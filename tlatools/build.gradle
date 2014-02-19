@@ -22,7 +22,7 @@ sourceSets {
             srcDir 'src'
         }
 		resources{
-			srcDir 'src/tla2sany/StandardModules'
+			srcDir 'src'
 		}
 		
 		
