@@ -10,11 +10,14 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.output.OutputCollector;
 import tlc2.output.StatePrinter;
 import tlc2.util.BufferedRandomAccessFile;
 import tlc2.util.LongVec;
@@ -260,7 +263,9 @@ public class TLCTrace {
   public synchronized final void printTrace(final TLCState s1, final TLCState s2)
   throws IOException, WorkerException 
   {
-      MP.printError(EC.TLC_BEHAVIOR_UP_TO_THIS_POINT);
+	  ArrayList<TLCStateInfo> trace = new ArrayList<TLCStateInfo>(); // collecting the whole error trace
+	  
+	  MP.printError(EC.TLC_BEHAVIOR_UP_TO_THIS_POINT);
       // Print the prefix leading to s1:
       long loc1 = s1.uid; 
       TLCState lastState = null;
@@ -270,6 +275,7 @@ public class TLCTrace {
       {
           StatePrinter.printState(prefix[idx], lastState, idx+1);
           lastState = prefix[idx].state;
+          trace.add(prefix[idx]);
           idx++;
       }
 
@@ -302,7 +308,8 @@ public class TLCTrace {
       }
       StatePrinter.printState(sinfo, lastState, ++idx);
       lastState = sinfo.state;
-
+      trace.add(sinfo);
+      
       // Print s2:
       if (s2 != null) {
           sinfo = this.tool.getState(s2, s1);
@@ -314,7 +321,9 @@ public class TLCTrace {
               System.exit(1);
           }
           StatePrinter.printState(sinfo, null, ++idx);
+          trace.add(sinfo);
       }
+      OutputCollector.setTrace(trace);
   }
 
 

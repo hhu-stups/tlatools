@@ -1107,6 +1107,8 @@ public class MP
         DebugPrinter.print("entering printError(int, String[]) with errorCode " + errorCode); //$NON-NLS-1$
         ToolIO.out.println(getMessage(ERROR, errorCode, parameters));
         DebugPrinter.print("leaving printError(int, String[])"); //$NON-NLS-1$
+        
+        OutputCollector.addErrorMessage(new ErrorMessage(errorCode, parameters)); //collecting the error message
     }
 
     /**
