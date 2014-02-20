@@ -166,6 +166,8 @@ public class MP
         {
             parameters = EMPTY_PARAMS;
         }
+        OutputCollector.saveMessage(messageClass, messageCode, parameters);
+        
         DebugPrinter.print("entering MP.getMessage() with error code " + messageCode + " and " + parameters.length //$NON-NLS-1$
                 + " parameters"); //$NON-NLS-1$
 
@@ -1107,8 +1109,6 @@ public class MP
         DebugPrinter.print("entering printError(int, String[]) with errorCode " + errorCode); //$NON-NLS-1$
         ToolIO.out.println(getMessage(ERROR, errorCode, parameters));
         DebugPrinter.print("leaving printError(int, String[])"); //$NON-NLS-1$
-        
-        OutputCollector.addErrorMessage(new ErrorMessage(errorCode, parameters)); //collecting the error message
     }
 
     /**

@@ -1,32 +1,32 @@
 package tlc2.output;
 
 import java.util.ArrayList;
+import java.util.Date;
 
 import tlc2.tool.TLCStateInfo;
 
 public class OutputCollector {
 
-	static ArrayList<TLCStateInfo> trace = null;
-	static ArrayList<ErrorMessage> errorMessages = new ArrayList<ErrorMessage>();
+	private static ArrayList<TLCStateInfo> trace = null;
+	private static ArrayList<Message> allMessages = new ArrayList<Message>();
 
-	public synchronized static ArrayList<TLCStateInfo> getTrace() {
+	public static ArrayList<TLCStateInfo> getTrace() {
 		return trace;
 	}
 
-	public synchronized static void setTrace(ArrayList<TLCStateInfo> trace) {
+	public static void setTrace(ArrayList<TLCStateInfo> trace) {
 		OutputCollector.trace = trace;
 	}
 
-	public static ArrayList<ErrorMessage> getErrorMessages() {
-		return errorMessages;
+	public static ArrayList<Message> getAllMessages() {
+		return allMessages;
 	}
 
-	public static void addErrorMessage(ErrorMessage errorMessage) {
-		OutputCollector.errorMessages.add(errorMessage);
+	public synchronized static void saveMessage(int messageClass,
+			int messageCode, String[] parameters) {
+
+		Message m = new Message(messageClass, messageCode, parameters,
+				new Date());
+		allMessages.add(m);
 	}
-	
-	
-	
-	
-	
 }
