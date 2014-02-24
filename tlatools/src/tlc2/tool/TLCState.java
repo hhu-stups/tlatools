@@ -23,7 +23,7 @@ public abstract class TLCState implements Cloneable, Serializable {
   public static TLCState Empty = null;
 
   // The state variables.
-  protected static OpDeclNode[] vars = null;
+  public static OpDeclNode[] vars = null;
   
   public static void setVariables(OpDeclNode[] variables) 
   {
