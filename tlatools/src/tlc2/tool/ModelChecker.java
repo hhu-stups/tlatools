@@ -13,6 +13,7 @@ import tla2sany.semantic.ExprNode;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.output.OutputCollector;
 import tlc2.tool.fp.FPSet;
 import tlc2.tool.fp.FPSetConfiguration;
 import tlc2.tool.fp.FPSetFactory;
@@ -324,6 +325,7 @@ public class ModelChecker extends AbstractChecker
                     }
                 }
                 // Check properties of the state:
+                OutputCollector.setInitialState(curState);
                 if (!seen)
                 {
                     for (int j = 0; j < this.invariants.length; j++)
@@ -331,9 +333,9 @@ public class ModelChecker extends AbstractChecker
                         if (!this.tool.isValid(this.invariants[j], curState))
                         {
                             // We get here because of invariant violation:
-                            MP.printError(EC.TLC_INVARIANT_VIOLATED_INITIAL, new String[] {
+                        	MP.printError(EC.TLC_INVARIANT_VIOLATED_INITIAL, new String[] {
                                     this.tool.getInvNames()[j].toString(), curState.toString() });
-                            if (!TLCGlobals.continuation)
+                        	if (!TLCGlobals.continuation)
                                 return false;
                         }
                     }
