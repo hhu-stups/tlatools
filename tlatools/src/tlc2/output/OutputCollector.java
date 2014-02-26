@@ -21,6 +21,13 @@ public class OutputCollector {
 	public static void setTrace(ArrayList<TLCStateInfo> trace) {
 		OutputCollector.trace = trace;
 	}
+	
+	public static void addStateToTrace(TLCStateInfo tlcStateInfo){
+		if(trace == null){
+			trace = new ArrayList<TLCStateInfo>();
+		}
+		trace.add(tlcStateInfo);
+	}
 
 	public static void setInitialState(TLCState initialState){
 		OutputCollector.initialState = initialState;
