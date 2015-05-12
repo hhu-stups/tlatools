@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project name="TLA+ Tools" default="default">
+<project name="TLA+ Tools" default="default" xmlns:jacoco="antlib:org.jacoco.ant">
 
 	<!-- load property file -->
 	<loadproperties srcfile="project.properties" />
@@ -16,6 +16,11 @@
 	<tstamp>
 		<format property="TODAY" pattern="yyyy-MM-dd" locale="en,US" />
 	</tstamp>
+
+	<!-- JaCoCo code coverage -->
+    <taskdef uri="antlib:org.jacoco.ant" resource="org/jacoco/ant/antlib.xml">
+        <classpath path="lib/jacocoant.jar"/>
+    </taskdef>
 
 	<taskdef resource="org/aspectj/tools/ant/taskdefs/aspectjTaskdefs.properties">
 		<classpath>
@@ -53,6 +58,7 @@
 	<target name="clean" description="Cleans the compilation output directory" unless="noclean">
 		<delete includeemptydirs="true" failonerror="false">
 			<fileset dir="${class.dir}" includes="*/**" />
+			<fileset dir="${test.class.dir}" includes="*/**" />
 		</delete>
 	</target>
 
@@ -62,6 +68,9 @@
 		<javac srcdir="${src.dir}" destdir="${class.dir}" debug="true" verbose="false" source="1.5" target="1.5">
 			<!-- compilerarg value="-Xlint:deprecation"/-->
 			<classpath refid="project.classpath" />
+			<classpath>
+				<pathelement location="lib/javax.mail.jar" />
+			</classpath>
 		</javac>
 
 		<!-- copy the resource files -->
@@ -105,6 +114,21 @@
 	</target>
 
 	<target name="dist" description="Build a distribution">
+		<!-- Extract javax.mail jar into class directory to be packaged into tla2tools.jar -->
+		<!-- javax.mail is used by the MailSender functionality, that mails the output -->
+		<!-- of TLC to a given email address. -->
+		<!-- The javax.mail dependency as well as javax.activation is also depended upon -->
+		<!-- by the tla2tools OSGi bundle and is expected to be the same version. -->
+		<unzip src="lib/javax.mail.jar" dest="${class.dir}"/>
+		
+		<!-- Extract javax.mail to maven classes folder. This script is triggered by -->
+		<!-- maven. However, maven compiles the code again to target/classes from -->
+		<!-- where it creates the plugin -->
+		<unzip src="lib/javax.mail.jar" dest="target/classes"/>
+		
+		<!-- TODO: add javax.activation to lib/ and extract it here too. Otherwise we have a -->
+		<!-- runtime dependency on Java 6. -->
+		
 		<!-- create a JAR file for the users -->
 		<mkdir dir="${dist.dir}" />
 		<jar destfile="${dist.file}">
@@ -116,6 +140,11 @@
 				<attribute name="Implementation-Title" value="TLA+ Tools" />
 				<attribute name="Implementation-Version" value="${version} ${TODAY}" />
 				<attribute name="Implementation-Vendor" value="Microsoft Corp." />
+				<!-- App-Name and Permissions is required by Java Webstart used by distributed TLC -->
+				<!-- Depending on security level, the user will see a warning otherwise. -->
+				<!-- http://docs.oracle.com/javase/7/docs/technotes/guides/jweb/security/manifest.html -->
+				<attribute name="Application-Name" value="TLC" />
+				<attribute name="permissions" value="all-permissions" /> <!-- won't work with 'sandbox' as it writes files -->
 			</manifest>
 		</jar>
 	</target>
@@ -127,6 +156,7 @@
 			<classpath refid="project.classpath" />
 			<classpath>
 				<pathelement location="lib/junit-4.8.2.jar" />
+				<pathelement location="lib/easymock-3.3.1.jar" />
 				<pathelement path="${class.dir}" />
 			</classpath>
 		</javac>
@@ -139,24 +169,36 @@
 		</copy>
 		<!-- run junit tests -->
 		<mkdir dir="${test.reports}" />
-		<junit printsummary="yes" haltonfailure="no" haltonerror="no">
-			<classpath refid="project.classpath" />
-			<classpath>
-				<pathelement location="lib/junit-4.8.2.jar" />
-				<pathelement path="${ws.class.dir}" />
-				<pathelement path="${test.class.dir}" />
-			</classpath>
-			<formatter type="xml" />
-			<batchtest fork="yes" todir="${test.reports}">
-				<fileset dir="${test.dir}">
-					<include name="**/*Test*.java" />
-					<exclude name="**/Abstract*Test.java" />
-					<exclude name="**/TestDriver.java" />
-					<exclude name="**/TestDriver2.java" />
-					<exclude name="**/AllTests.java" />
-				</fileset>
-			</batchtest>
-		</junit>
+		<jacoco:coverage destfile="target/code-coverage.exec">
+			<junit printsummary="yes" haltonfailure="no" haltonerror="no"  forkmode="perTest" fork="yes">
+				<classpath refid="project.classpath" />
+				<classpath>
+					<pathelement location="lib/junit-4.8.2.jar" />
+					<pathelement location="lib/cglib-nodep-3.1.jar" />
+					<pathelement location="lib/objenesis-2.1.jar" />
+					<pathelement location="lib/easymock-3.3.1.jar" />
+					<pathelement path="${ws.class.dir}" />
+					<pathelement path="${test.class.dir}" />
+				</classpath>
+				<formatter type="xml" />
+	
+				<!-- Pass the base path of the tlatools project to unit tests in case they need it to locate TLA+ specs or configs -->
+				<sysproperty key="basedir" value="${basedir}/"/>
+				<batchtest fork="yes" todir="${test.reports}">
+					<fileset dir="${test.dir}">
+						<include name="**/*Test*.java" />
+						<exclude name="**/ModelCheckerTestCase.java" />
+						<exclude name="**/SuccessfulSimulationTestCase.java" />
+						<exclude name="**/AbstractExampleTestCase.java" />
+						<exclude name="**/TestMPRecorder.java" />
+						<exclude name="**/Abstract*Test.java" />
+						<exclude name="**/TestDriver.java" />
+						<exclude name="**/TestDriver2.java" />
+						<exclude name="**/AllTests.java" />
+					</fileset>
+				</batchtest>
+			</junit>
+		</jacoco:coverage>
 
 		<!-- remove copied class.dir -->
 		<delete dir="${ws.class.dir}" deleteonexit="true"/>
@@ -169,6 +211,7 @@
 			<classpath refid="project.classpath" />
 			<classpath>
 				<pathelement location="lib/junit-4.8.2.jar" />
+				<pathelement location="lib/easymock-3.3.1.jar" />
 				<pathelement path="${class.dir}" />
 			</classpath>
 		</javac>
@@ -181,19 +224,27 @@
 		</copy>
 		<!-- run junit tests on tlatools.jar -->
 		<mkdir dir="${test.reports}/onJar" />
-		<junit printsummary="yes" haltonfailure="no" haltonerror="no">
+		<junit printsummary="yes" haltonfailure="no" haltonerror="no" forkmode="perTest" fork="yes">
 			<classpath refid="project.classpath" />
 			<classpath>
 				<pathelement location="lib/junit-4.8.2.jar" />
+				<pathelement location="lib/cglib-nodep-3.1.jar" />
+				<pathelement location="lib/objenesis-2.1.jar" />
+				<pathelement location="lib/easymock-3.3.1.jar" />
 				<pathelement location="${dist.file}" />
 				<pathelement path="${test.class.dir}" />
 			</classpath>
 
 			<formatter type="xml" />
+			<sysproperty key="basedir" value="${basedir}/"/>
 
 			<batchtest fork="yes" todir="${test.reports}/onJar">
 				<fileset dir="${test.dir}">
 					<include name="**/*Test*.java" />
+					<exclude name="**/ModelCheckerTestCase.java" />
+					<exclude name="**/SuccessfulSimulationTestCase.java" />
+					<exclude name="**/AbstractExampleTestCase.java" />
+					<exclude name="**/TestMPRecorder.java" />
 					<exclude name="**/Abstract*Test.java" />
 					<exclude name="**/TestDriver.java" />
 					<exclude name="**/TestDriver2.java" />
@@ -205,7 +256,7 @@
 		<!-- remove copied class.dir -->
 		<delete dir="${ws.class.dir}" deleteonexit="true"/>
 	</target>
-	
+
 	<target name="test-dist-long" description="Executes accompining long-running unit tests on jar file" depends="dist" unless="test.skip">
 		<!-- compile unit tests -->
 		<mkdir dir="${test.class.dir}" />
@@ -245,7 +296,7 @@
 		<!-- remove copied class.dir -->
 		<delete dir="${ws.class.dir}" deleteonexit="true"/>
 	</target>
-	
+
 	<target name="dist-mixed-jar" description="Build a distribution" depends="default">
 		<!-- create a JAR file for the users -->
 		<jar destfile="${dist-mixed.file.jar}">

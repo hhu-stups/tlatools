@@ -1,10 +1,12 @@
 TO MAKE Revert to HEAD WORK
   After doing revert to HEAD, Eclipse reverts the file but still marks it as
-  changed.  To unmark it, open a Cygwin shell and perform the command
+  changed.  To unmark it, open a Cygwin shell, cd to ~/git/tlaplus2, and perform the command
 
       git checkout FileName
 
-  where FileName is the path from the current directory to ~/git/tlaplus2/FileNameEclipseShows
+  where FileName is the path to the file name Eclipse shows, which should be a copy
+  of the file in the branch currently selected in Eclipse.
+  
   
 OBSOLETE TO START SVC-LAMPORT-7 AS A TESTBED
   https://tla.msr-inria.inria.fr/build/computer/svc/
@@ -15,7 +17,6 @@ OBSOLETE TO START SVC-LAMPORT-7 AS A TESTBED
         must install Java jdk and add the environment variable JAVA_HOME 
         and set it to something like C:\Program Files\Java\jdk1.6.0_26
 
-CODEPLEX: tlaplus.codeplex.com
 
 TO PREPARE THE ZIP FILES FOR THE TOOLBOX RELEASE
 
@@ -48,9 +49,12 @@ Step 1: Get the right version numbers to appear:
         create zip file names.)
      Overview: update version.  (I don't know if this is used anywhere.)
 
--- In org.lamport.tla.toolbox/welcome/welcomeView.html
+-- In org.lamport.tla.toolbox/src/org/lamport/tla/toolbox/ui/view/ToolboxWelcomeView.java
    Update date and version
-   
+
+-- In org.lamport.tla.toolbox.product.product/pom.xml around line 73 change the archiveFileName
+   XML tag to have the correct version number. This tag defines how the zip files will be named.
+
 -- In org.lamport.tla.toolbox.doc/META-INF/MANIFEST.MF, update the version (major.minor.micro).
    But do _not_ replace the last (".qualifier") segment. It is automatically replaced by the build.
 
@@ -178,7 +182,6 @@ Method 3. Using tla.msr-inria.inria.fr
         This is redirected to the right place by putting in my lamport.org/ top-level directory a file named .htaccess containing
         the line
                   Redirect /tlatoolbox http://tla.msr-inria.inria.fr/tlatoolbox
-    
 
 TO PREPARE THE STAND-ALONE TLA TOOLS RELEASE ZIP FILE (IN 
 Methods 1 and 2)
@@ -206,7 +209,19 @@ TO GENERATE THE RELEASE:
   Queries to msrcpx or Chuck Needham (chuckne)
 
 -------------------------------------------------------------
-Version 1.4.8 - unreleased
+Version 1.5.0 - 11 May 2015
+  - Distributed TLC in the Cloud--significantly improves 
+    distributed TLC.
+  - Significantly speeds ups TLC's liveness checking.
+  - Improvements to the Decompose Proof command.
+  - Improvements to the TLC Errors view, including ability to
+    show trace in reverse order.
+  - Fixes all known bugs in TLC's liveness checking.
+  - Fixes bug in TLC that caused infinite looping if a recursively
+    defined operator is used as an operator argument in its own
+    definition.
+
+Version 1.4.8 - 25 February 2014
   - Made module names case sensitive, so they must exactly match
     the name of the file containing them.
   - Disallowed <*> and <+> in names of named proof steps. 

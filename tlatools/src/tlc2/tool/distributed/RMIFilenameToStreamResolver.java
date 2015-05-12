@@ -8,17 +8,16 @@ import java.rmi.RemoteException;
 import java.util.HashMap;
 import java.util.Map;
 
-import tlc2.output.MP;
 import util.FilenameToStream;
 
 /**
  * This class extends the SimpleFilenameToStream class in the way that it first
  * tries to resolve file with the local {@link FilenameToStream} resolver, but
  * falls back to RMI if the local resolver fails.
- * 
+ *
  * This is used for distributed TLC where a worker does not necessarily have
  * access to the specification and/or configuration files.
- * 
+ *
  * Care must be taken with transferring big files. This implementation is
  * inefficient in the way that it requires the server to read the full file into
  * memory before it gets transferred to the client. The client too, will buffer
@@ -30,10 +29,10 @@ public class RMIFilenameToStreamResolver implements FilenameToStream {
 	private static final String javaTempDir = System.getProperty("java.io.tmpdir") + File.separator;
 
 	private TLCServerRMI server;
-	
+
 	private final Map<String, File> fileCache = new HashMap<String, File>();
 	private final String rndPrefix;
-	
+
 	public RMIFilenameToStreamResolver() {
 		rndPrefix = getRandomStoragePrefix();
 	}
@@ -45,22 +44,20 @@ public class RMIFilenameToStreamResolver implements FilenameToStream {
 	public void setTLCServer(final TLCServerRMI aServer) {
 		this.server = aServer;
 	}
-	
+
 	/* (non-Javadoc)
 	 * @see util.FilenameToStream#resolve(java.lang.String, boolean)
 	 */
 	public File resolve(final String filename, final boolean isModule) {
-		
+
 		// read the file from the server
 		// strip off path
 		final String name = new File(filename).getName();
-		
-		File tempFile = fileCache.get(name);
-		
-		File file = null;
+
+		File file = fileCache.get(name);
 		// not in cache
-		if (tempFile == null) {
-			
+		if (file == null ||  !file.exists()) {
+
 			// read bytes from server
 			byte[] bs = new byte[0];
 			try {
@@ -71,20 +68,20 @@ public class RMIFilenameToStreamResolver implements FilenameToStream {
 
 			// write into temp file
 			file  = writeToNewTempFile(name, bs);
-			
+
 			// add to local file cache
 			fileCache.put(name, file);
 		}
-		
+
 		return file;
 	}
-	
+
 	/**
 	 * I am hoping that a resolver of this class is never used to parse
 	 * the spec.  If it is, then a module's isStandard field will always
 	 * be false in a run of distributed TLC.  This isn't a problem, since
 	 * that field was added for use by a version of SANY called by TLAPS.
-	 * 
+	 *
 	 * Added by LL on 24 July 2013.
 	 */
 	public boolean isStandardModule(String moduleName) {
@@ -103,11 +100,11 @@ public class RMIFilenameToStreamResolver implements FilenameToStream {
 		file.mkdir();
 		return file.getAbsolutePath();
 	}
-	
+
 	private File writeToNewTempFile(String name, byte[] bs) {
 		final File f = new File(rndPrefix + File.separator + name);
 		f.deleteOnExit();
-		
+
 		FileOutputStream outputStream = null;
 		try {
 			outputStream = new FileOutputStream(f);
@@ -126,5 +123,19 @@ public class RMIFilenameToStreamResolver implements FilenameToStream {
 			}
 		}
 		return f;
+	}
+
+	public String getFullPath() {
+		StringBuffer buf = new StringBuffer();
+
+		String[] strings = fileCache.keySet().toArray(new String[fileCache.size()]);
+		for (int i = 0; i < strings.length; i++) {
+			String string = strings[i];
+			buf.append(string);
+			if (i < string.length() - 1) {
+				buf.append(", ");
+			}
+		}
+		return buf.toString();
 	}
 }

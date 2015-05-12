@@ -23,6 +23,7 @@ import tlc2.tool.queue.IStateQueue;
 import tlc2.util.IdThread;
 import tlc2.util.LongVec;
 import tlc2.util.ObjLongTable;
+import tlc2.util.statistics.BucketStatistics;
 import tlc2.value.Value;
 import util.DebugPrinter;
 import util.FileUtil;
@@ -39,6 +40,12 @@ import util.UniqueString;
 // the name resolver and support for the external specification object has been added
 public class ModelChecker extends AbstractChecker
 {
+
+	/**
+	 * If the state/ dir should be cleaned up after a successful model run
+	 */
+	private static final boolean VETO_CLEANUP = Boolean.getBoolean(ModelChecker.class.getName() + ".vetoCleanup");
+
     public FPSet theFPSet; // the set of reachable states (SZ: note the type)
     public IStateQueue theStateQueue; // the state queue
     public TLCTrace trace; // the trace file
@@ -94,14 +101,6 @@ public class ModelChecker extends AbstractChecker
         
         // needed to calculate state/minute in final progress report
         final long startTime = System.currentTimeMillis();
-
-        // Initialization for liveness checking:
-        if (this.checkLiveness)
-        {
-            report("initializing liveness checking");
-            LiveCheck.init(this.tool, this.actions, this.metadir);
-            report("liveness checking initialized");
-        }
 
         boolean recovered = this.recover();
         if (!recovered)
@@ -204,9 +203,10 @@ public class ModelChecker extends AbstractChecker
                 // Always check liveness properties at the end:
                 if (this.checkLiveness)
                 {
-                    MP.printMessage(EC.TLC_CHECKING_TEMPORAL_PROPS, "complete");
+					MP.printMessage(EC.TLC_CHECKING_TEMPORAL_PROPS,
+							new String[] { "complete", Long.toString(this.theFPSet.size()) });
                     report("checking liveness");
-                    success = LiveCheck.check();
+                    success = liveCheck.finalCheck();
                     report("liveness check complete");
                     if (!success)
                     {
@@ -239,7 +239,21 @@ public class ModelChecker extends AbstractChecker
             MP.printError(EC.GENERAL, e);  // LL changed call 7 April 2012
         } finally
         {
-            this.printSummary(success, startTime);
+        	
+        	this.printSummary(success, startTime);
+
+        	if (this.checkLiveness) {
+				if (LIVENESS_STATS) {
+					// Reclaim memory for in-degree calculation
+					System.gc();
+
+					MP.printStats(liveCheck
+							.calculateInDegreeDiskGraphs(new BucketStatistics("Histogram vertex in-degree",
+									LiveCheck.class.getPackage().getName(), "DiskGraphsInDegree")),
+							liveCheck.getOutDegreeStatistics());
+				}
+        	}
+
             this.cleanup(success);
         }
 
@@ -320,7 +334,7 @@ public class ModelChecker extends AbstractChecker
                         // build behavior graph for liveness checking
                         if (this.checkLiveness)
                         {
-                            LiveCheck.addInitState(curState, fp);
+                            liveCheck.addInitState(curState, fp);
                         }
                     }
                 }
@@ -595,7 +609,7 @@ public class ModelChecker extends AbstractChecker
                 long curStateFP = curState.fingerPrint();
                 liveNextStates.addElement(curState);
                 liveNextFPs.addElement(curStateFP);
-                LiveCheck.addNextState(curState, curStateFP, liveNextStates, liveNextFPs);
+                liveCheck.addNextState(curState, curStateFP, liveNextStates, liveNextFPs);
             }
             return false;
         } catch (Throwable e)
@@ -640,8 +654,8 @@ public class ModelChecker extends AbstractChecker
             boolean doCheck = this.checkLiveness && (stateNum >= nextLiveCheck);
             if (doCheck)
             {
-                MP.printMessage(EC.TLC_CHECKING_TEMPORAL_PROPS, "current");
-                if (!LiveCheck.check())
+				MP.printMessage(EC.TLC_CHECKING_TEMPORAL_PROPS, new String[] { "current", Long.toString(stateNum) });
+                if (!liveCheck.check())
                     return false;
                 nextLiveCheck = (stateNum <= 640000) ? stateNum * 2 : stateNum + 640000;
             }
@@ -657,7 +671,7 @@ public class ModelChecker extends AbstractChecker
             UniqueString.internTbl.beginChkpt(this.metadir);
             if (this.checkLiveness)
             {
-                LiveCheck.beginChkpt();
+                liveCheck.beginChkpt();
             }
             // commit checkpoint:
             this.theStateQueue.commitChkpt();
@@ -666,7 +680,7 @@ public class ModelChecker extends AbstractChecker
             UniqueString.internTbl.commitChkpt(this.metadir);
             if (this.checkLiveness)
             {
-                LiveCheck.commitChkpt();
+                liveCheck.commitChkpt();
             }
             MP.printMessage(EC.TLC_CHECKPOINT_END);
         }
@@ -685,7 +699,7 @@ public class ModelChecker extends AbstractChecker
             this.theFPSet.recover();
             if (this.checkLiveness)
             {
-                LiveCheck.recover();
+                liveCheck.recover();
             }
             MP.printMessage(EC.TLC_CHECKPOINT_RECOVER_END, new String[] { String.valueOf(this.theFPSet.size()),
                     String.valueOf(this.theStateQueue.size()) });
@@ -700,11 +714,13 @@ public class ModelChecker extends AbstractChecker
         this.theFPSet.close();
         this.trace.close();
         if (this.checkLiveness)
-            LiveCheck.close();
+            liveCheck.close();
         if (this.allStateWriter != null)
             this.allStateWriter.close();
-        FileUtil.deleteDir(this.metadir, success);
-    }
+        	if (!VETO_CLEANUP) {
+        		FileUtil.deleteDir(this.metadir, success);
+        	}
+		}
 
     public final void printSummary(boolean success, final long startTime) throws IOException
     {
@@ -1027,15 +1043,6 @@ public class ModelChecker extends AbstractChecker
             // }
             this.wait(TLCGlobals.progressInterval);
         }
-    }
-
-    /**
-     * Debugging support
-     * @param message
-     */
-    private void report(String message)
-    {
-        DebugPrinter.print(message);
     }
 
     /**

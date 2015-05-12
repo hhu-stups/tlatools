@@ -19,17 +19,13 @@ import org.eclipse.core.runtime.Platform;
 import org.eclipse.jface.viewers.ISelection;
 import org.eclipse.jface.viewers.IStructuredSelection;
 import org.eclipse.jface.viewers.StructuredSelection;
-import org.eclipse.ui.PlatformUI;
-import org.eclipse.ui.handlers.IHandlerActivation;
-import org.eclipse.ui.handlers.IHandlerService;
 import org.lamport.tla.toolbox.Activator;
 import org.lamport.tla.toolbox.spec.Spec;
 import org.lamport.tla.toolbox.spec.nature.TLANature;
 import org.lamport.tla.toolbox.tool.SpecEvent;
+import org.lamport.tla.toolbox.tool.SpecLifecycleParticipant;
 import org.lamport.tla.toolbox.tool.SpecRenameEvent;
-import org.lamport.tla.toolbox.ui.handler.OpenParseErrorViewHandler;
 import org.lamport.tla.toolbox.ui.property.GenericSelectionProvider;
-import org.lamport.tla.toolbox.util.AdapterFactory;
 import org.lamport.tla.toolbox.util.ResourceHelper;
 import org.lamport.tla.toolbox.util.SpecLifecycleManager;
 import org.lamport.tla.toolbox.util.compare.SpecComparator;
@@ -47,36 +43,41 @@ public class WorkspaceSpecManager extends GenericSelectionProvider implements IS
     private Hashtable<String, Spec> specStorage = new Hashtable<String, Spec>(47);
     private Spec loadedSpec = null;
     private SpecLifecycleManager lifecycleManager = null;
-    private IHandlerActivation parseErrorsHandlerActivation = null;
 
     /**
      * Constructor
      */
-    public WorkspaceSpecManager()
+    public WorkspaceSpecManager(final IProgressMonitor monitor)
     {
         // initialize the spec life cycle manager
         lifecycleManager = new SpecLifecycleManager();
 
-        IProgressMonitor monitor = null;
+        final IWorkspace ws = ResourcesPlugin.getWorkspace();
 
-        IWorkspace ws = ResourcesPlugin.getWorkspace();
-
-        String specLoadedName = PreferenceStoreHelper.getInstancePreferenceStore().getString(
+        final String specLoadedName = PreferenceStoreHelper.getInstancePreferenceStore().getString(
                 IPreferenceConstants.I_SPEC_LOADED);
 
-        IProject[] projects = ws.getRoot().getProjects();
+        final IProject[] projects = ws.getRoot().getProjects();
         try
         {
 
-            Spec spec = null;
             for (int i = 0; i < projects.length; i++)
             {
                 // changed from projects[i].isAccessible()
-                if (projects[i].isOpen())
+                final IProject project = projects[i];
+				if (project.isOpen())
                 {
-                    if (projects[i].hasNature(TLANature.ID))
+                    if (project.hasNature(TLANature.ID))
                     {
-                        spec = new Spec(projects[i]);
+						// Refresh the project in case the actual on-disk
+						// representation and the cached Eclipse representation
+						// have diverged. This can happen when e.g. another
+						// Toolbox opens the project or the files get manually
+						// edited. Without calling refresh, code down below 
+                    	// might throw exceptions due to out-of-sync problems.  
+                    	project.refreshLocal(IResource.DEPTH_INFINITE, monitor);
+                        
+                    	final Spec spec = new Spec(project);
                         // Added by LL on 12 Apr 2011
                         // If spec.rootFile = null, then this is a bad spec. So
                         // we should report it and not perform addSpec(spec).  It
@@ -85,7 +86,7 @@ public class WorkspaceSpecManager extends GenericSelectionProvider implements IS
                         // in the code.
                         if (spec.getRootFile() == null)
                         {
-                            Activator.getDefault().logError("The bad spec is: `" + projects[i].getName() + "'", null);
+                            Activator.getDefault().logError("The bad spec is: `" + project.getName() + "'", null);
                         } else
                         {
                             // This to threw a null pointer exception for Tom, probably causing the abortion
@@ -103,7 +104,7 @@ public class WorkspaceSpecManager extends GenericSelectionProvider implements IS
                 } else
                 {
                     // DELETE closed projects
-                    projects[i].delete(IResource.FORCE | IResource.ALWAYS_DELETE_PROJECT_CONTENT, monitor);
+                    project.delete(IResource.FORCE | IResource.ALWAYS_DELETE_PROJECT_CONTENT, monitor);
                 }
             }
 
@@ -321,46 +322,6 @@ public class WorkspaceSpecManager extends GenericSelectionProvider implements IS
      */
     public void specParsed(Spec spec)
     {
-        /*
-         * This controls graying and activating of the menu
-         * item Parse Errors which raises the parse errors
-         * view. It activates a handler programmatically
-         * when appropriate because declaring the handler as a
-         * plug in extension did not activate the handler quickly
-         * enough. For example, when a parse error is introduced,
-         * the Parse Errors menu item would not be active until
-         * the user did something such as highlight text. However,
-         * by activating it programmatically here, the menu item
-         * will become active as soon as there is a parse error
-         * and will become inactive as soon as there is no parse
-         * error.
-         */
-        if (parseErrorsHandlerActivation != null)
-        {
-        	IHandlerService handlerService = (IHandlerService) PlatformUI.getWorkbench().getService(
-        			IHandlerService.class);
-            /*
-             *  It is necessary to deactivate the currently active handler if there
-             *  was one because a command can have at most one
-             *  active handler at a time.
-             * It seems unnecessary to deactivate and reactivate a handler
-             * when the parse status goes from error to error, but I cannot
-             * find a way to determine if there is currently
-             * an active handler for the parse error view command, so the
-             * currently active handler is always deactivated, and then reactivated
-             * if there is still an error.
-             */
-            handlerService.deactivateHandler(parseErrorsHandlerActivation);
-            parseErrorsHandlerActivation = null;
-        }
-        if (AdapterFactory.isProblemStatus(spec.getStatus()))
-        {
-            IHandlerService handlerService = (IHandlerService) PlatformUI.getWorkbench().getService(
-                    IHandlerService.class);
-            parseErrorsHandlerActivation = handlerService.activateHandler("toolbox.command.openParseErrorView",
-                    new OpenParseErrorViewHandler());
-        }
-
         // inform the participants
         this.lifecycleManager.sendEvent(new SpecEvent(spec, SpecEvent.TYPE_PARSE));
     }
@@ -446,7 +407,7 @@ public class WorkspaceSpecManager extends GenericSelectionProvider implements IS
     /**
      * Only support the interface, no real adaptivity
      */
-    public Object getAdapter(Class adapter)
+    public Object getAdapter(@SuppressWarnings("rawtypes") Class adapter)
     {
         return null;
     }
@@ -504,5 +465,13 @@ public class WorkspaceSpecManager extends GenericSelectionProvider implements IS
 	@SuppressWarnings("rawtypes")
 	public Class[] getAdapterList() {
 		return new Class[] { Spec.class };
+	}
+
+	public void addSpecLifecycleParticipant(SpecLifecycleParticipant specLifecycleParticipant) {
+		this.lifecycleManager.addSpecLifecycleParticipant(specLifecycleParticipant);
+	}
+
+	public void removeSpecLifecycleParticipant(SpecLifecycleParticipant specLifecycleParticipant) {
+		this.lifecycleManager.removeSpecLifecycleParticipant(specLifecycleParticipant);
 	}
 }

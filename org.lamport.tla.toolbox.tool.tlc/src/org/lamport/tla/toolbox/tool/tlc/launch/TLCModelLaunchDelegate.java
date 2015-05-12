@@ -1,10 +1,14 @@
 package org.lamport.tla.toolbox.tool.tlc.launch;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.net.URL;
 import java.util.Hashtable;
 import java.util.List;
+import java.util.Properties;
 import java.util.Vector;
 
+import org.eclipse.core.internal.resources.ResourceException;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IFolder;
 import org.eclipse.core.resources.IProject;
@@ -15,6 +19,8 @@ import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.resources.WorkspaceJob;
 import org.eclipse.core.runtime.Assert;
 import org.eclipse.core.runtime.CoreException;
+import org.eclipse.core.runtime.IConfigurationElement;
+import org.eclipse.core.runtime.IExtensionRegistry;
 import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
@@ -28,15 +34,20 @@ import org.eclipse.core.runtime.jobs.MultiRule;
 import org.eclipse.debug.core.ILaunch;
 import org.eclipse.debug.core.ILaunchConfiguration;
 import org.eclipse.debug.core.model.LaunchConfigurationDelegate;
+import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.text.FindReplaceDocumentAdapter;
 import org.eclipse.jface.text.IDocument;
+import org.eclipse.swt.widgets.Display;
+import org.eclipse.ui.PartInitException;
+import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.editors.text.FileDocumentProvider;
 import org.eclipse.ui.part.FileEditorInput;
 import org.lamport.tla.toolbox.tool.IParseResult;
 import org.lamport.tla.toolbox.tool.ToolboxHandle;
 import org.lamport.tla.toolbox.tool.tlc.TLCActivator;
 import org.lamport.tla.toolbox.tool.tlc.job.DistributedTLCJob;
-import org.lamport.tla.toolbox.tool.tlc.job.TLCJob;
+import org.lamport.tla.toolbox.tool.tlc.job.ITLCJobStatus;
+import org.lamport.tla.toolbox.tool.tlc.job.TLCJobFactory;
 import org.lamport.tla.toolbox.tool.tlc.job.TLCProcessJob;
 import org.lamport.tla.toolbox.tool.tlc.model.TypedSet;
 import org.lamport.tla.toolbox.tool.tlc.util.ModelHelper;
@@ -44,9 +55,13 @@ import org.lamport.tla.toolbox.tool.tlc.util.ModelWriter;
 import org.lamport.tla.toolbox.util.AdapterFactory;
 import org.lamport.tla.toolbox.util.ResourceHelper;
 import org.lamport.tla.toolbox.util.TLAMarkerInformationHolder;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.FrameworkUtil;
+import org.osgi.framework.ServiceReference;
 
 import tla2sany.semantic.ModuleNode;
 import tla2sany.semantic.OpDeclNode;
+import tlc2.TLCGlobals;
 
 /**
  * Represents a launch delegate for TLC<br>
@@ -64,6 +79,7 @@ import tla2sany.semantic.OpDeclNode;
  * @version $Id$
  * Modified on 10 Sep 2009 to add No Spec TLC launch option.
  */
+@SuppressWarnings("restriction")
 public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implements IModelConfigurationConstants,
         IModelConfigurationDefaults
 {
@@ -189,7 +205,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             IFile cfgFile = project.getFile(targetFolderPath.append(ModelHelper.FILE_CFG));
             IFile outFile = project.getFile(targetFolderPath.append(ModelHelper.FILE_OUT));
 
-            TLCActivator.getDefault().logDebug("Writing files to: " + targetFolderPath.toOSString());
+            TLCActivator.logDebug("Writing files to: " + targetFolderPath.toOSString());
 
             final IFile[] files = new IFile[] { tlaFile, cfgFile, outFile };
 
@@ -247,7 +263,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
                                         // ignore this fact
                                         // FIXME this should be fixed at
                                         // some later point in time
-                                        TLCActivator.getDefault().logError("Error deleting a file " + members[i].getLocation(), e);
+                                        TLCActivator.logError("Error deleting a file " + members[i].getLocation(), e);
                                     }
                                 }
                             }
@@ -285,16 +301,41 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             for (int i = 0; i < extendedModules.size(); i++)
             {
                 String module = (String) extendedModules.get(i);
-                // only take care of user modules
-                if (ToolboxHandle.isUserModule(module))
+				// Only take care of user modules and actually *linked* files
+				// (not files defined via TLA_LIBRARY_PATH)
+                if (ToolboxHandle.isUserModule(module) && ResourceHelper.isLinkedFile(project, module))
                 {
                     moduleFile = ResourceHelper.getLinkedFile(project, module, false);
                     if (moduleFile != null)
                     {
+                    	try {
                         moduleFile.copy(targetFolderPath.append(moduleFile.getProjectRelativePath()), IResource.DERIVED
                                 | IResource.FORCE, new SubProgressMonitor(monitor, STEP / extendedModules.size()));
+                    	} catch (ResourceException re) {
+                    		// Trying to copy the file to the targetFolderPath produces an exception.
+                    		// The most common cause is a dangling linked file in the .project metadata 
+                    		// of the Toolbox project. Usually, a dangling link is the effect of copying
+                    		// a single Toolbox project from one machine to the other missing modules 
+                    		// extended (EXTENDS in TLA+) by a spec. The missing modules are part of
+                    		// another spec which does not exist on the current machine.
+                    		// We log the full exception to the Toolbox's error log (not directly visible
+                    		// to the user) and raise an error dialog (see org.lamport.tla.toolbox.tool.tlc.ui.editor.ModelEditor).
+                    		// We hint at how this problem can be addressed most of the time.
+							TLCActivator.logError(
+									String.format(
+											"Error copying file %s to %s. Please correct the path to %s. \n(The first place to check is in the %s/.project file. Restart the Toolbox when you change the .project file.)",
+											moduleFile.getLocation(), targetFolderPath, moduleFile.getName(),
+											modelFolder.getRawLocation().removeLastSegments(1)), re);
+							throw new CoreException(
+									new Status(
+											Status.ERROR,
+											"org.lamport.tlc.toolbox.tool.tlc",
+											String.format(
+													"Error copying file %s to %s. Please correct the path to %s. \n(The first place to check is in the %s/.project file. Restart the Toolbox when you change the .project file.)",
+													moduleFile.getLocation(), targetFolderPath, moduleFile.getName(),
+													modelFolder.getRawLocation().removeLastSegments(1))));
+                    	}
                     }
-
                     // TODO check the existence of copied files
                 }
             }
@@ -502,7 +543,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 
         if (!detectedErrors.isEmpty())
         {
-            TLCActivator.getDefault().logDebug("Errors in model file found " + rootModule.getLocation());
+            TLCActivator.logDebug("Errors in model file found " + rootModule.getLocation());
         }
 
         FileEditorInput fileEditorInput = new FileEditorInput((IFile) rootModule);
@@ -579,7 +620,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             return false;
         } else
         {
-            TLCActivator.getDefault().logDebug("Final check for the " + mode + " mode. The result of the check is " + status);
+            TLCActivator.logDebug("Final check for the " + mode + " mode. The result of the check is " + status);
             return status;
         }
     }
@@ -641,27 +682,166 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
         // number of workers
         int numberOfWorkers = config.getAttribute(LAUNCH_NUMBER_OF_WORKERS, LAUNCH_NUMBER_OF_WORKERS_DEFAULT);
 
-        // distributed launch
-        boolean distributed = config.getAttribute(LAUNCH_DISTRIBUTED, LAUNCH_DISTRIBUTED_DEFAULT);
+        // distributed launch (legacy launch configurations pre-dating TLC distributed functionality 
+        // do not have the LAUNCH_DISTRIBUTED attribute. Then, it obviously defaults to distribution turned off.
+        // Trying to lookup a non-existing attribute would cause a runtime exception.)
+        // Then it could also be true or false. The legacy flag showing if "ad hoc" distribution is turned
+        // on or not. Simply map it to "ad hoc" or "off".
+        String cloud = "off";
+        if (config.hasAttribute(LAUNCH_DISTRIBUTED)) {
+        	try {
+        		cloud = config.getAttribute(LAUNCH_DISTRIBUTED, LAUNCH_DISTRIBUTED_DEFAULT);
+        	} catch (CoreException e) {
+        		boolean distributed = config.getAttribute(LAUNCH_DISTRIBUTED, false);
+        		if (distributed) {
+        			cloud = "ad hoc";
+        		}
+        	}
+        }
         
         // TLC job
-        TLCJob tlcjob = null;
-        if(distributed) {
-        	tlcjob = new DistributedTLCJob(specName, modelName, launch, numberOfWorkers);
+        Job job = null;
+        if("off".equalsIgnoreCase(cloud)) {
+        	job = new TLCProcessJob(specName, modelName, launch, numberOfWorkers);
+            // The TLC job itself does not do any file IO
+            job.setRule(mutexRule);
         } else {
-        	tlcjob = new TLCProcessJob(specName, modelName, launch, numberOfWorkers);
+        	if ("ad hoc".equalsIgnoreCase(cloud)) {
+        		job = new DistributedTLCJob(specName, modelName, launch, numberOfWorkers);
+                job.setRule(mutexRule);
+        	} else {
+                //final IProject iproject = ResourceHelper.getProject(specName);
+                final IFolder launchDir = project.getFolder(modelName);
+                final File file = launchDir.getRawLocation().makeAbsolute().toFile();
+
+				final BundleContext bundleContext = FrameworkUtil.getBundle(
+						TLCModelLaunchDelegate.class).getBundleContext();
+				final ServiceReference<IExtensionRegistry> serviceReference = bundleContext
+						.getServiceReference(IExtensionRegistry.class);
+				final IExtensionRegistry registry = bundleContext
+						.getService(serviceReference);
+				final IConfigurationElement[] elements = registry
+						.getConfigurationElementsFor("org.lamport.tla.toolx.tlc.job");
+				for (IConfigurationElement element : elements) {
+					final TLCJobFactory factory = (TLCJobFactory) element
+							.createExecutableExtension("clazz");
+					final Properties props = new Properties();
+					props.put(TLCJobFactory.MAIN_CLASS, tlc2.TLC.class.getName());
+					props.put(TLCJobFactory.MAIL_ADDRESS, config.getAttribute(
+							LAUNCH_DISTRIBUTED_RESULT_MAIL_ADDRESS, "tlc@localhost"));
+					
+					// The parameters below are the only one currently useful with CloudDistributedTLC
+					final StringBuffer tlcParams = new StringBuffer();
+					
+			        // fp seed offset (decrease by one to map from [1, 64] interval to [0, 63] array address
+			        final int fpSeedOffset = launch.getLaunchConfiguration().getAttribute(LAUNCH_FP_INDEX, LAUNCH_FP_INDEX_DEFAULT);
+			        tlcParams.append("-fp ");
+			        tlcParams.append(String.valueOf(fpSeedOffset - 1));
+		        	tlcParams.append(" ");
+			        
+			        // add maxSetSize argument if not equal to the default
+			        // code added by LL on 9 Mar 2012
+			        final int maxSetSize = launch.getLaunchConfiguration().getAttribute(
+			                LAUNCH_MAXSETSIZE, TLCGlobals.setBound);
+			        if (maxSetSize != TLCGlobals.setBound) {
+			        	tlcParams.append("-maxSetSize ");
+			        	tlcParams.append(String.valueOf(maxSetSize));
+			        	tlcParams.append(" ");
+			        }
+			        
+			        boolean checkDeadlock = config.getAttribute(IModelConfigurationConstants.MODEL_CORRECTNESS_CHECK_DEADLOCK,
+							IModelConfigurationDefaults.MODEL_CORRECTNESS_CHECK_DEADLOCK_DEFAULT);
+					if (!checkDeadlock) {
+						tlcParams.append("-deadlock");
+					}
+
+					job = factory.getTLCJob(cloud, file, numberOfWorkers, props, tlcParams.toString());
+					job.addJobChangeListener(new WithStatusJobChangeListener(config));
+					break;
+				}
+				// Notify the user that something went wrong and ask him to report it. This code path
+				// is usually taken if the Toolbox distribution is incomplete. Thus, the exception should
+				// never happen at the user's end. Anyway, try to give a clue what might be wrong.
+                if (job == null) {
+                	throw new CoreException(
+                			new Status(
+                					IStatus.ERROR,
+                					TLCActivator.PLUGIN_ID,
+                					String.format(
+                							"The distribution mode '%s' selected in the \"How to run?\" section caused "
+                									+ "an error. Check the Toolbox's \"Installation Details\" if the "
+                									+ "'JCloud distributed TLC provider' is installed. If not, this is a bug "
+                									+ "and should be reported to the Toolbox authors. Thank you for "
+                									+ "your help and sorry for the inconvenience."
+                									+ "\n\n"
+                									+ "In the meantime, try running the Toolbox in non-distributed mode "
+                									+ "by setting \"Run in distributed mode\" to 'off'. "
+                									+ "You might have to 'Repair' your model via the \"Spec Explorer\" first.",
+                									cloud)));
+                	// "Repairing" the model here with ModelHelper.recoverModel(config) does not work. The 
+                	// markers indicating a broken model have not been installed at this point.
+                }
+        	}
         }
-        tlcjob.setPriority(Job.LONG);
-        tlcjob.setUser(true);
-        // The TLC job itself does not do any file IO
-        tlcjob.setRule(mutexRule);
+        job.setPriority(Job.LONG);
+        job.setUser(true);
 
         // setup the job change listener
         TLCJobChangeListener tlcJobListener = new TLCJobChangeListener(config);
-        tlcjob.addJobChangeListener(tlcJobListener);
-        tlcjob.schedule();
+        job.addJobChangeListener(tlcJobListener);
+        job.schedule();
     }
 
+	// This opens up a dialog at the end of the job showing the status message
+    class WithStatusJobChangeListener extends SimpleJobChangeListener {
+
+		private final ILaunchConfiguration config;
+
+		public WithStatusJobChangeListener(ILaunchConfiguration config) {
+			this.config = config;
+		}
+
+		public void done(IJobChangeEvent event) {
+			super.done(event);
+	
+			// TLC models seem to require some clean-up
+			try {
+				ModelHelper.setModelLocked(config, false);
+				ModelHelper.setModelRunning(config, false);
+				ModelHelper.recoverModel(config);
+			} catch (CoreException doesNotHappen) {
+				doesNotHappen.printStackTrace();
+				// Not supposed to happen
+			}
+
+			final IStatus status = event.getJob().getResult();
+			final String message = status.getMessage();
+			if (status instanceof ITLCJobStatus) {
+				final ITLCJobStatus result = (ITLCJobStatus) status;
+				final URL url = result.getURL();
+				Display.getDefault().asyncExec(new Runnable() {
+					public void run() {
+						boolean yesOpenBrowser = MessageDialog
+								.openConfirm(
+										Display.getDefault().getActiveShell(),
+										"Cloud TLC",
+										message
+												+ "\n\nClick OK to open a status page in your browser. "
+												+ "Click Cancel to ignore the status page (you can still go there later).");
+						if (yesOpenBrowser) {
+							try {
+								PlatformUI.getWorkbench().getBrowserSupport()
+								.getExternalBrowser().openURL(url);
+							} catch (PartInitException doesNotHappen) {
+								doesNotHappen.printStackTrace();
+							}
+						}
+					}
+				});
+			}
+		}
+    }
+    
     /**
      * listens to the termination of the TLC run 
      */
@@ -725,27 +905,29 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
                 refreshJob.schedule();
 
                 // make the model modification in order to make it runnable again
-                Assert.isTrue(event.getJob() instanceof TLCProcessJob);
-                Assert.isNotNull(event.getResult());
-                TLCProcessJob tlcJob = (TLCProcessJob) event.getJob();
-                if (event.getResult().isOK())
-                {
-                    int autoLockTime = config.getAttribute(LAUNCH_AUTO_LOCK_MODEL_TIME,
-                            IModelConfigurationDefaults.MODEL_AUTO_LOCK_TIME_DEFAULT);
-                    // auto lock time is in minutes, getTLCStartTime() and getTLCEndTime()
-                    // are in milliseconds
-                    if (tlcJob.getTlcEndTime() - tlcJob.getTlcStartTime() > autoLockTime * 60 * 1000)
-                    {
-                        // length of job execution exceeded a certain length of time
-                        // should lock
-                        ModelHelper.setModelLocked(config, true);
-                    }
+                if (event.getJob() instanceof TLCProcessJob) {
+                	Assert.isTrue(event.getJob() instanceof TLCProcessJob);
+                	Assert.isNotNull(event.getResult());
+                	TLCProcessJob tlcJob = (TLCProcessJob) event.getJob();
+                	if (event.getResult().isOK())
+                	{
+                		int autoLockTime = config.getAttribute(LAUNCH_AUTO_LOCK_MODEL_TIME,
+                				IModelConfigurationDefaults.MODEL_AUTO_LOCK_TIME_DEFAULT);
+                		// auto lock time is in minutes, getTLCStartTime() and getTLCEndTime()
+                		// are in milliseconds
+                		if (tlcJob.getTlcEndTime() - tlcJob.getTlcStartTime() > autoLockTime * 60 * 1000)
+                		{
+                			// length of job execution exceeded a certain length of time
+                			// should lock
+                			ModelHelper.setModelLocked(config, true);
+                		}
+                	}
                 }
 
                 ModelHelper.setModelRunning(config, false);
             } catch (CoreException e)
             {
-                TLCActivator.getDefault().logError("Error setting lock and running markers on the model", e);
+                TLCActivator.logError("Error setting lock and running markers on the model", e);
             }
         }
     }
@@ -778,7 +960,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
                     break;
                 }
             }
-            TLCActivator.getDefault().logDebug("Job '" + jobName + "' terminated with status: { " + status + " }");
+            TLCActivator.logDebug("Job '" + jobName + "' terminated with status: { " + status + " }");
         }
     };
 

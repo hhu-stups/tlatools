@@ -8,6 +8,10 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 
 import tlc2.TLCGlobals;
+import tlc2.tool.TLCState;
+import tlc2.tool.TLCStateInfo;
+import tlc2.tool.liveness.LiveWorker;
+import tlc2.util.statistics.IBucketStatistics;
 import util.DebugPrinter;
 import util.Set;
 import util.ToolIO;
@@ -123,6 +127,7 @@ public class MP
     public static final String NOT_APPLICABLE_VAL = "-1";
 
     private static MP instance = null;
+	private static MPRecorder recorder = new MPRecorder();
     private Set warningHistory;
     private static final String CONFIG_FILE_ERROR = "TLC found an error in the configuration file at line %1%\n";
     private static final SimpleDateFormat SDF = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss"); //$NON-NLS-1$ 
@@ -749,7 +754,8 @@ public class MP
             b.append("Finished computing initial states: %1% states generated, with %2% of them distinct.");
             break;
         case EC.TLC_CHECKING_TEMPORAL_PROPS:
-            b.append("Checking temporal properties for the %1% state space...");
+			b.append("Checking temporal properties for the %1% state space with %2% distinct states at (")
+					.append(SDF.format(new Date())).append(")");
             break;
 
         case EC.TLC_SUCCESS:
@@ -1105,6 +1111,7 @@ public class MP
      */
     public static void printError(int errorCode, String[] parameters)
     {
+    	recorder.record(errorCode, (Object[]) parameters);
         // write the output
         DebugPrinter.print("entering printError(int, String[]) with errorCode " + errorCode); //$NON-NLS-1$
         ToolIO.out.println(getMessage(ERROR, errorCode, parameters));
@@ -1262,6 +1269,7 @@ public class MP
      */
     public static void printMessage(int errorCode, String[] parameters)
     {
+    	recorder.record(errorCode, (Object[]) parameters);
         DebugPrinter.print("entering printMessage(int, String[]) with errorCode " + errorCode); //$NON-NLS-1$
         // write the output
         ToolIO.out.println(getMessage(NONE, errorCode, parameters));
@@ -1272,8 +1280,17 @@ public class MP
      * Prints the state
      * @param parameters
      */
-    public static void printState(int code, String[] parameters)
+    public static void printState(int code, String[] parameters, TLCState state, int num)
     {
+		recorder.record(code, new TLCStateInfo(state, ""), num);
+        DebugPrinter.print("entering printState(String[])"); //$NON-NLS-1$
+        ToolIO.out.println(getMessage(STATE, code, parameters));
+        DebugPrinter.print("leaving printState(String[])"); //$NON-NLS-1$
+    }
+    
+    public static void printState(int code, String[] parameters, TLCStateInfo stateInfo, int num)
+    {
+		recorder.record(code, (TLCStateInfo) stateInfo, num);
         DebugPrinter.print("entering printState(String[])"); //$NON-NLS-1$
         ToolIO.out.println(getMessage(STATE, code, parameters));
         DebugPrinter.print("leaving printState(String[])"); //$NON-NLS-1$
@@ -1287,6 +1304,7 @@ public class MP
      */
     public static void printTLCBug(int errorCode, String[] parameters)
     {
+    	recorder.record(errorCode, (Object[]) parameters);
         DebugPrinter.print("entering printTLCBug(int, String[]) with errorCode " + errorCode); //$NON-NLS-1$
         // write the output
         ToolIO.out.println(getMessage(TLCBUG, errorCode, parameters));
@@ -1307,6 +1325,7 @@ public class MP
      */
     public static void printWarning(int errorCode, String[] parameters)
     {
+    	recorder.record(errorCode, (Object[]) parameters);
         DebugPrinter.print("entering printWarning(int, String[]) with errorCode " + errorCode); //$NON-NLS-1$
         // only print warnings if the global warning switch was enabled
         if (TLCGlobals.warn)
@@ -1330,6 +1349,7 @@ public class MP
      */
     public static void printWarning(int errorCode, String parameters, Throwable e)
     {
+    	recorder.record(errorCode, parameters, e);
         DebugPrinter.print("entering printWarning(int, String, Exception) with errorCode " + errorCode); //$NON-NLS-1$
         // only print warnings if the global warning switch was enabled
         if (TLCGlobals.warn)
@@ -1346,6 +1366,19 @@ public class MP
             e.printStackTrace(ToolIO.out);
         }
         DebugPrinter.print("leaving printWarning(int, String[])"); //$NON-NLS-1$
+    }
+    
+    public static void printStats(final IBucketStatistics inDegree, final IBucketStatistics outDegree) {
+    	// Out degree
+        ToolIO.out.println(outDegree);
+        
+        // In Degree
+		ToolIO.out.println(inDegree);
+
+		// SCC size and count
+		ToolIO.out.println(LiveWorker.STATS.toString());
+		ToolIO.out.println(String.format("%s SCC%s found during liveness checking.",
+				LiveWorker.STATS.getObservations(), LiveWorker.STATS.getObservations() > 1 ? "s" : ""));
     }
 
     /**
@@ -1387,4 +1420,8 @@ public class MP
         ToolIO.out.flush();
         ToolIO.err.flush();
     }
+
+	public static void setRecorder(MPRecorder aRecorder) {
+		recorder = aRecorder;
+	}
 }

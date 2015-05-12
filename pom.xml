@@ -28,8 +28,14 @@
 		<!-- non-OSGi jars -->
 		<module>tlatools</module>
 
+		<!-- OSGi based multi invocation worker (model check > 1 spec in a single runtime -->
+		<module>org.lamport.tlatools.api</module>
+		<module>org.lamport.tlatools.impl.distributed</module>
+		<module>org.lamport.tlatools.consumer.distributed</module>
+
 		<!-- bundles -->
 		<module>org.lamport.tla.toolbox</module>
+		<module>org.lamport.tla.toolbox.jclouds</module>
 		<module>org.lamport.tla.toolbox.jnlp</module>
 		<module>org.lamport.tla.toolbox.doc</module>
 		<module>org.lamport.tla.toolbox.editor.basic</module>
@@ -49,20 +55,17 @@
 		<module>org.lamport.tla.toolbox.tool.tla2tex.uitest</module>
 		<module>org.lamport.tla.toolbox.tool.tlc.ui.uitest</module>
 
-		<!-- OSGi based multi invocation worker (model check > 1 spec in a single runtime -->
-		<module>org.lamport.tlatools.api</module>
-		<module>org.lamport.tlatools.impl.distributed</module>
-		<module>org.lamport.tlatools.consumer.distributed</module>
-
 		<!-- features -->
 		<module>org.lamport.tlatools.feature</module>
 		<module>org.lamport.tla.toolbox.feature.base</module>
 		<module>org.lamport.tla.toolbox.feature.editor</module>
 		<module>org.lamport.tla.toolbox.feature.jnlp</module>
+		<module>org.lamport.tla.toolbox.feature.jclouds</module>
 		<module>org.lamport.tla.toolbox.feature.help</module>
 		<module>org.lamport.tla.toolbox.feature.prover</module>
 		<module>org.lamport.tla.toolbox.feature.tla2tex</module>
 		<module>org.lamport.tla.toolbox.feature.tlc</module>
+		<module>org.lamport.tla.toolbox.feature.branding</module>
 		<module>org.lamport.tla.toolbox.feature.standalone</module>
 
 		<!-- p2 repository for updates -->
@@ -83,46 +86,12 @@
 		<!-- http://maven.apache.org/general.html#encoding-warning  -->
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-		<tycho-version>0.14.0-SNAPSHOT</tycho-version>
+		<tycho-version>0.21.0</tycho-version>
 
 		<!-- no default here -->
 		<tycho.test.vm.argline>-Xmx500m -Xdebug -Xrunjdwp:transport=dt_socket,address=1044,server=y,suspend=n</tycho.test.vm.argline>
 		<tycho.test.vm.useUiThread>false</tycho.test.vm.useUiThread>
 	</properties>
-
-	<!-- explicitly define plugin repositories to make tycho SNAPSHOT builds available -->
-	<pluginRepositories>
-
-		<!-- main Maven repository (do not remove) -->
-	    <pluginRepository>
-	      <id>central</id>
-	      <name>Maven Plugin Repository</name>
-	      <url>http://repo1.maven.org/maven2</url>
-	      <layout>default</layout>
-	      <snapshots>
-	        <enabled>false</enabled>
-	      </snapshots>
-	      <releases>
-	        <updatePolicy>never</updatePolicy>
-	      </releases>
-	    </pluginRepository>
-
-	    <!-- Private Tycho snapshot repo (remove once 0.14 is stable) -->
-	    <!-- Eclispe ini patcher repo (remove when bug TYCHO-595 fixed) -->
-	    <pluginRepository>
-	      <id>tla</id>
-	      <name>Eclipse-ini-patcher and Tycho Snapshot Repository</name>
-	      <url>http://tla.msr-inria.inria.fr/maven</url>
-	      <layout>default</layout>
-	      <snapshots>
-	        <enabled>true</enabled>
-	      </snapshots>
-	      <releases>
-	        <updatePolicy>never</updatePolicy>
-	      </releases>
-	    </pluginRepository>
-
-	  </pluginRepositories>
 
 	<build>
 		<plugins>
@@ -169,7 +138,15 @@
 					    <version>1.4.0-SNAPSHOT</version>
 					    <classifier>TLAToolbox</classifier>
 					 </artifact>
-					</target> 
+					</target>
+					
+					<!-- Need to specify miminum Java version. This defines what
+					     java.* packages are available during dependency resolution. The default
+					     is Java 1.4 which e.g. does not come with "java.security.sasl", a
+					     package that is indirectly referenced by the toolbox (indirectly via
+					     org.apache.mina.core).
+					     see http://dev.eclipse.org/mhonarc/lists/cbi-dev/msg00166.html --> 
+		 			<executionEnvironment>JavaSE-1.7</executionEnvironment>
 
 					<!-- configure the p2 target environments for multi-platform build -->
 					<environments>
@@ -212,23 +189,68 @@
 
 					</environments>
 				</configuration>
+					</plugin>
+		
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-enforcer-plugin</artifactId>
+				<version>1.3.1</version>
+				<executions>
+					<!-- Newer maven versions (e.g. 3.2) fail with a cyclic dependency error 
+						during resolution -->
+					<!-- Read http://maven.apache.org/enforcer/enforcer-rules/versionRanges.html 
+						on version range syntax -->
+					<execution>
+						<id>enforce-maven-3</id>
+						<goals>
+							<goal>enforce</goal>
+						</goals>
+						<configuration>
+							<rules>
+								<requireMavenVersion>
+									<version>[3.0.0,3.1)</version>
+								</requireMavenVersion>
+							</rules>
+							<fail>true</fail>
+						</configuration>
+					</execution>
+					<!-- The toolbox's build is broken with Java 1.8 right now due to an older 
+						AspectJ dependency. Upgrading to a newer aspectJ is probably going to fix 
+						this problem by creating a new one. -->
+					<!-- http://maven.apache.org/enforcer/enforcer-rules/requireJavaVersion.html -->
+					<execution>
+						<id>enforce-java</id>
+						<goals>
+							<goal>enforce</goal>
+						</goals>
+						<configuration>
+							<rules>
+								<requireJavaVersion>
+									<version>[1.5,1.9)</version>
+								</requireJavaVersion>
+							</rules>
+						</configuration>
+					</execution>
+				</executions>
 			</plugin>
-
 		</plugins>
 	</build>
 
-	<!-- pass mac specific SWT proeprties on mac (OS check is based on identifying the VM)-->
+	<!-- pass mac specific SWT properties on ...drum roll... mac -->
 	<profiles>
 		<profile>
 			<id>macosx</id>
 			<activation>
 				<property>
-					<name>java.vendor.url</name>
-					<value>http://www.apple.com/</value>
+					<name>os.name</name>
+					<value>Mac OS X</value>
 				</property>
 			</activation>
 			<properties>
-				<tycho.test.vm.argline>-Dosgi.ws=cocoa -XstartOnFirstThread</tycho.test.vm.argline>
+				<!-- On Mac OS X, /tmp is a symbolic link pointing to /private/tmp. Thus, make sure unit tests -->
+				<!-- use the /private/tmp to make path comparison work. -->
+				<!-- See org.lamport.tla.toolbox.spec.SpecTest.testCreateSpecStoreRelativePath() -->
+				<tycho.test.vm.argline>-Dosgi.ws=cocoa -Djava.io.tmpdir=/private/tmp/ -XstartOnFirstThread</tycho.test.vm.argline>
 				<tycho.test.vm.useUiThread>false</tycho.test.vm.useUiThread>
 			</properties>
 		</profile>

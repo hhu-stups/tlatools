@@ -30,6 +30,10 @@ public interface IConfigurationConstants
      */
 	public static final String LAUNCH_DISTRIBUTED = "distributedTLC";
     /**
+     * Launch distributed version of TLC and send result to this address
+     */
+	public static final String LAUNCH_DISTRIBUTED_RESULT_MAIL_ADDRESS = "result.mail.address";
+    /**
      * Additional VM args for distributed version of TLC
      */
 	public static final String LAUNCH_JVM_ARGS = "distributedTLCVMArgs";
@@ -37,6 +41,14 @@ public interface IConfigurationConstants
      * Additional VM args for distributed version of TLC
      */
 	public static final String LAUNCH_TLC_PARAMETERS = "TLCCmdLineParameters";
+    /**
+     * Distributed FPSets
+     */
+	public static final String LAUNCH_DISTRIBUTED_FPSET_COUNT = "distributedFPSetCount";
+	/**
+	 * Network interface under which TLC server process will listen (java.rmi.server.hostname)
+	 */
+	public static final String LAUNCH_DISTRIBUTED_INTERFACE = "distributedNetworkInterface";
     /**
      * Pre-flight script (primarily for distributed version of TLC)
      */

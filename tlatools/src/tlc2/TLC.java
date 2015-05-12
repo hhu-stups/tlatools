@@ -5,6 +5,16 @@
 
 package tlc2;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.net.UnknownHostException;
+import java.util.ArrayList;
+import java.util.Enumeration;
+import java.util.List;
+
+import model.InJarFilenameToStream;
+import model.ModelInJar;
+import tla2sany.modanalyzer.ParseUnit;
 import tla2sany.modanalyzer.SpecObj;
 import tlc2.output.EC;
 import tlc2.output.MP;
@@ -23,6 +33,7 @@ import tlc2.value.Value;
 import util.DebugPrinter;
 import util.FileUtil;
 import util.FilenameToStream;
+import util.MailSender;
 import util.SimpleFilenameToStream;
 import util.ToolIO;
 import util.UniqueString;
@@ -36,8 +47,8 @@ import util.UniqueString;
  */
 public class TLC
 {
-
     
+    private static boolean MODEL_PART_OF_JAR = false;
 
     // SZ Feb 20, 2009: the class has been 
     // transformed from static to dynamic
@@ -55,6 +66,10 @@ public class TLC
     private String fromChkpt;
 
     private int fpIndex;
+    /**
+     * The number of traces/behaviors to generate in simulation mode
+     */
+    public static long traceNum = Long.MAX_VALUE;
     private int traceDepth;
     private FilenameToStream resolver;
     private SpecObj specObj;
@@ -156,16 +171,36 @@ public class TLC
      *                     default: 1000000
      *    
      */
-    public static void main(String[] args)
+    public static void main(String[] args) throws UnknownHostException, FileNotFoundException
     {
         TLC tlc = new TLC();
 
         // handle parameters
         if (tlc.handleParameters(args))
         {
-            tlc.setResolver(new SimpleFilenameToStream());
+        	final MailSender ms = new MailSender(tlc.mainFile);
+        	if (MODEL_PART_OF_JAR) {
+        		tlc.setResolver(new InJarFilenameToStream(ModelInJar.PATH));
+        	} else {
+        		tlc.setResolver(new SimpleFilenameToStream());
+        	}
             // call the actual processing method
             tlc.process();
+
+            // Send logged output by email
+            boolean success = ms.send(tlc.getModuleFiles());
+            
+			// In case sending the mail has failed, we treat this as an error.
+			// This is needed when TLC runs on another host and email is
+			// the only means for the user to get access to the model checking
+			// results. 
+			// With distributed TLC and CloudDistributedTLCJob in particular,
+			// the cloud node is immediately turned off once the TLC process has
+			// finished. If we were to shutdown the node even when sending out 
+            // the email has failed, the result would be lost.
+			if (!success) {
+				System.exit(1);
+			}
         }
         // terminate
         System.exit(0);
@@ -602,8 +637,19 @@ public class TLC
         
         if (mainFile == null)
         {
-            printErrorMsg("Error: Missing input TLA+ module.");
-            return false;
+			// command line omitted name of spec file, take this as an
+			// indicator to check the in-jar model/ folder for a spec.
+			// If a spec is found, use it instead.
+			if (ModelInJar.hasModel()) {
+				MODEL_PART_OF_JAR = true;
+				ModelInJar.loadProperties();
+				TLCGlobals.tool = true; // always run in Tool mode (to parse output by Toolbox later)
+				TLCGlobals.chkptDuration = 0; // never use checkpoints with distributed TLC (highly inefficient)
+				mainFile = "MC";
+			} else {
+				printErrorMsg("Error: Missing input TLA+ module.");
+				return false;
+			}
         }
         if (configFile == null)
         {
@@ -674,7 +720,7 @@ public class TLC
                 }
                 MP.printMessage(EC.TLC_MODE_SIMU, String.valueOf(seed));
                 Simulator simulator = new Simulator(mainFile, configFile, null, deadlock, traceDepth, 
-                        Long.MAX_VALUE, rng, seed, true, resolver, specObj);
+                        traceNum, rng, seed, true, resolver, specObj);
 // The following statement moved to Spec.processSpec by LL on 10 March 2011               
 //                MP.printMessage(EC.TLC_STARTING);
                 instance = simulator;
@@ -726,6 +772,23 @@ public class TLC
             MP.printMessage(EC.TLC_FINISHED);
             MP.flush();
         }
+    }
+    
+    @SuppressWarnings("unchecked")
+	public List<File> getModuleFiles() {
+    	final List<File> result = new ArrayList<File>();
+    	
+    	if (instance instanceof ModelChecker) {
+    		ModelChecker mc = (ModelChecker) instance;
+			final Enumeration<ParseUnit> parseUnitContext = mc.specObj.parseUnitContext
+					.elements();
+    		while (parseUnitContext.hasMoreElements()) {
+    			ParseUnit pu = (ParseUnit) parseUnitContext.nextElement();
+				File resolve = resolver.resolve(pu.getFileName(), false);
+				result.add(resolve);
+    		}
+    	}
+        return result;
     }
 
     /**

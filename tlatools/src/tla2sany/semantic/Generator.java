@@ -580,6 +580,12 @@ public class Generator implements ASTConstants, SyntaxTreeConstants,
             * There are arguments, which are heirs()[1].                   *
             ***************************************************************/
             if (prefixElts[i].heirs().length != 3) {
+              // Note added 13 April 2015 by LL:
+              // This error is caused by the spurious "(x)" in the leaf proof
+              //    BY ... DEF A!foo(x)
+              // It would be nice if this produced a more helpful error
+              // message, but I have no idea if there are other bad inputs
+              // that can cause it.
               errors.addAbort(
                 prefixElts[i].getLocation(),
                 "Internal error: " + 
@@ -6899,7 +6905,11 @@ errors.addAbort(stn.getLocation(), "Uses generateNumerable_Step") ;
           Selector sel = genIdToSelector((SyntaxTreeNode) heirs[nextTok]) ;
           SemanticNode selToNd = selectorToNode(sel, -1, false, true, cm);
           if (   (selToNd instanceof OpDefNode)
-              || (selToNd instanceof ThmOrAssumpDefNode)) { 
+              || (  (selToNd instanceof ThmOrAssumpDefNode)
+                  && // This conjunct added 4 Feb 2015 by LL to forbid step
+                     // names in a DEF clause.
+                     (((ThmOrAssumpDefNode) selToNd).getName().toString().charAt(0) != '<' )
+                  )) { 
             SymbolNode def = (SymbolNode) selToNd;
             vec.addElement(def) ;
            } 

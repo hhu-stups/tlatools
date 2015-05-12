@@ -23,10 +23,20 @@ public interface IConfigurationDefaults
             : 1;
 
 	/**
-	 * Run in distributed moe?
+	 * Run in distributed mode?
 	 */
-	public static final boolean LAUNCH_DISTRIBUTED_DEFAULT = false;
-
+	public static final String LAUNCH_DISTRIBUTED_DEFAULT = "off";
+	
+    /**
+     * Launch distributed version of TLC and send result to this address
+     */
+	public static final String LAUNCH_DISTRIBUTED_RESULT_MAIL_ADDRESS_DEFAULT = "";
+	
+	/**
+	 * Distributed FPSet default count
+	 */
+	public static final int LAUNCH_DISTRIBUTED_FPSET_COUNT_DEFAULT = 0;
+	
 	/**
 	 * Additional (e.g. RMI specific) VM args for distributed model checker
 	 */

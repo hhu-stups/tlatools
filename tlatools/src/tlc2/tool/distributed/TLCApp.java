@@ -8,6 +8,8 @@ package tlc2.tool.distributed;
 import java.io.File;
 import java.io.IOException;
 
+import model.InJarFilenameToStream;
+import model.ModelInJar;
 import tlc2.TLCGlobals;
 import tlc2.tool.Action;
 import tlc2.tool.StateVec;
@@ -35,6 +37,15 @@ public class TLCApp extends DistApp {
 	public TLCApp(String specFile, String configFile, boolean deadlock,
 			String fromChkpt, FPSetConfiguration fpSetConfig) throws IOException {
 		this(specFile, configFile, deadlock, true, null);
+
+		this.fromChkpt = fromChkpt;
+		this.metadir = FileUtil.makeMetaDir(this.tool.specDir, fromChkpt);
+		this.fpSetConfig = fpSetConfig;
+	}
+	
+	public TLCApp(String specFile, String configFile, boolean deadlock,
+			String fromChkpt, FPSetConfiguration fpSetConfig, FilenameToStream fts) throws IOException {
+		this(specFile, configFile, deadlock, true, fts);
 
 		this.fromChkpt = fromChkpt;
 		this.metadir = FileUtil.makeMetaDir(this.tool.specDir, fromChkpt);
@@ -494,6 +505,18 @@ public class TLCApp extends DistApp {
 		}
 
 		if (specFile == null) {
+			// command line omitted name of spec file, take this as an
+			// indicator to check the in-jar model/ folder for a spec.
+			// If a spec is found, use it instead.
+			if (ModelInJar.hasModel()) {
+				TLCGlobals.tool = true; // always run in Tool mode (to parse output by Toolbox later)
+				TLCGlobals.chkptDuration = 0; // never use checkpoints with distributed TLC (highly inefficient)
+				FP64.Init(fpIndex);
+				FilenameToStream resolver = new InJarFilenameToStream(ModelInJar.PATH);
+				return new TLCApp("MC", "MC", deadlock, fromChkpt,
+						fpSetConfig, resolver);
+			}
+			
 			printErrorMsg("Error: Missing input TLA+ module.");
 			return null;
 		}

@@ -11,9 +11,12 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Vector;
 
 import org.eclipse.core.resources.ICommand;
@@ -45,6 +48,7 @@ import org.eclipse.jface.text.IDocument;
 import org.eclipse.jface.text.ITextSelection;
 import org.eclipse.ui.editors.text.FileDocumentProvider;
 import org.eclipse.ui.part.FileEditorInput;
+import org.eclipse.ui.progress.UIJob;
 import org.lamport.tla.toolbox.Activator;
 import org.lamport.tla.toolbox.job.NewTLAModuleCreationOperation;
 import org.lamport.tla.toolbox.spec.Spec;
@@ -57,7 +61,7 @@ import org.lamport.tla.toolbox.spec.parser.ParseResultBroadcaster;
 import org.lamport.tla.toolbox.spec.parser.ParserDependencyStorage;
 import org.lamport.tla.toolbox.tool.ToolboxHandle;
 import org.lamport.tla.toolbox.ui.preference.EditorPreferencePage;
-import org.lamport.tla.toolbox.util.pref.IPreferenceConstants;
+import org.lamport.tla.toolbox.ui.preference.LibraryPathComposite;
 import org.lamport.tla.toolbox.util.pref.PreferenceStoreHelper;
 
 import pcal.TLAtoPCalMapping;
@@ -66,8 +70,10 @@ import tla2sany.parser.ParseException;
 import tla2sany.parser.SyntaxTreeNode;
 import tla2sany.parser.TLAplusParser;
 import tla2sany.parser.TLAplusParserConstants;
+import tla2sany.semantic.ASTConstants;
 import tla2sany.semantic.DefStepNode;
 import tla2sany.semantic.ExprNode;
+import tla2sany.semantic.ExprOrOpArgNode;
 import tla2sany.semantic.FormalParamNode;
 import tla2sany.semantic.InstanceNode;
 import tla2sany.semantic.LeafProofNode;
@@ -88,6 +94,7 @@ import tla2sany.semantic.ThmOrAssumpDefNode;
 import tla2sany.semantic.UseOrHideNode;
 import tla2sany.st.Location;
 import tla2sany.st.SyntaxTreeConstants;
+import util.FilenameToStream;
 import util.UniqueString;
 
 /**
@@ -345,7 +352,7 @@ public class ResourceHelper
                 // relocate files (fix the links)
                 if (performImport)
                 {
-                    relocateFiles(project, new Path(parentDirectory), new NullProgressMonitor());
+                    relocateFiles(project, new Path(parentDirectory), monitor);
                 }
 
             } catch (CoreException e)
@@ -401,10 +408,10 @@ public class ResourceHelper
 
     /**
      * On relocation, all linked files in the project become invalid. This method fixes this issue
-     * @param project project containing links to the nen-existing files
+     * @param project project containing links to the non-existing files
      * @param newLocationParent the parent directory, where the files are located
      */
-    public static void relocateFiles(IProject project, IPath newLocationParent, IProgressMonitor monitor)
+    private static void relocateFiles(IProject project, IPath newLocationParent, IProgressMonitor monitor)
     {
         Assert.isNotNull(project);
         Assert.isNotNull(newLocationParent);
@@ -414,33 +421,35 @@ public class ResourceHelper
             newLocationParent.addTrailingSeparator();
         }
 
+
         try
         {
+        	final Map<IResource, IPath> failures = new HashMap<IResource, IPath>();
             IResource[] members = project.members();
 
             monitor.beginTask("Relocating Files", members.length * 2);
 
             for (int i = 0; i < members.length; i++)
             {
-                if (members[i].isLinked() && !members[i].getRawLocation().toFile().exists())
-                {
+				final IResource resource = members[i];
+				if (resource.isLinked() && (!resource.isAccessible() || resource.getRawLocation().isAbsolute())) {
                     // the linked file points to a file that does not exist.
                     String name = members[i].getName();
                     IPath newLocation = newLocationParent.append(name);
+                    
+                    members[i].delete(true, new SubProgressMonitor(monitor, 1));
                     if (newLocation.toFile().exists())
                     {
-
-                        members[i].delete(true, new SubProgressMonitor(monitor, 1));
-
-                        getLinkedFile(project, newLocation.toOSString(), true);
+                        getLinkedFile(project, ResourceHelper.PARENT_ONE_PROJECT_LOC + name, true);
                         monitor.worked(1);
 
                         Activator.getDefault().logDebug("File found " + newLocation.toOSString());
                     } else
                     {
-                        throw new CoreException(new Status(IStatus.ERROR, Activator.PLUGIN_ID, "Error relocating file "
+                    	failures.put(members[i], newLocation);
+						Activator.getDefault().logError("Error relocating files in " + project.getName(), new CoreException(new Status(IStatus.ERROR, Activator.PLUGIN_ID, "Error relocating file "
                                 + name + ". The specified location " + newLocation.toOSString()
-                                + " did not contain the file."));
+                                + " did not contain the file.")));
                     }
                 } else
                 {
@@ -448,7 +457,49 @@ public class ResourceHelper
                 }
 
             }
+            if (!failures.isEmpty()) {
+        		
+        		// Inform the user that the Toolbox failed to "relocate" files (we are going to call it
+        		// "find" though, in hope that it's more meaningful).
+        		// 
+        		final StringBuffer buf = new StringBuffer(failures.size());
+				buf.append(String.format("The Toolbox failed to find %s %s while opening the %s spec:",
+						failures.size(), failures.size() > 1 ? "files" : "file", project.getName()));
+				buf.append("\n\n");
 
+				// Use the standard resolver to try and resolve the missing file. If it resolves
+				// successfully, we assume it is a standard module. Note, that there is still the
+				// possibility that the user decided to overwrite the standard module. In this
+				// case, TLC will use the wrong version. Thus, still inform the user about what
+				// we have done here.
+				final FilenameToStream resolver = new RCPNameToFileIStream(
+						getTLALibraryPath(project));
+        		for (Entry<IResource, IPath> entry : failures.entrySet()) {
+        			final String moduleName = entry.getKey().getName();
+        			
+        			// resolve and check if the File object really exists
+        			final File resolve = resolver.resolve(moduleName, false);
+					boolean assumedStandardModule = resolve.exists();
+        			
+					final String path = entry.getValue().toOSString();
+					buf.append(String.format("%s %s", path, assumedStandardModule == true ? "(standard module)" : ""));
+        			buf.append("\n\n");
+        		}
+				buf.append("Files marked as standard modules will not cause the spec parser to fail. "
+						+ "If you intended to provide an overwrite of a standard module, it is up to you now to provide the module.\n"
+						+ "Missing user modules will result in a parser failure and have to be manually created.");
+
+        		// Finally raise a warning dialog showing the user what we have done to her spec. 
+        		final UIJob job = new UIJob("Warning relocating files") {
+        			@Override
+        			public IStatus runInUIThread(IProgressMonitor monitor) {
+						MessageDialog.openWarning(UIHelper.getShell(),
+								String.format("Failed to find %s spec files!", failures.size(), failures.size() > 1 ? "files" : "file"), buf.toString());
+        				return Status.OK_STATUS;
+        			}
+        		};
+        		job.schedule();
+        	}
         } catch (CoreException e)
         {
             Activator.getDefault().logError("Error relocating files in " + project.getName(), e);
@@ -456,7 +507,50 @@ public class ResourceHelper
         {
             monitor.done();
         }
+    }
+    
 
+    /**
+     * Modified by LL on 28 Nov 2012 to make locationList a Vector instead of a
+     * HashSet. With a HashSet, it returned the library paths in an order that
+     * was mostly independent of the order of the paths specified by the user.
+     * 
+     * @return an Array of {@link String}s each set by the user as additional
+     *         TLA+ library lookup path locations. Returns and empty array if
+     *         none set, not <code>null</code>.
+     */
+    public static String[] getTLALibraryPath(final IProject project) {
+        final IPreferenceStore store = PreferenceStoreHelper
+                .getProjectPreferenceStore(project);
+
+        // Read project specific and general preferences (project take
+        // precedence over general ones)
+        String prefStr = store
+                .getString(LibraryPathComposite.LIBRARY_PATH_LOCATION_PREFIX);
+        if ("".equals(prefStr)) {
+            prefStr = PreferenceStoreHelper.getInstancePreferenceStore()
+                    .getString(
+                            LibraryPathComposite.LIBRARY_PATH_LOCATION_PREFIX);
+        }
+
+        if (!"".equals(prefStr)) {
+            // final Set<String> locationList = new HashSet<String>();
+            final Vector<String> locationList = new Vector<String>();
+            // convert UI string into an array
+            final String[] locations = prefStr
+                    .split(LibraryPathComposite.ESCAPE_REGEX
+                            + LibraryPathComposite.LOCATION_DELIM);
+            for (String location : locations) {
+                final String[] split = location
+                        .split(LibraryPathComposite.ESCAPE_REGEX
+                                + LibraryPathComposite.STATE_DELIM);
+                if (Boolean.parseBoolean(split[1])) {
+                    locationList.add(split[0]);
+                }
+            }
+            return locationList.toArray(new String[locationList.size()]);
+        }
+        return new String[0];
     }
 
     /**
@@ -1274,24 +1368,6 @@ public class ResourceHelper
     }
 
     /**
-     * Sets the ToolboxDirSize property, which equals the number of kbytes of storage
-     * used by the spec's .toolbox directory, where resource is the IProject object
-     * for the spec.
-     * 
-     * @param resource
-     */
-    public static void setToolboxDirSize(IProject resource)
-    {
-        // set dirSize to the size of the .toolbox directory
-        long dirSize = ResourceHelper.getSizeOfJavaFileResource(resource);
-
-        // Set the size property of the Spec's property page spec to the Spec object for which
-        IPreferenceStore preferenceStore = PreferenceStoreHelper.getProjectPreferenceStore(resource);
-
-        preferenceStore.setValue(IPreferenceConstants.P_PROJECT_TOOLBOX_DIR_SIZE, String.valueOf(dirSize / 1000));
-    }
-
-    /**
      * Called to find the number of bytes contained within an IResource
      * that represents a Java File object (a file or directory).  Returns
      * 0 if resource or its File are null.
@@ -1299,7 +1375,7 @@ public class ResourceHelper
      * @param resource
      * @return
      */
-    public static long getSizeOfJavaFileResource(IResource resource)
+    public static long getSizeOfJavaFileResource(final IResource resource)
     {
         // Set file to the Java File represented by the resource.
         if (resource == null)
@@ -1323,9 +1399,9 @@ public class ResourceHelper
     }
 
     /**
-     * If dir is a directory, return the size of all
+     * If dir is a directory, return the size in bytes of all
      * @param dir
-     * @return
+     * @return the size in bytes
      */
     private static long getDirSize(File dir)
     {
@@ -1388,10 +1464,7 @@ public class ResourceHelper
      */
     public static SemanticNode[] getUsesOfSymbol(SymbolNode symbol, SemanticNode module)
     {
-        Vector<SemanticNode> found = new Vector<SemanticNode>(20); // For some reason, Eclipse doesn't let me use a List here.
-        // If I write
-        // List found = new List(20);
-        // Eclipse mysteriously complains that it can't find the second "List".
+        Vector<SemanticNode> found = new Vector<SemanticNode>(20); 
         innerGetUsesOfSymbol(symbol, module, found);
         SemanticNode[] value = new SemanticNode[found.size()];
         for (int i = 0; i < value.length; i++)
@@ -1569,6 +1642,103 @@ public class ResourceHelper
         }
         return;
     }
+    
+    /**
+     * Return all the <code>OpApplNode</code>s and <code>OpArgNode</code>s in the 
+     * expression or OpArgNode <code>expr</code> whose operator node is a 
+     * user-defined operator.
+     * 
+     * @param symbol
+     * @param expr
+     * @return
+     */
+    public static ExprOrOpArgNode[] getUsesOfUserDefinedOps(SemanticNode expr)
+    {
+        Vector<ExprOrOpArgNode> found = new Vector<ExprOrOpArgNode>(20); 
+        innerGetUsesOfUserDefinedOps(expr, found);
+        ExprOrOpArgNode[] value = new ExprOrOpArgNode[found.size()];
+        for (int i = 0; i < value.length; i++)
+        {
+            value[i] =  found.elementAt(i);
+        }
+        return value;
+    }
+
+    /** 
+     * Returns true iff node is an OpApplNode or ExprOrOpArgNode whose operator 
+     * is a user-defined operator.
+     * 
+     * @param node
+     * @param symbol
+     * @return
+     */
+    private static boolean hasUserDefinedOp(SemanticNode node)
+    {
+        if (! (node instanceof ExprOrOpArgNode)) {
+            return false ;
+        }
+        
+        SymbolNode sym ;
+        
+        if (node instanceof OpApplNode) {
+            sym = ((OpApplNode) node).getOperator() ;
+        } 
+        else if (node instanceof OpArgNode) {
+            sym = ((OpArgNode) node).getOp() ;
+        }
+        else {
+            return false ;
+        }
+                      
+        if (! (sym instanceof OpDefNode)) {
+            return false ;
+        }
+        
+        OpDefNode op = (OpDefNode) sym ;
+        return op.getKind() == ASTConstants.UserDefinedOpKind ;
+    }
+
+    /**
+     * The inner recursive method used by getUsesOfUserDefinedOps. It appends all the appropriate
+     * OpApplNodes  to <code>found</code>.
+     * 
+     * @param node
+     * @param found
+     * @return
+     */
+    private static void innerGetUsesOfUserDefinedOps(SemanticNode node, Vector<ExprOrOpArgNode> found)
+    {
+        // We have to detect the following instances in which we get a use directly from
+        // this node. There are three basic cases:
+        // 1. This is an OpApplNode and the operator is a user-defined OpDef node. 
+        // 2. This is an OpArgNode whose operator is a user-defined OpDef node.
+        if (hasUserDefinedOp(node)) {
+          found.add((ExprOrOpArgNode) node);
+
+        } 
+        SemanticNode[] children = node.getChildren();
+        if (children == null)
+        {
+            return;
+        }
+        for (int i = 0; i < children.length; i++)
+        {
+            // The following null pointer test added by LL on 4 Dec 2011 to fix
+            // bug 233, which occurs because the OTHER clause in a CASE statement
+            // is indicated by the presence of a null instead of a test expression.
+            final SemanticNode sn = children[i];
+            if (sn != null) 
+            {
+               if (node.getLocation().source().equals(sn.getLocation().source()))
+               {
+                   innerGetUsesOfUserDefinedOps(sn, found);
+               }
+            }
+        }
+        return;
+    }
+
+
 
     /**
      * Returns an array of all the user modules of the current 
@@ -1651,6 +1821,12 @@ public class ResourceHelper
      * Like declaredSymbolsInScope, except instead of returning the computed value as a result,
      * it adds it to the elements of the `result' argument.
      * 
+     * Note added by LL on 8 Oct 2014: This implementation seems silly.  It is pulling in symbols
+     * defined or declared in all the modules EXTENDed by `module'.  However, all those symbols
+     * should already be included in the defined and declared symbols of `module'.  However,
+     * it appears that this doesn't cause the same string to be included multiple times
+     * in the returned result.
+     * 
      * @param result
      * @param module
      * @param loc
@@ -1659,11 +1835,15 @@ public class ResourceHelper
         // Set result to the set of all CONSTANT and VARIABLE declarations it should contain.
         // These are the ones from `module' that precede loc, and the ones from any extended
         // module.
-        HashSet extendees = module.getExtendedModuleSet();
+        //
+        // Testing on 9 Oct 2014 reveals that there is no need to look at EXTENDed modules
+        // because those are already returned by the GetConstant/VariableDecls calls of
+        // the module itself.
+        HashSet<ModuleNode> extendees = module.getExtendedModuleSet(); 
         extendees.add(module) ;
-        Iterator iter = extendees.iterator() ;
+        Iterator<ModuleNode> iter = extendees.iterator() ;
         while (iter.hasNext()) {
-            ModuleNode modNode = (ModuleNode) iter.next() ;
+            ModuleNode modNode = iter.next() ;
             // Get CONSTANTS
             OpDeclNode[] decls = modNode.getConstantDecls() ;
             for (int i = 0; i < decls.length; i++) {
@@ -1693,10 +1873,14 @@ public class ResourceHelper
         // Add defined operator and theorem names
         iter = allModulesSet.iterator();
         while (iter.hasNext()) {
-            ModuleNode modNode = (ModuleNode) iter.next() ;
+            ModuleNode modNode = iter.next() ;
             
             // add definitions
-            OpDefNode[] decls = module.getOpDefs();
+            // On 8 Oct 2014, LL corrected a bug caused by the use of `module'
+            // instead of `modNode' in the following statement.  This caused
+            // all definitions and declarations from `module' to be returned
+            // rather than just the ones appearing earlier in the module.
+            OpDefNode[] decls = modNode.getOpDefs();
             for (int i = 0; i < decls.length; i++) {
                 if ((modNode != module) || earlierLine(decls[i].stn.getLocation(), loc)) {
                     result.add(decls[i].getName().toString()) ;
@@ -1710,7 +1894,7 @@ public class ResourceHelper
                     result.add(tdecls[i].getName().toString()) ;
                 } 
             }
-        }
+        };
     }
     
     /**
@@ -1740,10 +1924,10 @@ public class ResourceHelper
         }
         modules.add(node) ;
         
-        HashSet extendees = node.getExtendedModuleSet();
-        Iterator iter = extendees.iterator() ;
+        HashSet<ModuleNode> extendees = node.getExtendedModuleSet();
+        Iterator<ModuleNode> iter = extendees.iterator() ;
         while (iter.hasNext()) {
-            ModuleNode modNode = (ModuleNode) iter.next() ;
+            ModuleNode modNode = iter.next() ;
             addImportedModules(modules, symbols, infiniteLoc, modNode) ;
         }
         
@@ -1758,7 +1942,184 @@ public class ResourceHelper
                if (instances[i].getName() != null) {
                    symbols.add(instances[i].getName().toString()) ;
                } else {
-                   addImportedModules(modules, symbols, infiniteLoc, instances[i].getModule()) ;
+                  // Testing on 9 Oct 2014 revealed that the following is unnecessary because
+                  // the defined operators imported into a module M without renaming by an INSTANCE
+                  // are contained in M.getOpDefs().  Imported named theorems are similarly
+                  // contained in M.getThmOrAssDefs().
+                  
+                  addImportedModules(modules, symbols, infiniteLoc, instances[i].getModule()) ; 
+               }
+            }
+        }     
+
+    }
+
+    /*
+     * The following three methods are clones of the preceding three methods with HashSet<String>
+     * arguments replaced by StringSet arguments.  These clones were made because where the 
+     * original implementation of the Decompose Proof command used a HashSet<String> to hold a set
+     * of operator names, while the new implementation uses a StringSet.
+     */
+    
+    /**
+     * Returns a HashSet containing all user-definable names that are globally 
+     * defined or declared at Location loc of the module.  The returned
+     * value may or may not contain strings that are not user-definable names--in
+     * particular strings like "I!bar".  
+     * 
+     * If the statement at loc defines or declares a symbol, that symbol does
+     * not appear in the returned value.  However, the implementation assumes that
+     * there there is no declaration or definition that begins on the same line
+     * as the beginning of loc.  If there is, the symbol it defines will not 
+     * appear in the returned result. 
+     * 
+     * The method also assumes that loc is after any EXTENDS statement in the
+     * module.
+     * 
+     * @param module  The module.
+     * @param loc     The location.
+     * @return
+     */
+    public static StringSet declaredSymbolsInScopeSet(ModuleNode module, Location loc) {
+        // result accumulates the return value.
+        StringSet result = new StringSet() ;
+        addDeclaredSymbolsInScopeSet(result, module, loc);
+        return result ;
+    }
+    
+    /**
+     * Like declaredSymbolsInScope, except instead of returning the computed value as a result,
+     * it adds it to the elements of the `result' argument.
+     * 
+     * Note added by LL on 8 Oct 2014: This implementation seems silly.  It is pulling in symbols
+     * defined or declared in all the modules EXTENDed by `module'.  However, all those symbols
+     * should already be included in the defined and declared symbols of `module'.  However,
+     * it appears that this doesn't cause the same string to be included multiple times
+     * in the returned result.
+     * 
+     * @param result
+     * @param module
+     * @param loc
+     */
+    public static void addDeclaredSymbolsInScopeSet(StringSet result, ModuleNode module, Location loc) {
+        // Set result to the set of all CONSTANT and VARIABLE declarations it should contain.
+        // These are the ones from `module' that precede loc, and the ones from any extended
+        // module.
+        //
+        // Testing on 9 Oct 2014 reveals that there is no need to look at EXTENDed modules
+        // because those are already returned by the GetConstant/VariableDecls calls of
+        // the module itself.
+        HashSet<ModuleNode> extendees = module.getExtendedModuleSet(); 
+        extendees.add(module) ;
+        Iterator<ModuleNode> iter = extendees.iterator() ;
+        while (iter.hasNext()) {
+            ModuleNode modNode = iter.next() ;
+            // Get CONSTANTS
+            OpDeclNode[] decls = modNode.getConstantDecls() ;
+            for (int i = 0; i < decls.length; i++) {
+                if ((modNode != module) || earlierLine(decls[i].stn.getLocation(), loc)) {
+                    result.add(decls[i].getName().toString()) ;
+                }
+            }
+            
+           // Get VARIABLES
+            decls = modNode.getVariableDecls() ;
+            for (int i = 0; i < decls.length; i++) {
+                if ((modNode != module) || earlierLine(decls[i].stn.getLocation(), loc)) {
+                    result.add(decls[i].getName().toString()) ;
+                }
+            }
+        }
+        
+        // Set allModulesSet to the set of ModuleNodes containing module and all imported
+        // modules that can contribute definitions or declarations of user-typeable symbols.
+        // Add to `result' the set of all symbols sym that contribute to the final result from
+        // statements of the form
+        //
+        //    sym == INSTANCE ...
+        HashSet<ModuleNode> allModulesSet = new HashSet<ModuleNode>();
+        addImportedModulesSet(allModulesSet, result, loc, module) ;
+        
+        // Add defined operator and theorem names
+        iter = allModulesSet.iterator();
+        while (iter.hasNext()) {
+            ModuleNode modNode = iter.next() ;
+            
+            // add definitions
+            // On 8 Oct 2014, LL corrected a bug caused by the use of `module'
+            // instead of `modNode' in the following statement.  This caused
+            // all definitions and declarations from `module' to be returned
+            // rather than just the ones appearing earlier in the module.
+            OpDefNode[] decls = modNode.getOpDefs();
+            for (int i = 0; i < decls.length; i++) {
+                if ((modNode != module) || earlierLine(decls[i].stn.getLocation(), loc)) {
+                    result.add(decls[i].getName().toString()) ;
+                } 
+            }
+            
+            // add theorems
+            ThmOrAssumpDefNode[] tdecls = module.getThmOrAssDefs();
+            for (int i = 0; i < tdecls.length; i++) {
+                if ((modNode != module) || earlierLine(tdecls[i].stn.getLocation(), loc)) {
+                    result.add(tdecls[i].getName().toString()) ;
+                } 
+            }
+        };
+    }
+    
+
+    
+    /**
+     * If node is an element of modules, it does nothing.  If it is then it
+     * adds to <code>modules</code> all modules imported (directly or indirectly)
+     * by module <code>node</code> by an EXTENDS statement or by an unnamed
+     * INSTANCE occurring before Location <code>loc</code>.  It adds to 
+     * <code>symbols</code> all symbols sym that occur in a
+     * 
+     *    sym == INSTANCE ...
+     *    
+     * statement that occurs in module <code>node</code> before location 
+     * <code>loc</code> or anywhere in one of the modules added to <code>modules</code>.
+     * 
+     * This procedure is called by declaredSymbolsInScope and by itself, the
+     * latter calls always with loc a Location beyond the end of any module.
+     * 
+     * @param modules
+     * @param symbols
+     * @param loc
+     * @param node
+     */
+    public static void addImportedModulesSet(HashSet<ModuleNode> modules, StringSet symbols, 
+                                   Location loc, ModuleNode node) {
+        if (modules.contains(node)) {
+            return ;
+        }
+        modules.add(node) ;
+        
+        HashSet<ModuleNode> extendees = node.getExtendedModuleSet();
+        Iterator<ModuleNode> iter = extendees.iterator() ;
+        while (iter.hasNext()) {
+            ModuleNode modNode = iter.next() ;
+            addImportedModulesSet(modules, symbols, infiniteLoc, modNode) ;
+        }
+        
+        InstanceNode[] instances = node.getInstances() ;
+        for (int i = 0; i < instances.length; i++) {
+            // We add the instance only if its comes before loc.
+            // For a LOCAL instance, we add the module to `module' or its name to `symbols'
+            // only if this is the initial call, which is the case iff  loc # infiniteLoc
+            if ( earlierLine(instances[i].stn.getLocation(), loc)
+                 && (   ! instances[i].getLocal()
+                     || earlierLine(loc, infiniteLoc))){
+               if (instances[i].getName() != null) {
+                   symbols.add(instances[i].getName().toString()) ;
+               } else {
+                  // Testing on 9 Oct 2014 revealed that the following is unnecessary because
+                  // the defined operators imported into a module M without renaming by an INSTANCE
+                  // are contained in M.getOpDefs().  Imported named theorems are similarly
+                  // contained in M.getThmOrAssDefs().
+                  
+                  addImportedModulesSet(modules, symbols, infiniteLoc, instances[i].getModule()) ; 
                }
             }
         }     
@@ -1897,6 +2258,13 @@ public class ResourceHelper
      * @return true if the given spec name is a valid identifier
      */
 	public static boolean isValidSpecName(final String aSpecName) {
+		String identifier = getIdentifier(aSpecName);
+		// verify given spec name and parsed spec name are the same
+		return aSpecName.equals(identifier);
+	}
+	
+
+	public static String getIdentifier(String aSpecName) {
 		// in memory stream of spec name
 		final ByteArrayInputStream stream = new ByteArrayInputStream(
 				aSpecName.getBytes());
@@ -1908,18 +2276,13 @@ public class ResourceHelper
 		tlaParser.token_source.SwitchTo(TLAplusParserConstants.SPEC);
 
 		// try to consume an identifier
-		String identifier;
 		try {
-			identifier = tlaParser.Identifier().getImage();
+			return tlaParser.Identifier().getImage();
 		} catch (ParseException e) {
 			// not expected to happen but handle anyway
-			return false;
+			return "";
 		}
-		
-		// verify given spec name and parsed spec name are the same
-		return aSpecName.equals(identifier);
 	}
-	
 
 	public static boolean isValidLibraryLocation(final String location) {
 		if (location != null && location.length() > 0) {
@@ -1947,6 +2310,7 @@ public class ResourceHelper
 				final ObjectInputStream inputStream = new ObjectInputStream(
 						new FileInputStream(file.getLocation().toOSString()));
 				final Object object = inputStream.readObject();
+				inputStream.close();
 				if (object instanceof TLAtoPCalMapping) {
 					return (TLAtoPCalMapping) object;
 				}
@@ -1995,4 +2359,39 @@ public class ResourceHelper
 		}
 		return true;
 	}
+
+	/**
+	 * Projects can have linked files (resources more generally). Linked resources a listed in the
+	 * project's .project metadata.
+	 * 
+	 * @param project The project of which the given file (name) is assumed to be a linked file
+	 * @param name The name of the link
+	 * @return true iff the given name is indeed a *linked* file of the given project.
+	 */
+	public static boolean isLinkedFile(IProject project, String name) throws CoreException {
+        final IFile file = project.getFile(new Path(new Path(name).lastSegment()));
+        return file.isLinked(IResource.CHECK_ANCESTORS);
+	}
+
+	/**
+	 * This does *not* work when the path are both pointing to an identical file
+	 * but either is a symlink. This shouldn`t matter much for the Toolbox
+	 * though (hope so).
+	 * <p>
+	 * A scenario where the previous claim is plain wrong is when running
+	 * SpecTest on Mac OS X. Both /var/ and /tmp are symlinks pointing into
+	 * /private/... and SpecTest thus fails because isProjectParent returns
+	 * false. project.getLocation returns the resolved path /private/var/...
+	 * whereas aFileName is /var/...
+	 * @see SpecTest and AddModuleHandlerTest
+	 * 
+	 * @param aFileName
+	 * @param project
+	 * @return true iff aPath points to the parent folder of the given project
+	 */
+	public static boolean isProjectParent(final IPath aFileName, final IProject project) {
+		return aFileName.equals(project.getLocation().removeLastSegments(1));
+	}
+
+	public static final String PARENT_ONE_PROJECT_LOC = "PARENT-1-PROJECT_LOC/";
 }

@@ -2,10 +2,12 @@
 package org.lamport.tla.distributed.consumer;
 
 import java.net.URI;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import tlc2.IDistributedFPSet;
 
-public class DistributedFPSetConsumer extends FaultyConsumer {
+public class DistributedFPSetConsumer {
 	
 	/**
 	 * TLCServer address to connect to.
@@ -27,19 +29,13 @@ public class DistributedFPSetConsumer extends FaultyConsumer {
 	 */
 	public void setIDistributedFPSet(final IDistributedFPSet anIDistributedFPSet) {
 		// Fork out to a separate thread to not block DeclarativeService forever
+		final ExecutorService executor = Executors.newSingleThreadExecutor();
 		executor.execute(new Runnable() {
 			/* (non-Javadoc)
 			 * @see java.lang.Runnable#run()
 			 */
 			public void run() {
 				anIDistributedFPSet.connect(uri);
-				
-				// Decide if this instance simulates a faulty one and - if so -
-				// wait for a random time before disconnecting the FPSet.
-				if (shouldKill()) {
-					sleep();
-					anIDistributedFPSet.disconnect();
-				}
 			}
 		});
 	}

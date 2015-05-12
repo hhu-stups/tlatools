@@ -1,9 +1,20 @@
 package org.lamport.tla.toolbox.tool.tlc.ui.editor.page;
 
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Enumeration;
 import java.util.List;
 import java.util.Vector;
+
+import javax.mail.internet.AddressException;
 
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.IWorkspaceRunnable;
@@ -16,6 +27,9 @@ import org.eclipse.jface.text.Document;
 import org.eclipse.jface.text.source.SourceViewer;
 import org.eclipse.jface.viewers.TableViewer;
 import org.eclipse.swt.SWT;
+import org.eclipse.swt.custom.StackLayout;
+import org.eclipse.swt.events.KeyAdapter;
+import org.eclipse.swt.events.KeyEvent;
 import org.eclipse.swt.events.ModifyEvent;
 import org.eclipse.swt.events.ModifyListener;
 import org.eclipse.swt.events.PaintEvent;
@@ -28,10 +42,10 @@ import org.eclipse.swt.layout.FillLayout;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Button;
+import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
-import org.eclipse.swt.widgets.FileDialog;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Scale;
 import org.eclipse.swt.widgets.Spinner;
@@ -44,7 +58,6 @@ import org.eclipse.ui.forms.editor.FormEditor;
 import org.eclipse.ui.forms.events.HyperlinkAdapter;
 import org.eclipse.ui.forms.events.HyperlinkEvent;
 import org.eclipse.ui.forms.widgets.ExpandableComposite;
-import org.eclipse.ui.forms.widgets.FormText;
 import org.eclipse.ui.forms.widgets.FormToolkit;
 import org.eclipse.ui.forms.widgets.Hyperlink;
 import org.eclipse.ui.forms.widgets.ImageHyperlink;
@@ -100,6 +113,11 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
     private SourceViewer specSource;
     private Button checkDeadlockButton;
     private Spinner workers;
+    /**
+	 * Spinner to set the number of (expected) distributed FPSets.
+	 */
+    private Spinner distributedFPSetCountSpinner;
+    private Combo networkInterfaceCombo;
     private Scale maxHeapSize;
     private TableViewer invariantsTable;
     private TableViewer propertiesTable;
@@ -147,17 +165,16 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
     /*
      * Checkbox and input box for distributed model checking
      * 
-     * button: activate distribution
+     * combo: choose distribution and cloud to run on
      * text: additional vm arguments (e.g. -Djava.rmi...) 
      * text: pre-flight script
      */
-    private Button distributedButton;
-    private Text distributedScriptText;
-    private Button browseDistributedScriptButton;
+    private Combo distributedCombo;
+    private Text resultMailAddressText;
     
     // The widgets to display the checkpoint size and
     // the delete button.
-    private FormText chkpointSizeLabel;
+    private Label chkpointSizeLabel;
     private Text checkpointSizeText;
     private Button chkptDeleteButton;
     
@@ -165,6 +182,7 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 	 * Used to interpolate y-values for memory scale
 	 */
 	private final Interpolator linearInterpolator;
+	private Composite distributedOptions;
 	
     /**
      * constructs the main model page 
@@ -285,12 +303,38 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
         /*
          * Distributed mode
          */
-        final boolean distributed = getConfig().getAttribute(LAUNCH_DISTRIBUTED, LAUNCH_DISTRIBUTED_DEFAULT);
-        this.distributedButton.setSelection(distributed);
-       
-        final String distributedScript = getConfig().getAttribute(LAUNCH_DISTRIBUTED_SCRIPT, LAUNCH_DISTRIBUTED_SCRIPT_DEFAULT);
-        this.distributedScriptText.setText(distributedScript);
+        String cloud = "off";
+        try {
+			cloud = getConfig().getAttribute(LAUNCH_DISTRIBUTED, LAUNCH_DISTRIBUTED_DEFAULT);
+        } catch (CoreException e) {
+        	// LAUNCH_DISTRIBUTED might still be stored in a legacy format. The user is
+        	// opening an old model.
+        	boolean distributed = getConfig().getAttribute(LAUNCH_DISTRIBUTED, false);
+        	if (distributed) {
+        		cloud = "ad hoc";
+        	}
+        }
+        final String[] items = distributedCombo.getItems();
+        for (int i = 0; i < items.length; i++) {
+			final String string = items[i];
+			if (cloud.equals(string)) {
+				distributedCombo.select(i);
+				break;
+			}
+		}
+
+		if (cloud.equalsIgnoreCase("aws-ec2")) {
+			MainModelPage.this.putOnTopOfStack("aws-ec2", false, false);
+			String email = getConfig().getAttribute(LAUNCH_DISTRIBUTED_RESULT_MAIL_ADDRESS, LAUNCH_DISTRIBUTED_RESULT_MAIL_ADDRESS_DEFAULT);
+			resultMailAddressText.setText(email);
+		} else if(cloud.equalsIgnoreCase("ad hoc")) {
+			MainModelPage.this.putOnTopOfStack("ad hoc", false, true);
+		} else {
+			MainModelPage.this.putOnTopOfStack("off", true, true);
+		}
         
+        // distribute FPSet count
+        distributedFPSetCountSpinner.setSelection(getConfig().getAttribute(LAUNCH_DISTRIBUTED_FPSET_COUNT, LAUNCH_DISTRIBUTED_FPSET_COUNT_DEFAULT));
     }
 
     public void validatePage(boolean switchToErrorPage)
@@ -498,6 +542,9 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
                     this.getId(), IMessageProvider.WARNING, UIHelper.getWidget(dm
 					        .getAttributeControl(LAUNCH_NUMBER_OF_WORKERS)));
             expandSection(SEC_HOW_TO_RUN);
+        } else {
+        	modelEditor.removeErrorMessage("strangeNumber1", UIHelper.getWidget(dm
+			        .getAttributeControl(LAUNCH_NUMBER_OF_WORKERS)));
         }
         
 		// legacy value?
@@ -656,25 +703,6 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
                 expandSection(dm.getSectionForAttribute(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_NEXT));
             }
         }
-        
-        // enablement for distributed input text boxes depends on button
-        boolean distributed = this.distributedButton.getSelection();
-        this.distributedScriptText.setEnabled(distributed);
-        
-        // verify existence of pre-flight script
-//       	if(distributed) {
-//       		final String scriptPath = distributedScriptText.getText();
-//       		if(scriptPath != null && !"".equals(scriptPath)) {
-//       			final File f = new File(scriptPath);
-//       			if(!f.exists()) {
-//                    modelEditor.addErrorMessage("noScript", "No script file found", this.getId(),
-//                            IMessageProvider.ERROR, UIHelper.getWidget(dm.getAttributeControl(LAUNCH_DISTRIBUTED_SCRIPT)));
-//                    setComplete(false);
-//                    expandSection(SEC_HOW_TO_RUN);
-//       			}
-//       		}
-//       	}
-//       	
 
         mm.setAutoUpdate(true);
 
@@ -788,11 +816,18 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
         getConfig().setAttribute(MODEL_CORRECTNESS_CHECK_DEADLOCK, checkDeadlock);
 
         // run in distributed mode
-        boolean distributed = this.distributedButton.getSelection();
+        String distributed = this.distributedCombo.getItem(this.distributedCombo.getSelectionIndex());
         getConfig().setAttribute(LAUNCH_DISTRIBUTED, distributed);
         
-        final String distributedScript = this.distributedScriptText.getText();
-        getConfig().setAttribute(LAUNCH_DISTRIBUTED_SCRIPT, distributedScript);
+        String resultMailAddress = this.resultMailAddressText.getText();
+        getConfig().setAttribute(LAUNCH_DISTRIBUTED_RESULT_MAIL_ADDRESS, resultMailAddress);
+        
+        // distributed FPSet count
+        getConfig().setAttribute(LAUNCH_DISTRIBUTED_FPSET_COUNT, distributedFPSetCountSpinner.getSelection());
+        
+        // network interface
+        final String iface = this.networkInterfaceCombo.getItem(this.networkInterfaceCombo.getSelectionIndex());
+        getConfig().setAttribute(LAUNCH_DISTRIBUTED_INTERFACE, iface);
 
         // invariants
         List<String> serializedList = FormHelper.getSerializedInput(invariantsTable);
@@ -1070,8 +1105,7 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
         elementLine.setLayout(new FillLayout(SWT.HORIZONTAL));
 
         // the text
-        FormText labelText = toolkit.createFormText(elementLine, false);
-        labelText.setText("Advanced parts of the model:", false, false);
+        toolkit.createLabel(elementLine, "Advanced parts of the model:");
 
         // the hyperlinks
         Hyperlink hyper;
@@ -1122,8 +1156,7 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
          */
         
         // label workers
-        FormText workersLabel = toolkit.createFormText(howToRunArea, true);
-        workersLabel.setText("Number of worker threads:", false, false);
+        toolkit.createLabel(howToRunArea, "Number of worker threads:");
 
         // field workers
         workers = new Spinner(howToRunArea, SWT.NONE);
@@ -1146,8 +1179,7 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
          */
         
         // max heap size label
-        FormText maxHeapLabel = toolkit.createFormText(howToRunArea, true);
-        maxHeapLabel.setText("Fraction of physical memory allocated to TLC:", false, false);
+        toolkit.createLabel(howToRunArea, "Fraction of physical memory allocated to TLC:");
 
 		// Create a composite inside the right "cell" of the "how to run"
 		// section grid layout to fit the scale and the maxHeapSizeFraction
@@ -1175,10 +1207,10 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
         dm.bindAttribute(LAUNCH_MAX_HEAP_SIZE, maxHeapSize, howToRunPart);
         
         // label next to the scale showing the current fraction selected
-        final FormText maxHeapSizeFraction = toolkit.createFormText(maxHeapScale, false);
 		final TLCRuntime instance = TLCRuntime.getInstance();
 		long memory = instance.getAbsolutePhysicalSystemMemory(defaultMaxHeapSize / 100d);
-        maxHeapSizeFraction.setText(defaultMaxHeapSize + "%" + " (" + memory + " mb)", false, false);
+		final Label maxHeapSizeFraction = toolkit.createLabel(maxHeapScale,
+				defaultMaxHeapSize + "%" + " (" + memory + " mb)");
         maxHeapSize.addPaintListener(new PaintListener() {
 			/* (non-Javadoc)
 			 * @see org.eclipse.swt.events.PaintListener#paintControl(org.eclipse.swt.events.PaintEvent)
@@ -1188,14 +1220,13 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 				int value = ((Scale) e.getSource()).getSelection();
 				final TLCRuntime instance = TLCRuntime.getInstance();
 				long memory = instance.getAbsolutePhysicalSystemMemory(value / 100d);
-				maxHeapSizeFraction.setText(value + "%" + " (" + memory + " mb)" , false, false);
+				maxHeapSizeFraction.setText(value + "%" + " (" + memory + " mb)");
 			}
 		});
 
         
 //        // label workers
-//        FormText workersLabel = toolkit.createFormText(howToRunArea, true);
-//        workersLabel.setText("Number of worker threads:", false, false);
+//        toolkit.createLabel(howToRunArea, "Number of worker threads:");
 //
 //        // field workers
 //        workers = toolkit.createText(howToRunArea, "1");
@@ -1223,10 +1254,9 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
         checkpointButton = toolkit.createButton(ckptComp, "Recover from checkpoint", SWT.CHECK);
         checkpointButton.addSelectionListener(howToRunListener);
         checkpointButton.addFocusListener(focusListener);
-        Button ckptHelpButton = HelpButton.helpButton(ckptComp, "model/overview-page.html#checkpoint") ;
+        HelpButton.helpButton(ckptComp, "model/overview-page.html#checkpoint") ;
 
-        FormText chkpointIdLabel = toolkit.createFormText(howToRunArea, true);
-        chkpointIdLabel.setText("Checkpoint ID:", false, false);
+        toolkit.createLabel(howToRunArea, "Checkpoint ID:");
 
         checkpointIdText = toolkit.createText(howToRunArea, "");
         checkpointIdText.setEditable(false);
@@ -1236,8 +1266,7 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
         checkpointIdText.setLayoutData(gd);
         dm.bindAttribute(LAUNCH_RECOVER, checkpointButton, howToRunPart);
 
-        chkpointSizeLabel = toolkit.createFormText(howToRunArea, true);
-        chkpointSizeLabel.setText("Checkpoint size (kbytes):", false, false);
+        chkpointSizeLabel = toolkit.createLabel(howToRunArea, "Checkpoint size (kbytes):");
         checkpointSizeText = toolkit.createText(howToRunArea, "");
         gd = new GridData();
         gd.horizontalIndent = 10;
@@ -1287,73 +1316,226 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
          * Distribution.  Help button added by LL on 17 Jan 2013
          */
         Composite distComp = new Composite(howToRunArea, SWT.NONE) ;
-        layout = new GridLayout(2, true);
+        layout = new GridLayout(3, true);
         distComp.setLayout(layout);
         
         gd = new GridData();
         gd.horizontalSpan = 2;
         distComp.setLayoutData(gd);
         
-        distributedButton = toolkit.createButton(distComp, "Run in distributed mode", SWT.CHECK);
-        Button distHelpButton = HelpButton.helpButton(distComp, "model/distributed-mode.html") ;
-        distributedButton.addSelectionListener(howToRunListener);
-		distributedButton.setToolTipText("If checked, state computation will be performed by (remote) workers.");
-		distributedButton.addFocusListener(focusListener);
+        toolkit.createLabel(distComp, "Run in distributed mode");
+        distributedCombo = new Combo(distComp, SWT.READ_ONLY);
+        distributedCombo.setItems(new String[] {"off", "ad hoc", "aws-ec2"});
+        distributedCombo.select(0);
+        HelpButton.helpButton(distComp, "model/distributed-mode.html") ;
+        distributedCombo.addSelectionListener(howToRunListener);
+		distributedCombo.setToolTipText("If other than 'off' selected, state computation will be performed by (remote) workers.");
+		distributedCombo.addFocusListener(focusListener);
 		
-        /*
-         * pre-flight script executed prior to distributed TLC (e.g. to start remote workers)
-         */
-        FormText distributedLabel = toolkit.createFormText(howToRunArea, true);
-        distributedLabel.setText("Pre Flight Script:", false, false);
+		distributedOptions = new Composite(howToRunArea, SWT.NONE);
+		final StackLayout stackLayout = new StackLayout();
+		distributedOptions.setLayout(stackLayout);
+		
+        gd = new GridData();
+        gd.horizontalSpan = 2;
+        distributedOptions.setLayoutData(gd);
+        
+		// No distribution has no options
+		final Composite offComposite = new Composite(distributedOptions, SWT.NONE);
+		distributedOptions.setData("off", offComposite);
+		stackLayout.topControl = offComposite;
+		
+		/*
+		 * Composite wrapping number of distributed FPSet and iface when ad hoc selected
+		 */
+        final Composite builtInOptions = new Composite(distributedOptions, SWT.NONE);
+        layout = new GridLayout(2, true);
+        builtInOptions.setLayout(layout);
+        gd = new GridData();
+        gd.horizontalSpan = 2;
+        builtInOptions.setLayoutData(gd);
+		distributedOptions.setData("ad hoc", builtInOptions);
+		
+		/*
+		 * Server interface/hostname (This text shows the hostname detected by the Toolbox under which TLCServer will listen
+		 */
+		// composite
+        final Composite networkInterface = new Composite(builtInOptions, SWT.NONE) ;
+        layout = new GridLayout(2, true);
+        networkInterface.setLayout(layout);
+        gd = new GridData();
+        gd.horizontalSpan = 2;
+        networkInterface.setLayoutData(gd);
+		
+        // label
+        toolkit.createLabel(networkInterface, "Master's network address:");
 
-        // non-editable text input
-        distributedScriptText = toolkit.createText(howToRunArea, "");
-        distributedScriptText.setEditable(true);
-        distributedScriptText
-        .setToolTipText("Optionally pass a pre-flight script to be run prior to the TLC process (e.g. to start remote workers)");
-        distributedScriptText.addModifyListener(howToRunListener);
+        // field
+        networkInterfaceCombo = new Combo(networkInterface, SWT.NONE);
+        networkInterfaceCombo.addSelectionListener(howToRunListener);
+        networkInterfaceCombo.addFocusListener(focusListener);
         gd = new GridData();
         gd.horizontalIndent = 10;
-        gd.widthHint = 300;
-        distributedScriptText.setLayoutData(gd);
-        dm.bindAttribute(LAUNCH_DISTRIBUTED_SCRIPT, distributedScriptText, howToRunPart);
-
-        // skip the left cell in the grid layout
-        final Text invisibleText = toolkit.createText(howToRunArea, "");
-        invisibleText.setEditable(false);
-        invisibleText.setVisible(false);
-        invisibleText.setEnabled(false);
+        networkInterfaceCombo.setLayoutData(gd);
         
-        // browse button right-aligned
-        browseDistributedScriptButton = toolkit.createButton(howToRunArea, "Browse", SWT.PUSH);
-        gd = new GridData(GridData.HORIZONTAL_ALIGN_END);
-		browseDistributedScriptButton.setLayoutData(gd);
-        browseDistributedScriptButton.addSelectionListener(new SelectionListener() {
-			/* (non-Javadoc)
-			 * @see org.eclipse.swt.events.SelectionListener#widgetSelected(org.eclipse.swt.events.SelectionEvent)
-			 */
-			public void widgetSelected(SelectionEvent e) {
-				// prompt user for a file
-				final FileDialog fd = new FileDialog(getSite().getShell(), SWT.OPEN);
-				final String oldPath = distributedScriptText.getText();
-				fd.setFileName(oldPath);
-				
-				// use user-provided path as input for script input text box
-				final String path = fd.open();
-				distributedScriptText.setText((path != null) ? path : oldPath);
+        networkInterfaceCombo.setToolTipText("IP address to which workers (and distributed fingerprint sets) will connect.");
+        networkInterfaceCombo.addSelectionListener(howToRunListener);
+        networkInterfaceCombo.addFocusListener(focusListener);
+        try {
+        	final Comparator<InetAddress> comparator = new Comparator<InetAddress>() {
+        		// Try to "guess" the best possible match.
+        		public int compare(InetAddress o1, InetAddress o2) {
+        			// IPv4 < IPv6 (v6 is less common even today)
+        			if (o1 instanceof Inet4Address && o2 instanceof Inet6Address) {
+        				return -1;
+        			} else if (o1 instanceof Inet6Address && o2 instanceof Inet4Address) {
+        				return 1;
+        			}
+        			
+        			// anything < LoopBack (loopback only useful if master and worker are on the same host)
+        			if (!o1.isLoopbackAddress() && o2.isLoopbackAddress()) {
+        				return -1;
+        			} else if (o1.isLoopbackAddress() && !o2.isLoopbackAddress()) {
+        				return 1;
+        			}
+        			
+        			// Public Addresses < Non-private RFC 1918 (I guess this is questionable)
+        			if (!o1.isSiteLocalAddress() && o2.isSiteLocalAddress()) {
+        				return -1;
+        			} else if (o1.isSiteLocalAddress() && !o2.isSiteLocalAddress()) {
+        				return 1;
+        			}
+        			
+        			return 0;
+        		}
+        	};
+
+        	// Get all IP addresses of the host and sort them according to the Comparator.
+        	final List<InetAddress> addresses = new ArrayList<InetAddress>(); 
+			final Enumeration<NetworkInterface> nets = NetworkInterface.getNetworkInterfaces();
+			while (nets.hasMoreElements()) {
+				final NetworkInterface iface = (NetworkInterface) nets.nextElement();
+				final Enumeration<InetAddress> inetAddresses = iface.getInetAddresses();
+				while (inetAddresses.hasMoreElements()) {
+					final InetAddress addr = inetAddresses.nextElement();
+					// Cannot connect to a multicast address
+					if (addr.isMulticastAddress()) {
+						continue;
+					}
+					addresses.add(addr);
+				}
 			}
-			/* (non-Javadoc)
-			 * @see org.eclipse.swt.events.SelectionListener#widgetDefaultSelected(org.eclipse.swt.events.SelectionEvent)
-			 */
-			public void widgetDefaultSelected(SelectionEvent e) {
-				//nop
+			
+			// Add the sorted IP addresses and select the first one which -
+			// according to the comparator - is assumed to be the best match.
+			Collections.sort(addresses, comparator);
+			for (InetAddress inetAddress : addresses) {
+				networkInterfaceCombo.add(inetAddress.getHostAddress());
+			}
+			networkInterfaceCombo.select(0);
+		} catch (SocketException e1) {
+			e1.printStackTrace();
+		}
+
+        dm.bindAttribute(LAUNCH_DISTRIBUTED_INTERFACE, networkInterfaceCombo, howToRunPart);
+
+		/*
+		 * Distributed FPSet count
+		 */
+
+		// composite
+        final Composite distributedFPSetCount = new Composite(builtInOptions, SWT.NONE);
+        layout = new GridLayout(2, false);
+        distributedFPSetCount.setLayout(layout);
+        gd = new GridData();
+        gd.horizontalSpan = 2;
+        distributedFPSetCount.setLayoutData(gd);
+		
+        // label
+        toolkit.createLabel(distributedFPSetCount, "Number of distributed fingerprint sets (zero for single built-in set):");
+
+        // field
+        distributedFPSetCountSpinner = new Spinner(distributedFPSetCount, SWT.NONE);
+        distributedFPSetCountSpinner.addSelectionListener(howToRunListener);
+        distributedFPSetCountSpinner.addFocusListener(focusListener);
+        gd = new GridData();
+        gd.grabExcessHorizontalSpace = true;
+        gd.horizontalIndent = 10;
+        gd.widthHint = 40;
+        distributedFPSetCountSpinner.setLayoutData(gd);
+        
+        distributedFPSetCountSpinner.setMinimum(0);
+        distributedFPSetCountSpinner.setMaximum(64); // Haven't really tested this many distributed fpsets
+        distributedFPSetCountSpinner.setPageIncrement(1);
+        distributedFPSetCountSpinner.setToolTipText("Determines how many distributed FPSets will be expected by the TLCServer process");
+        distributedFPSetCountSpinner.setSelection(IConfigurationDefaults.LAUNCH_DISTRIBUTED_FPSET_COUNT_DEFAULT);
+
+        dm.bindAttribute(LAUNCH_DISTRIBUTED_FPSET_COUNT, distributedFPSetCountSpinner, howToRunPart);
+		
+		/*
+		 * Result mail address input
+		 */
+        final Composite resultAddress = new Composite(distributedOptions, SWT.NONE) ;
+        layout = new GridLayout(2, true);
+        resultAddress.setLayout(layout);
+        
+        gd = new GridData();
+        gd.horizontalSpan = 2;
+        resultAddress.setLayoutData(gd);
+        
+		toolkit.createLabel(resultAddress, "Result mailto address:");
+		resultMailAddressText = toolkit.createText(resultAddress, "", SWT.BORDER);
+		resultMailAddressText.setMessage("my-name@my-domain.org"); // hint
+		resultMailAddressText.addKeyListener(new KeyAdapter() {
+			
+			private final ModelEditor modelEditor = (ModelEditor) getEditor();
+
+			@Override
+			public void keyPressed(KeyEvent e) {
+				super.keyPressed(e);
+			}
+
+			@Override
+			public void keyReleased(KeyEvent e) {
+				super.keyReleased(e);
+				try {
+					String text = resultMailAddressText.getText();
+					new javax.mail.internet.InternetAddress(text, true);
+				} catch (AddressException exp) {
+					modelEditor.addErrorMessage("emailAddressInvalid",
+							"Invalid email address", getId(),
+							IMessageProvider.ERROR, resultMailAddressText);
+					return;
+				}
+				modelEditor.removeErrorMessage("emailAddressInvalid", resultMailAddressText);
 			}
 		});
+        gd = new GridData();
+        gd.grabExcessHorizontalSpace = true;
+        gd.horizontalIndent = 10;
+        gd.widthHint = 200;
+        resultMailAddressText.setLayoutData(gd);
+        resultMailAddressText.addModifyListener(howToRunListener);
+        dm.bindAttribute(LAUNCH_DISTRIBUTED_RESULT_MAIL_ADDRESS, resultMailAddressText, howToRunPart);
+		
+		distributedOptions.setData("aws-ec2", resultAddress);
 
-        // deactivate because domain logic is not done yet
-        distributedLabel.setVisible(false);
-        distributedScriptText.setVisible(false);
-        browseDistributedScriptButton.setVisible(false);
+        distributedCombo.addSelectionListener(new SelectionListener() {
+			public void widgetSelected(SelectionEvent e) {
+				int selectionIndex = distributedCombo.getSelectionIndex();
+				String item = distributedCombo.getItem(selectionIndex);
+				if (item.equalsIgnoreCase("aws-ec2")) {
+					MainModelPage.this.putOnTopOfStack("aws-ec2", false, false);
+				} else if(item.equalsIgnoreCase("ad hoc")) {
+					MainModelPage.this.putOnTopOfStack("ad hoc", false, true);
+				} else {
+					MainModelPage.this.putOnTopOfStack("off", true, true);
+				}
+			}
+
+			public void widgetDefaultSelected(SelectionEvent e) {
+			}
+        });
 
         /*
          * run link
@@ -1395,6 +1577,16 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
         dirtyPartListeners.add(whatIsTheSpecListener);
         dirtyPartListeners.add(whatToCheckListener);
         dirtyPartListeners.add(howToRunListener);
+    }
+
+    private void putOnTopOfStack(final String id, boolean enableWorker, boolean enableMaxHeap) {
+		workers.setEnabled(enableWorker);
+		maxHeapSize.setEnabled(enableMaxHeap);
+		
+		final Composite composite = (Composite) distributedOptions.getData(id);
+		final StackLayout stackLayout = (StackLayout) distributedOptions.getLayout();
+		stackLayout.topControl = composite;
+		distributedOptions.layout();
     }
 
     /**

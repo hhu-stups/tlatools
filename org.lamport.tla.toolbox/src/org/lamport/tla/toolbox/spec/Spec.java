@@ -6,11 +6,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.Vector;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -27,12 +24,10 @@ import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Platform;
 import org.eclipse.core.runtime.SubProgressMonitor;
-import org.eclipse.jface.preference.IPreferenceStore;
 import org.eclipse.jface.text.ITextSelection;
 import org.lamport.tla.toolbox.Activator;
 import org.lamport.tla.toolbox.spec.parser.IParseConstants;
 import org.lamport.tla.toolbox.tool.SpecLifecycleParticipant;
-import org.lamport.tla.toolbox.ui.preference.LibraryPathComposite;
 import org.lamport.tla.toolbox.util.AdapterFactory;
 import org.lamport.tla.toolbox.util.ResourceHelper;
 import org.lamport.tla.toolbox.util.compare.ResourceNameComparator;
@@ -103,8 +98,13 @@ public class Spec implements IAdaptable {
      */
     private int currentSelection = 0;
 
+    /**
+	 * The overall size of the spec directory with all subdirectories and files.
+	 */
+	private long size = 0;
+
     /* project handle */
-    private IProject project;
+    private final IProject project;
 
     /* root module handle */
     private IFile rootFile;
@@ -124,6 +124,7 @@ public class Spec implements IAdaptable {
      *            project handle
      */
     public Spec(IProject project) {
+    	Assert.isNotNull(project);
         this.project = project;
         initProjectProperties();
     }
@@ -173,9 +174,8 @@ public class Spec implements IAdaptable {
         this.specObj = null;
         this.status = IParseConstants.UNPARSED;
 
-        // Initialize the spec's ToolboxDirSize property.
-        // Added by LL and Dan on 21 May 2010
-        ResourceHelper.setToolboxDirSize(this.project);
+        // Read the current size of the spec. 
+        size = ResourceHelper.getSizeOfJavaFileResource(this.project);
 
         // Assert.isNotNull(this.rootFile);
         // This assertion was preventing the Toolbox from starting, so LL
@@ -432,47 +432,22 @@ public class Spec implements IAdaptable {
         return currentSelection;
     }
 
+	public long getSize() {
+		return size;
+	}
+	
+	/**
+	 * @param size A spec size in bytes
+	 */
+	public void setSize(long size) {
+		this.size = size;
+	}
+
     /**
-     * Modified by LL on 28 Nov 2012 to make locationList a Vector instead of a
-     * HashSet. With a HashSet, it returned the library paths in an order that
-     * was mostly independent of the order of the paths specified by the user.
-     * 
-     * @return an Array of {@link String}s each set by the user as additional
-     *         TLA+ library lookup path locations. Returns and empty array if
-     *         none set, not <code>null</code>.
+     * @see ResourceHelper#getTLALibraryPath(IProject)
      */
     public String[] getTLALibraryPath() {
-        final IPreferenceStore store = PreferenceStoreHelper
-                .getProjectPreferenceStore(getProject());
-
-        // Read project specific and general preferences (project take
-        // precedence over general ones)
-        String prefStr = store
-                .getString(LibraryPathComposite.LIBRARY_PATH_LOCATION_PREFIX);
-        if ("".equals(prefStr)) {
-            prefStr = PreferenceStoreHelper.getInstancePreferenceStore()
-                    .getString(
-                            LibraryPathComposite.LIBRARY_PATH_LOCATION_PREFIX);
-        }
-
-        if (!"".equals(prefStr)) {
-            // final Set<String> locationList = new HashSet<String>();
-            final Vector<String> locationList = new Vector<String>();
-            // convert UI string into an array
-            final String[] locations = prefStr
-                    .split(LibraryPathComposite.ESCAPE_REGEX
-                            + LibraryPathComposite.LOCATION_DELIM);
-            for (String location : locations) {
-                final String[] split = location
-                        .split(LibraryPathComposite.ESCAPE_REGEX
-                                + LibraryPathComposite.STATE_DELIM);
-                if (Boolean.parseBoolean(split[1])) {
-                    locationList.add(split[0]);
-                }
-            }
-            return locationList.toArray(new String[locationList.size()]);
-        }
-        return new String[0];
+    	return ResourceHelper.getTLALibraryPath(project);
     }
 
     /**
