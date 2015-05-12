@@ -22,3 +22,5 @@ workspace/
 states/
 .DS_Store
 screenshots/
+tlatools/.gradle
+tlatools/build
