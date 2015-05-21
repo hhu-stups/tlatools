@@ -12,9 +12,7 @@ repositories {
 }
 
 dependencies {
-	testCompile (group: 'junit', name: 'junit', version: '4.+')
-    testCompile (group: 'org.easymock', name: 'easymock', version: '3.1')
-    compile (group: 'javax.mail', name: 'mail', version :'1.4.1')
+	testCompile files ('lib/easymock-3.3.1.jar', 'lib/jpf.jar', 'lib/junit-4.8.2.jar', 'lib/javax.mail.jar')
 }
 
 sourceSets {
