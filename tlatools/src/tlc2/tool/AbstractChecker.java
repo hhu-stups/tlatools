@@ -1,13 +1,16 @@
 package tlc2.tool;
 
 import java.io.IOException;
+import java.util.Hashtable;
 import java.util.concurrent.atomic.AtomicLong;
 
 import tla2sany.modanalyzer.SpecObj;
 import tla2sany.semantic.SemanticNode;
+import tla2sany.st.Location;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.output.OutputCollector;
 import tlc2.tool.liveness.ILiveCheck;
 import tlc2.tool.liveness.LiveCheck;
 import tlc2.tool.liveness.Liveness;
@@ -151,6 +154,7 @@ public abstract class AbstractChecker implements Cancelable
             MP.printMessage(EC.TLC_COVERAGE_START);
             // First collecting all counts from all workers:
             ObjLongTable counts = this.tool.getPrimedLocs();
+            Hashtable<String, Location> locationTable = new Hashtable<String, Location>();
             for (int i = 0; i < workers.length; i++)
             {
                 ObjLongTable counts1 = workers[i].getCounts();
@@ -160,6 +164,7 @@ public abstract class AbstractChecker implements Cancelable
                 {
                     String loc = ((SemanticNode) key).getLocation().toString();
                     counts.add(loc, counts1.get(key));
+                    locationTable.put(loc, ((SemanticNode) key).getLocation());
                 }
             }
             // Reporting:
@@ -168,6 +173,7 @@ public abstract class AbstractChecker implements Cancelable
             {
                 long val = counts.get(skeys[i]);
                 MP.printMessage(EC.TLC_COVERAGE_VALUE, new String[] { skeys[i].toString(), String.valueOf(val) });
+                OutputCollector.lineCount.put(locationTable.get(skeys[i]), val);
             }
             MP.printMessage(EC.TLC_COVERAGE_END);
         }
