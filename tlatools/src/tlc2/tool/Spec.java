@@ -42,7 +42,6 @@ import tla2sany.semantic.ThmOrAssumpDefNode;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
-import tlc2.output.OutputCollector;
 import tlc2.util.Context;
 import tlc2.util.List;
 import tlc2.util.ObjLongTable;
@@ -916,7 +915,6 @@ public class Spec implements ValueConstants, ToolGlobals, Serializable
                 Assert.fail(EC.TLC_CONFIG_ID_REQUIRES_NO_ARG, new String[] { "next state action", name });
             }
             this.nextPred = new Action(def.getBody(), Context.Empty);
-            OutputCollector.nextPred = this.nextPred;
         }
     }
 

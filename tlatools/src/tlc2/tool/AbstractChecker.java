@@ -154,6 +154,7 @@ public abstract class AbstractChecker implements Cancelable
             MP.printMessage(EC.TLC_COVERAGE_START);
             // First collecting all counts from all workers:
             ObjLongTable counts = this.tool.getPrimedLocs();
+            OutputCollector.moduleNode = this.tool.rootModule;
             Hashtable<String, Location> locationTable = new Hashtable<String, Location>();
             for (int i = 0; i < workers.length; i++)
             {
@@ -169,11 +170,15 @@ public abstract class AbstractChecker implements Cancelable
             }
             // Reporting:
             Object[] skeys = counts.sortStringKeys();
+            OutputCollector.lineCount = new Hashtable<Location, Long>();
             for (int i = 0; i < skeys.length; i++)
             {
                 long val = counts.get(skeys[i]);
                 MP.printMessage(EC.TLC_COVERAGE_VALUE, new String[] { skeys[i].toString(), String.valueOf(val) });
-                OutputCollector.lineCount.put(locationTable.get(skeys[i]), val);
+                Location location = locationTable.get(skeys[i]);
+                if(location != null){
+                    OutputCollector.lineCount.put(location, val);
+                }
             }
             MP.printMessage(EC.TLC_COVERAGE_END);
         }

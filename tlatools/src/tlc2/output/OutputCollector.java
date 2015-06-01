@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.Hashtable;
 
+import tla2sany.semantic.ModuleNode;
 import tla2sany.semantic.SemanticNode;
 import tla2sany.st.Location;
 import tlc2.module.TLC;
@@ -14,12 +15,11 @@ import tlc2.util.ObjLongTable;
 
 public class OutputCollector {
 
-	
 	private static TLCState initialState = null;
 	private static ArrayList<TLCStateInfo> trace = null;
 	private static ArrayList<Message> allMessages = new ArrayList<Message>();
-	public static Action nextPred = null;
-	public static Hashtable<Location, Long> lineCount= new Hashtable<Location, Long>();
+	public static ModuleNode moduleNode = null;
+	public static Hashtable<Location, Long> lineCount = null;
 	
 	public static ArrayList<TLCStateInfo> getTrace() {
 		return trace;
