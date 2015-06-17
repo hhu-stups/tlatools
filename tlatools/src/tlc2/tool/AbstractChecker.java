@@ -174,7 +174,7 @@ public abstract class AbstractChecker implements Cancelable
             for (int i = 0; i < skeys.length; i++)
             {
                 long val = counts.get(skeys[i]);
-                MP.printMessage(EC.TLC_COVERAGE_VALUE, new String[] { skeys[i].toString(), String.valueOf(val) });
+                //MP.printMessage(EC.TLC_COVERAGE_VALUE, new String[] { skeys[i].toString(), String.valueOf(val) });
                 Location location = locationTable.get(skeys[i]);
                 if(location != null){
                     OutputCollector.lineCount.put(location, val);
