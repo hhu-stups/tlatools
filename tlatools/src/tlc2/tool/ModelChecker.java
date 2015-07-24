@@ -273,6 +273,7 @@ public class ModelChecker extends AbstractChecker
             {
                 if ((!isAxiom[i]) && !this.tool.isValid(assumps[i]))
                 {
+                	OutputCollector.setViolatedAssumption(assumps[i]);
                     MP.printError(EC.TLC_ASSUMPTION_FALSE, assumps[i].toString());
                     return false;
                 }
