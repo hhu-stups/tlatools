@@ -267,25 +267,30 @@ public class ModelChecker extends AbstractChecker
     {
         ExprNode[] assumps = this.tool.getAssumptions();
         boolean[] isAxiom = this.tool.getAssumptionIsAxiom();
+        boolean assumptionsAreTRUE = true;
         for (int i = 0; i < assumps.length; i++)
         {
             try
             {
                 if ((!isAxiom[i]) && !this.tool.isValid(assumps[i]))
                 {
-                	OutputCollector.setViolatedAssumption(assumps[i]);
+                	OutputCollector.addViolatedAssumption(assumps[i]);
                     MP.printError(EC.TLC_ASSUMPTION_FALSE, assumps[i].toString());
-                    return false;
+                    //return false;
+                    assumptionsAreTRUE = false;
                 }
             } catch (Exception e)
             {
                 // Assert.printStack(e);
+            	OutputCollector.addViolatedAssumption(assumps[i]);
                 MP.printError(EC.TLC_ASSUMPTION_EVALUATION_ERROR,
                         new String[] { assumps[i].toString(), e.getMessage() });
-                return false;
+                //return false;
+                assumptionsAreTRUE = false;
             }
         }
-        return true;
+        //return true;
+        return assumptionsAreTRUE;
     }
 
     /**

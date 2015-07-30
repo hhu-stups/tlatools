@@ -5,7 +5,6 @@ apply plugin: 'maven'
 project.version = '1.0.0-SNAPSHOT'
 project.group = 'de.tla'
 
-sourceCompatibility = 1.5
 
 repositories {
 	mavenCentral()

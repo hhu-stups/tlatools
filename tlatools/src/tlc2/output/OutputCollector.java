@@ -17,7 +17,7 @@ public class OutputCollector {
 	private static ArrayList<Message> allMessages = new ArrayList<Message>();
 	private static Hashtable<Location, Long> lineCount = new Hashtable<Location, Long>();
 	private static ModuleNode moduleNode = null;
-	private static ExprNode violatedAssumption = null;
+	private static ArrayList<ExprNode> violatedAssumptions = new ArrayList<>();
 
 	public static ArrayList<TLCStateInfo> getTrace() {
 		return trace;
@@ -46,12 +46,12 @@ public class OutputCollector {
 		return allMessages;
 	}
 
-	public static void setViolatedAssumption(ExprNode assumption) {
-		violatedAssumption = assumption;
+	public static void addViolatedAssumption(ExprNode assumption) {
+			violatedAssumptions.add(assumption);
 	}
 
-	public static ExprNode getViolatedAssumption() {
-		return violatedAssumption;
+	public static ArrayList<ExprNode> getViolatedAssumptions() {
+		return violatedAssumptions;
 	}
 
 	public synchronized static void saveMessage(int messageClass,
