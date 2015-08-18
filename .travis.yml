@@ -1,0 +1,5 @@
+language: java
+
+install: /bin/true
+
+script: gradle -b tlatools/build.gradle tlatools
