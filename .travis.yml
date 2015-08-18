@@ -1,5 +1,15 @@
 language: java
-
+jdk:
+- oraclejdk7
+before_install:
+- openssl aes-256-cbc -pass pass:$ENCRYPTION_PASSWORD -in secring.gpg.enc -out secring.gpg
+  -d
+- openssl aes-256-cbc -pass pass:$ENCRYPTION_PASSWORD -in pubring.gpg.enc -out pubring.gpg
+  -d
+- openssl aes-256-cbc -pass pass:$ENCRYPTION_PASSWORD -in gradle.properties.enc -out
+  tlatools/gradle.properties -d
 install: /bin/true
-
-script: gradle -b tlatools/build.gradle tlatools
+script: gradle -btlatools/build.gradle uploadArchives
+env:
+  global:
+    secure: IrwH0PGjlWp22J55HCJrmqUlupD4X+BIYNnpn88lAtWDeqS+iSl43p42woBxHdrXDwPdYBWpLOYLtDxf7EEw9gnvp5y9FUyYBqscjqTKVpsXAH7f/aCgMb9S4p9kYC/jME7cKwiY2/fx+yAFOQqEOqpBWUrIQssH6ApfOv/3P5khb0O0BMYh0ek8oVrX9+NHpQTnolPIG8chBS53iHM27InQp9RB7sW+l69UaP1+jkzSbyvcfI+p64mgpHZQxnL6DeBi5d82cHDog38GbMeOgBJPNeMplSKo9ofTqOLChqfCAT4s0XskASkQNz7OOC8zWNeEoXpQF8ff9QqKrHyS284LZrrdf8pcJoQgFm/DSilUFCMRCNDWmAuCBR7In8zeBNVbMKR4v2/tcu5yR/PT5disS9Flxl2V3t0/s4MN88qN4w5ZU5I+KxxkR3NJoDWtfCz1b9vQXEXdWiUi5dwpKZ3skxQxY/w+/h2qyYfFfqFHTKW0z98ZBygGySlwsEPVzmva3o6L0bT+6dlT0/5GQi3tbgc6n+M+eafpP/EPybghLqUVF46h3hibK6Bykj3+9djBb0OZTOwyBuQO69TmXWUU/tlMwlBmz2ib3pgz2MBnWNdui6UVwVI2y2fhHNkCc/tRg356dxbI4p6oP0ogncdwlOlGsEUX773GjYQmHhU=

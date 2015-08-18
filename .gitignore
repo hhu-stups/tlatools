@@ -25,3 +25,4 @@ screenshots/
 tlatools/.gradle
 tlatools/build
 ajcore.*.txt
+local.*

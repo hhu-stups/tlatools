@@ -3,8 +3,8 @@ apply plugin: 'eclipse'
 apply plugin: 'maven'
 
 project.version = '1.0.0-SNAPSHOT'
-project.group = 'de.tla'
-
+project.group = 'de.hhu.stups'
+project.archivesBaseName = 'tlatools'
 
 repositories {
 	mavenCentral()
@@ -23,17 +23,81 @@ sourceSets {
 		resources{
 			srcDir 'src'
 		}
-		
-		
+
+
     }
 }
 
-task tlatools(dependsOn: build) << {
-	copy {
-		from('build/libs/')
-		into('build/tlatools')
-		include('tlatools-'+project.version+'.jar')
-		rename('tlatools-(.+)', 'tlatools.jar')
-	}
+if (project.hasProperty('ossrhUsername') && project.hasProperty('ossrhPassword')) {
+
+println "Configuring deployment for ${ project.name }"
+
+apply plugin: 'signing'
+
+task javadocJar(type: Jar) {
+	 classifier = 'javadoc'
+	 from javadoc
 }
 
+task sourcesJar(type: Jar) {
+	 classifier = 'sources'
+	 from sourceSets.main.allSource
+}
+
+artifacts {
+	 archives javadocJar, sourcesJar
+}
+
+
+signing {
+	 sign configurations.archives
+}
+
+uploadArchives {
+ repositories {
+	 mavenDeployer {
+		 beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
+
+		 repository(url: "https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
+			 authentication(userName: ossrhUsername, password: ossrhPassword)
+		 }
+
+		 snapshotRepository(url: "https://oss.sonatype.org/content/repositories/snapshots/") {
+			 authentication(userName: ossrhUsername, password: ossrhPassword)
+		 }
+
+		 pom.project {
+			 name "TLA+ Tools"
+			 packaging 'jar'
+			 // optionally artifactId can be defined here
+			 description 'Modified version of the TLA+ tools for usage in ProB'
+			 url 'https://github.com/hhu-stups/tlatools'
+
+			 licenses {
+				 license {
+					 name 'MIT License'
+					 url 'http://research.microsoft.com/en-us/um/people/lamport/tla/license.html'
+				 }
+			 }
+
+			 scm {
+				 connection 'scm:git:git://github.com/hhu-stups/tlatools.git'
+				 developerConnection 'scm:git:git@github.com:hhu-stups/tlatools.git'
+				 url 'https://github.com/hhu-stups/tlatools'
+			 }
+
+
+			 developers {
+				 developer {
+					 id 'bendisposto'
+					 name 'Jens Bendisposto'
+					 email 'jens@bendisposto.de'
+				 }
+			 }
+		 }
+	 }
+ }
+}
+}
+
+}
