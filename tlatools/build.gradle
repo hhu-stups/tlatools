@@ -28,6 +28,15 @@ sourceSets {
     }
 }
 
+task tlatools(dependsOn: build) << {
+	copy {
+		from('build/libs/')
+		into('build/tlatools')
+		include('tlatools-'+project.version+'.jar')
+		rename('tlatools-(.+)', 'tlatools.jar')
+	}
+}
+
 if (project.hasProperty('ossrhUsername') && project.hasProperty('ossrhPassword')) {
 
 println "Configuring deployment for ${ project.name }"
