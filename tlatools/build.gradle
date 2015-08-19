@@ -6,6 +6,9 @@ project.version = '1.0.1-SNAPSHOT'
 project.group = 'de.hhu.stups'
 project.archivesBaseName = 'tlatools'
 
+project.sourceCompatibility = '1.7'
+project.targetCompatibility = '1.7'
+
 repositories {
 	mavenCentral()
 }
