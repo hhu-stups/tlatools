@@ -2,7 +2,7 @@ apply plugin: 'java'
 apply plugin: 'eclipse'
 apply plugin: 'maven'
 
-project.version = '1.0.1'
+project.version = '1.0.2-SNAPSHOT'
 project.group = 'de.hhu.stups'
 project.archivesBaseName = 'tlatools'
 
