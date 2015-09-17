@@ -358,7 +358,7 @@ public class MP
             break;
 
         case EC.TLC_INVARIANT_EVALUATION_FAILED:
-            b.append("Evaluating invariant %1% failed.");
+            b.append("Evaluating invariant %1% failed:\n%2%");
             break;
 
         case EC.TLC_ACTION_PROPERTY_VIOLATED_BEHAVIOR:
