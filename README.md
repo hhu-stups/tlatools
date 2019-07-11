@@ -1,4 +1,4 @@
-#TLA+ Tools
+# TLA+ Tools
 
 [![Build Status](https://travis-ci.org/hhu-stups/tlatools.svg)](https://travis-ci.org/hhu-stups/tlatools)
 
