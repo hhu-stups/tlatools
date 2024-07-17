@@ -28,12 +28,7 @@ package tlc2.tool;
 import java.io.File;
 import java.util.List;
 
-import tla2sany.semantic.ExprNode;
-import tla2sany.semantic.ExprOrOpArgNode;
-import tla2sany.semantic.OpApplNode;
-import tla2sany.semantic.OpDefNode;
-import tla2sany.semantic.SemanticNode;
-import tla2sany.semantic.SymbolNode;
+import tla2sany.semantic.*;
 import tlc2.tool.coverage.CostModel;
 import tlc2.tool.impl.ModelConfig;
 import tlc2.util.Context;
@@ -177,6 +172,8 @@ public interface ITool extends TraceApp {
 	 *         full or relative path information.
 	 */
 	String getRootFile();
+
+	ModuleNode getRootModule();
 
 	String getConfigFile();
 

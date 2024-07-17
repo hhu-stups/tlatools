@@ -14,20 +14,7 @@ import java.util.List;
 import java.util.Set;
 
 import tla2sany.modanalyzer.ParseUnit;
-import tla2sany.semantic.APSubstInNode;
-import tla2sany.semantic.ExprNode;
-import tla2sany.semantic.ExprOrOpArgNode;
-import tla2sany.semantic.FormalParamNode;
-import tla2sany.semantic.FrontEnd;
-import tla2sany.semantic.LabelNode;
-import tla2sany.semantic.LetInNode;
-import tla2sany.semantic.OpApplNode;
-import tla2sany.semantic.OpDefNode;
-import tla2sany.semantic.SemanticNode;
-import tla2sany.semantic.Subst;
-import tla2sany.semantic.SubstInNode;
-import tla2sany.semantic.SymbolNode;
-import tla2sany.semantic.ThmOrAssumpDefNode;
+import tla2sany.semantic.*;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.tool.Action;
@@ -117,6 +104,10 @@ abstract class Spec
     
     public SpecProcessor getSpecProcessor() {
     	return specProcessor;
+    }
+
+    public ModuleNode getRootModule() {
+        return specProcessor.getRootModule();
     }
 
     /* Return the variable if expr is a primed state variable. Otherwise, null. */

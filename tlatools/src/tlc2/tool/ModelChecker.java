@@ -18,6 +18,7 @@ import tla2sany.semantic.OpDeclNode;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.output.OutputCollector;
 import tlc2.tool.fp.FPSet;
 import tlc2.tool.fp.FPSetConfiguration;
 import tlc2.tool.fp.FPSetFactory;
@@ -1131,6 +1132,7 @@ public class ModelChecker extends AbstractChecker
 						}
 					}
 				}
+				OutputCollector.setInitialState(curState);
 				// Check properties of the state:
 				if (!seen || forceChecks) {
 					for (int j = 0; j < tool.getInvariants().length; j++) {

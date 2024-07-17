@@ -36,6 +36,7 @@ import tla2sany.st.Location;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.output.OutputCollector;
 
 public class OpApplNodeWrapper extends CostModelNode implements Comparable<OpApplNodeWrapper>, CostModel {
 
@@ -293,8 +294,12 @@ public class OpApplNodeWrapper extends CostModelNode implements Comparable<OpApp
 	}
 
 	protected void printSelf(final int level, final long count) {
-		MP.printMessage(EC.TLC_COVERAGE_VALUE, new String[] {
-				indentBegin(level, TLCGlobals.coverageIndent, getLocation().toString()), String.valueOf(count) });
+		/*MP.printMessage(EC.TLC_COVERAGE_VALUE, new String[] {
+				indentBegin(level, TLCGlobals.coverageIndent, getLocation().toString()), String.valueOf(count) });*/
+		Location location = getLocation();
+		if(location != null){
+			OutputCollector.putLineCount(location, count);
+		}
 	}
 	
 	protected void printSelf(final int level, final long count, final long cost) {

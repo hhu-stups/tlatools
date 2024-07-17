@@ -28,7 +28,11 @@ public interface ExploreNode {
     * semNodesTable for itself and every descendant in the semantic tree   *
     * by executing                                                         *
     *                                                                      *
+<<<<<<< Updated upstream
     *     Integer uid = Integer.valueOf(myUID);                                *
+=======
+    *     Integer uid = myUID;                                *
+>>>>>>> Stashed changes
     *     if (semNodesTable.get(uid) != null) return;                      *
     *     semNodesTable.put(uid, this);                                    *
     *                                                                      *

@@ -251,6 +251,8 @@ public class MP
         {
             parameters = EMPTY_PARAMS;
         }
+	    OutputCollector.saveMessage(messageClass, messageCode, parameters);
+
         DebugPrinter.print("entering MP.getMessage() with error code " + messageCode + " and " + parameters.length //$NON-NLS-1$
                 + " parameters"); //$NON-NLS-1$
 
@@ -288,7 +290,7 @@ public class MP
                 break;
             }
         }
-        
+
         b.append(getMessage0(messageClass, messageCode, parameters));
 
         if (TLCGlobals.tool)
@@ -721,11 +723,11 @@ public class MP
         case EC.TLC_EXCEPT_APPLIED_TO_UNKNOWN_FIELD:
             b.append("The EXCEPT was applied to non-existing fields of the value at\n%1%");
             break;
-            
+
         case EC.TLC_SYMMETRY_SET_TOO_SMALL:
         	b.append("The set%1% %2% %3% been defined to be a symmetry set but contain%4% less than two elements.");
         	break;
-            
+
         case EC.TLC_SPECIFICATION_FEATURES_TEMPORAL_QUANTIFIER:
         	b.append("TLC does not support temporal existential, nor universal, quantification over state variables.");
         	break;
@@ -960,8 +962,8 @@ public class MP
 		/*
 		 * The two startup banners below are parsed by the Toolbox in
 		 * org.lamport.tla.toolbox.tool.tlc.output.data.TLCModelLaunchDataProvider.
-		 * startupMessagePattern.  Remember to update when the banners below 
-		 * get changed 
+		 * startupMessagePattern.  Remember to update when the banners below
+		 * get changed
 		 * (see org.lamport.tla.toolbox.tool.tlc.output.data.TLCModelLaunchDataProviderTest)!!!
 		 */
         case EC.TLC_MODE_MC:
@@ -1504,7 +1506,7 @@ public class MP
         }
         if (throwable instanceof Assert.TLCRuntimeException) {
 			// MK 07/25/2017: Disguise TLCRuntimeException with its parent class
-			// RuntimeException to not change the externally visible TLC output 
+			// RuntimeException to not change the externally visible TLC output
         	// when an exception gets reports.
         	msg = msg + "\nThe exception was a " +  RuntimeException.class.getName() + "\n";
         } else {
@@ -1604,8 +1606,8 @@ public class MP
     	}
     	return tre.errorCode;
     }
-    
-    /** 
+
+    /**
      * Prints the state
      * @param parameters
      */
@@ -1616,7 +1618,7 @@ public class MP
         ToolIO.out.println(getMessage(STATE, code, parameters));
         DebugPrinter.print("leaving printState(String[])"); //$NON-NLS-1$
     }
-    
+
     public static void printState(int code, String[] parameters, TLCStateInfo stateInfo, int num)
     {
 		recorder.record(code, (TLCStateInfo) stateInfo, num);
@@ -1703,11 +1705,11 @@ public class MP
         }
         DebugPrinter.print("leaving printWarning(int, String[])"); //$NON-NLS-1$
     }
-    
+
     public static void printStats(final IBucketStatistics inDegree, final IBucketStatistics outDegree) {
     	// Out degree
         ToolIO.out.println(outDegree);
-        
+
         // In Degree
 		ToolIO.out.println(inDegree);
 

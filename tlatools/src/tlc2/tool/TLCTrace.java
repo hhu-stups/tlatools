@@ -10,11 +10,14 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.output.OutputCollector;
 import tlc2.output.StatePrinter;
 import tlc2.util.BufferedRandomAccessFile;
 import tlc2.util.LongVec;
@@ -90,7 +93,7 @@ public class TLCTrace {
 
 	/**
 	 * Returns the level (monotonically increasing)!
-	 * 
+	 *
 	 * LL: The user has no real need of an accurate tree height. Breadth-first
 	 * search is good because it provides the shortest possible error trace.
 	 * Usually approximately breadth-first search is just as good because it
@@ -105,7 +108,7 @@ public class TLCTrace {
 	 * what it means.) I'd like to make the reported value be monotonic because,
 	 * if it's not, users may worry and people already have enough things in
 	 * life to worry about.
-	 * 
+	 *
 	 * @see TLCTrace#getLevel()
 	 */
 	public synchronized int getLevelForReporting() throws IOException {
@@ -131,7 +134,7 @@ public class TLCTrace {
 		// on the highest level of the state tree, which is only true if
 		// states are explored with strict breadth-first search.
 		//
-		// The (execution) trace is a forest of one to n trees, where each path 
+		// The (execution) trace is a forest of one to n trees, where each path
 		// in the forest represents the order in which states have been generated
 		// by the workers.
 		// The algorithm, with which the diameter is approximated from the trace,
@@ -143,21 +146,21 @@ public class TLCTrace {
 		// successors have been appended (yet, assuming there are any).
 		//
 		// Once the workers have terminated, TLC traverses the trace from a leaf record
-		// back to a root record. This height is what is reported as the diameter. 
+		// back to a root record. This height is what is reported as the diameter.
 		// The selection, from what leaf record TLC starts the traversal, is based on
 		// the last record inserted into the trace file. If this record is one with a
 		// low height (because its corresponding worker waited most of the time), the
-		// diameter will thus be underreport. If, on the other hand, the last record 
+		// diameter will thus be underreport. If, on the other hand, the last record
 		// happens to be one with a large height, the diameter will be overreported.
-		// 
-		// The selection of the leaf record is the source of the algorithm's 
+		//
+		// The selection of the leaf record is the source of the algorithm's
 		// non-determinism. With a single worker, the last record in the trace is
-		// always the same which always corresponds to the longest behavior found so 
+		// always the same which always corresponds to the longest behavior found so
 		// far (strict BFS). This invariant does not hold with multiple workers.
         //
 		// Obviously, with multiple workers the approximation of the diameter will
 		// improve with the size of the state graph. Assuming a well-shaped state graph,
-		// we can argue that the approximation is good enough and document, that its 
+		// we can argue that the approximation is good enough and document, that its
 		// value can be anything from 1 to the longest behavior found so far.
 		return getLevel(this.lastPtr);
 	}
@@ -256,7 +259,7 @@ public class TLCTrace {
 			}
 			this.raf.seek(curLoc);
 		}
-		
+
 		return getTrace(fps);
 	}
 
@@ -282,7 +285,7 @@ public class TLCTrace {
 		// This is only necessary though, if TLCGlobals.enumFraction was < 1 during
 		// the generation of inits.
 		RandomEnumerableValues.reset();
-		
+
 		// The vector of fingerprints is now being followed forward from the
 		// initial state (which is the last state in the long vector), to the
 		// end state.
@@ -326,7 +329,7 @@ public class TLCTrace {
 	/**
 	 * Write out a sequence of states that reaches s2 from an initial state,
 	 * according to the spec. s2 is a next state of s1.
-	 * 
+	 *
 	 * @param s1
 	 *            may not be null.
 	 * @param s2
@@ -337,9 +340,11 @@ public class TLCTrace {
 	public void printTrace(final TLCState s1, final TLCState s2) throws IOException, WorkerException {
 		printTrace(s1, s2, getTrace(s1.uid, false));
 	}
-	
+
 	protected synchronized final void printTrace(final TLCState s1, final TLCState s2, final TLCStateInfo[] prefix)
 			throws IOException, WorkerException {
+		ArrayList<TLCStateInfo> trace = new ArrayList<TLCStateInfo>(); // collecting the whole error trace
+
 		if (s1.isInitial()) {
 			// Do not recreate the potentially expensive error trace - e.g. when the set of
 			// initial states is huge such as during inductive invariant checking. Instead
@@ -360,6 +365,7 @@ public class TLCTrace {
 		while (idx < prefix.length) {
 			StatePrinter.printState(prefix[idx], lastState, idx + 1);
 			lastState = prefix[idx].state;
+			trace.add(prefix[idx]);
 			idx++;
 		}
 
@@ -390,6 +396,7 @@ public class TLCTrace {
 		}
 		StatePrinter.printState(sinfo, lastState, ++idx);
 		lastState = sinfo.state;
+		trace.add(sinfo);
 
 		// Print s2:
 		// The predecessor to s2 is s1.
@@ -402,7 +409,9 @@ public class TLCTrace {
 				System.exit(1);
 			}
 			StatePrinter.printState(sinfo, null, ++idx);
+			trace.add(sinfo);
 		}
+		OutputCollector.setTrace(trace);
 	}
 
 	/**
@@ -477,7 +486,7 @@ public class TLCTrace {
 		void close() throws IOException;
 		void reset(long i) throws IOException;
 	}
-	
+
 	public class TLCTraceEnumerator implements Enumerator {
 		long len;
 		BufferedRandomAccessFile enumRaf;
@@ -508,7 +517,7 @@ public class TLCTrace {
 			this.enumRaf.readLongNat(); /* drop */
 			return this.enumRaf.readLong();
 		}
-		
+
 		public final void close() throws IOException {
 			this.enumRaf.close();
 		}

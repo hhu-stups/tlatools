@@ -1298,7 +1298,7 @@ public class OpApplNode extends ExprNode implements ExploreNode {
     if (operator.getName().toString().equals("$Case") && operands.length > 1 /* OTHER cannot occur alone in a CASE */) {
       // OTHER should be last operand
        ExprOrOpArgNode lastOperand = operands[operands.length-1];
-       if (lastOperand instanceof tla2sany.semantic.OpApplNode) {
+       if (lastOperand instanceof OpApplNode) {
           OpApplNode other = (OpApplNode)lastOperand;
           // indeed the OTHER case
           if (other.getOperator().getName().toString().equals("$Pair") && other.getArgs()[0] == null) {

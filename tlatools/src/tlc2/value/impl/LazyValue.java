@@ -47,7 +47,7 @@ public class LazyValue extends Value {
 
   public SemanticNode expr;
   public Context con;
-  private Value val;
+  public Value val;
 
   public LazyValue(SemanticNode expr, Context con, final CostModel cm) {
 	  this(expr, con, true, coverage ? cm.get(expr) : cm);

@@ -281,21 +281,21 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 	/* (non-Javadoc)
 	 * @see java.lang.Object#finalize()
 	 */
-	public final void finalize() {
+	/*public final void finalize() {
 		/* Close any backing disk files in use by this object. */
-		for (int i = 0; i < this.braf.length; i++) {
+	/*	for (int i = 0; i < this.braf.length; i++) {
 			try {
 				this.braf[i].close();
 			} catch (IOException e) { /* SKIP */
-			}
+	/*		}
 		}
 		for (int i = 0; i < this.brafPool.length; i++) {
 			try {
 				this.brafPool[i].close();
 			} catch (IOException e) { /* SKIP */
-			}
+	/*		}
 		}
-	}
+	}*/
 
 	/* (non-Javadoc)
 	 * @see tlc2.tool.fp.FPSet#addThread()

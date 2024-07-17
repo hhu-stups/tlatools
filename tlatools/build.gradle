@@ -1,21 +1,22 @@
 apply plugin: 'java'
 apply plugin: 'eclipse'
-apply plugin: 'maven'
+apply plugin: 'maven-publish'
 
 project.version = '1.0.3-SNAPSHOT'
 project.group = 'de.hhu.stups'
 project.archivesBaseName = 'tlatools'
 
-project.sourceCompatibility = '1.7'
-project.targetCompatibility = '1.7'
+project.sourceCompatibility = '1.8'
+project.targetCompatibility = '1.8'
 
 repositories {
 	mavenCentral()
+	mavenLocal()
 }
 
 dependencies {
-	compile files ('lib/javax.mail.jar')
-	testCompile files ('lib/easymock-3.3.1.jar', 'lib/jpf.jar', 'lib/junit-4.8.2.jar', 'lib/javax.mail.jar')
+	implementation files('lib/javax.mail/javax.activation_1.1.0.v201211130549.jar', 'lib/javax.mail/mailapi-1.6.3.jar', 'lib/smtp-1.6.3.jar')
+	implementation files('lib/easymock-3.3.1.jar', 'lib/jpf/jpf-shell.jar', 'lib/junit-4.12.jar', 'lib/javax.mail/javax.activation_1.1.0.v201211130549.jar', 'lib/javax.mail/mailapi-1.6.3.jar', 'lib/smtp-1.6.3.jar')
 }
 
 sourceSets {
@@ -31,16 +32,16 @@ sourceSets {
     }
 }
 
-task tlatools(dependsOn: build) << {
-	copy {
-		from('build/libs/')
-		into('build/tlatools')
-		include('tlatools-'+project.version+'.jar')
-		rename('tlatools-(.+)', 'tlatools.jar')
-	}
+tasks.register('tlatools', Copy) {
+	dependsOn tasks.named('build')
+
+	from('build/libs/')
+	into('build/tlatools')
+	include('tlatools-' + project.version + '.jar')
+	rename('tlatools-(.+)', 'tlatools.jar')
 }
 
-if (project.hasProperty('ossrhUsername') && project.hasProperty('ossrhPassword')) {
+/*if (project.hasProperty('ossrhUsername') && project.hasProperty('ossrhPassword')) {
 
 println "Configuring deployment for ${ project.name }"
 
@@ -110,4 +111,4 @@ uploadArchives {
 	 }
  }
 }
-}
+}*/

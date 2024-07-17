@@ -50,6 +50,7 @@ import tla2sany.semantic.SubstInNode;
 import tla2sany.semantic.SymbolNode;
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.output.OutputCollector;
 import tlc2.tool.Action;
 import tlc2.tool.ITool;
 import tlc2.tool.coverage.ActionWrapper.Relation;
@@ -179,6 +180,7 @@ public class CostModelCreator extends ExplorerVisitor {
 		SemanticNode sn;
 		while ((sn = keys.nextElement()) != null) {
 			this.nodes.add(new OpApplNodeWrapper((OpApplNode) sn, null));
+			//locationTable.put(loc, ((SemanticNode) key).getLocation());
 		}
 	}
 
@@ -406,6 +408,8 @@ public class CostModelCreator extends ExplorerVisitor {
 	
 	public static void report(final ITool tool, final long startTime) {
         MP.printMessage(EC.TLC_COVERAGE_START);
+		OutputCollector.setModuleNode(tool.getRootModule());
+		//Hashtable<String, Location> locationTable = new Hashtable<String, Location>();
     	final Vect<Action> init = tool.getInitStateSpec();
     	for (int i = 0; i < init.size(); i++) {
     		final Action initAction = init.elementAt(i);

@@ -6,10 +6,12 @@ import java.math.MathContext;
 import java.util.Timer;
 import java.util.TimerTask;
 
+import tla2sany.semantic.ModuleNode;
 import tlc2.TLC;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.output.OutputCollector;
 import tlc2.tool.coverage.CostModelCreator;
 import tlc2.tool.impl.FastTool;
 import tlc2.tool.liveness.AddAndCheckLiveCheck;
@@ -77,6 +79,8 @@ public abstract class AbstractChecker
 		
 		this.checkDeadlock = deadlock;
         this.checkLiveness = !this.tool.livenessIsTrue();
+
+		OutputCollector.setModuleNode(this.tool.getRootModule());
 
         // moved to file utilities
         this.metadir = metadir;

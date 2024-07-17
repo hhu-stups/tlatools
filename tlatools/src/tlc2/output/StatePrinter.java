@@ -78,6 +78,7 @@ public class StatePrinter
         	MP.printState(EC.TLC_STATE_PRINT2, new String[] { String.valueOf(num), currentStateInfo.info.toString(),
         			stateString, "-1" }, currentStateInfo, num);
         }
+	    OutputCollector.addStateToTrace(currentStateInfo);
     }
 
     /**

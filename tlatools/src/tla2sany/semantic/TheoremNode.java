@@ -428,7 +428,7 @@ public class TheoremNode extends LevelNode {
     return "TheoremNodeRef";
   }
 
-  protected Element getLevelElement(Document doc, tla2sany.xml.SymbolContext context) {
+  protected Element getLevelElement(Document doc, SymbolContext context) {
     Element e = doc.createElement("TheoremNode");
 
     //the theorem name is now contained in the definition, if it exists
