@@ -55,7 +55,7 @@ import util.FileUtil;
 // TODO-MAK Flush asynchronously and with multiple threads (Exploit SSD support
 // for multiple concurrent readers)
 @SuppressWarnings("serial")
-public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
+public abstract class DiskFPSet extends FPSet implements FPSetStatistic, AutoCloseable {
 
 	protected final static Logger LOGGER = Logger.getLogger(DiskFPSet.class.getName());
 
@@ -277,25 +277,6 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 	}
 
 	public abstract long sizeof();
-
-	/* (non-Javadoc)
-	 * @see java.lang.Object#finalize()
-	 */
-	/*public final void finalize() {
-		/* Close any backing disk files in use by this object. */
-	/*	for (int i = 0; i < this.braf.length; i++) {
-			try {
-				this.braf[i].close();
-			} catch (IOException e) { /* SKIP */
-	/*		}
-		}
-		for (int i = 0; i < this.brafPool.length; i++) {
-			try {
-				this.brafPool[i].close();
-			} catch (IOException e) { /* SKIP */
-	/*		}
-		}
-	}*/
 
 	/* (non-Javadoc)
 	 * @see tlc2.tool.fp.FPSet#addThread()
