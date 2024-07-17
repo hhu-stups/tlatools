@@ -2,11 +2,18 @@
 
 package util;
 
+import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
-import java.lang.management.OperatingSystemMXBean;
 import java.lang.management.RuntimeMXBean;
-import java.lang.reflect.Method;
 import java.util.List;
+
+import javax.management.AttributeNotFoundException;
+import javax.management.InstanceNotFoundException;
+import javax.management.MBeanException;
+import javax.management.MBeanServer;
+import javax.management.MalformedObjectNameException;
+import javax.management.ObjectName;
+import javax.management.ReflectionException;
 
 import tlc2.tool.fp.FPSet;
 
@@ -30,33 +37,23 @@ public class TLCRuntime {
 		}
 		return runtime;
 	}
+	
 
 	private long physicalSystemMemory = -1;
-
+	
 	/**
 	 * @return the total amount of memory, measured in bytes.
 	 */
 	private long getPhysicalSystemMemory() {
-
-		// try to read the total physical memory via a MXBean. Unfortunately,
-		// these methods are not meant as public API, which requires us to pull
-		// a visibility reflection hack.
-		// This hack is expected to work on Linux, Windows (up to 7) and Max OSX
-		final OperatingSystemMXBean operatingSystemMXBean = ManagementFactory
-				.getOperatingSystemMXBean();
-		for (Method method : operatingSystemMXBean.getClass()
-				.getDeclaredMethods()) {
-			if (method.getName().equals("getTotalPhysicalMemorySize")) {
-				method.setAccessible(true);
-				try {
-					return (Long) method.invoke(operatingSystemMXBean);
-				} catch (Exception e) {
-					break;
-				}
-			}
+		final MBeanServer mBeanServer = ManagementFactory.getPlatformMBeanServer();
+		try {
+			return (Long) mBeanServer.getAttribute(new ObjectName("java.lang", "type", "OperatingSystem"),
+					"TotalPhysicalMemorySize");
+		} catch (InstanceNotFoundException | AttributeNotFoundException | MalformedObjectNameException
+				| ReflectionException | MBeanException | ClassCastException e) {
+			// as a safeguard default to the total memory available to this JVM
+			return Runtime.getRuntime().totalMemory();
 		}
-		// as a safeguard default to the total memory available to this JVM
-		return Runtime.getRuntime().totalMemory();
 	}
 
 	/**
@@ -147,5 +144,55 @@ public class TLCRuntime {
 			fpMemSize = maxMemory - (maxMemory >> 2);
 		}
 		return (long) fpMemSize;
+	}
+
+	public enum ARCH {
+		x86,
+		x86_64;
+	}
+	
+	public ARCH getArchitecture() {
+		if (System.getProperty("sun.arch.data.model") != null
+				&& System.getProperty("sun.arch.data.model").equals("64")) {
+			return ARCH.x86_64;
+		}
+		if (System.getProperty("com.ibm.vm.bitmode") != null 
+				&& System.getProperty("com.ibm.vm.bitmode").equals("64")) {
+			return ARCH.x86_64;
+		}
+		if (System.getProperty("java.vm.version") != null 
+				&& System.getProperty("java.vm.version").contains("_64")) {
+			return ARCH.x86_64;
+		}
+		return ARCH.x86;
+	}
+
+	// See java.lang.ProcessHandle.current().pid() or -1 when Java version -lt 9.
+	@SuppressWarnings({ "unchecked", "rawtypes" })
+	public long pid() {
+		// Once Java9 is minimum BREE, change to:
+        // return java.lang.ProcessHandle.current().pid();
+		try {
+			// Get class.
+			final ClassLoader classLoader = getClass().getClassLoader();
+	        final Class aClass = classLoader.loadClass("java.lang.ProcessHandle");
+	        // Execute static current()
+	        final Object o = aClass.getMethod("current").invoke(null, (Object[]) null);
+	        // Execute instance method pid()
+	        return (long) aClass.getMethod("pid").invoke(o, (Object[]) null);
+	    } catch (Exception e) {
+			return -1;
+		}
+	}
+
+	public boolean isThroughputOptimizedGC() {
+		final List<GarbageCollectorMXBean> gcs = ManagementFactory.getGarbageCollectorMXBeans();
+		for (GarbageCollectorMXBean gc : gcs) {
+			// This might not be a reliable way to identify the currently active GC.
+			if ("PS Scavenge".equals(gc.getName())) {
+				return true;
+			}
+		}
+		return false;
 	}
 }

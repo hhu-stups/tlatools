@@ -25,50 +25,105 @@
  ******************************************************************************/
 package tlc2.tool.liveness;
 
-import java.io.File;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
+
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import junit.framework.TestCase;
+import org.junit.After;
+import org.junit.Before;
+
 import tlc2.TLC;
+import tlc2.TLCGlobals;
 import tlc2.TestMPRecorder;
+import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 import tlc2.output.MP;
+import tlc2.tool.CommonTestCase;
+import tlc2.tool.ModelChecker;
+import util.FileUtil;
+import util.SimpleFilenameToStream;
 import util.ToolIO;
 
-public abstract class ModelCheckerTestCase extends TestCase {
-
-	private static final String BASE_DIR = System.getProperty("basedir", "");
-	private static final String TEST_MODEL = "test-model" + File.separator;
+public abstract class ModelCheckerTestCase extends CommonTestCase {
 	
-	private String path = "";
-	private final String spec;
-	protected final TestMPRecorder recorder = new TestMPRecorder();
-	private String[] extraArguments = new String[0];
-
+	protected String path = "";
+	protected String spec;
+	protected String[] extraArguments = new String[0];
+	protected TLC tlc;
+	protected int actualExitStatus = -1;
+	protected int expectedExitStatus = ExitStatus.SUCCESS;
 
 	public ModelCheckerTestCase(String spec) {
-		this.spec = spec;
+		this(spec, ExitStatus.SUCCESS);
+	}
+
+	public ModelCheckerTestCase(String spec, final int exitStatus) {
+		this(spec, "", exitStatus);
 	}
 
 	public ModelCheckerTestCase(String spec, String path) {
-		this(spec);
-		this.path = path;
+		this(spec, path, ExitStatus.SUCCESS);
+	}
+	
+	public ModelCheckerTestCase(String spec, String[] extraArguments) {
+		this(spec, "", extraArguments, ExitStatus.SUCCESS);
+	}
+	
+	public ModelCheckerTestCase(String spec, String[] extraArguments, final int exitStatus) {
+		this(spec, "", extraArguments, exitStatus);
 	}
 	
 	public ModelCheckerTestCase(String spec, String path, String[] extraArguments) {
-		this(spec, path);
+		this(spec, path, extraArguments, ExitStatus.SUCCESS);
+	}
+	
+	public ModelCheckerTestCase(String spec, String path, String[] extraArguments, final int exitStatus) {
+		this(spec, path, exitStatus);
 		this.extraArguments  = extraArguments; 
 	}
 	
+	public ModelCheckerTestCase(final String spec, final String path, final int exitStatus) {
+		super(new TestMPRecorder());
+		this.spec = spec;
+		this.path = path;
+		this.expectedExitStatus = exitStatus;
+	}
+
+	protected void beforeSetUp() {
+		// No-op
+	}
+
+	/* (non-Javadoc)
+	 * @see junit.framework.TestCase#setUp()
+	 */
+	@Before
 	public void setUp() {
+		beforeSetUp();
+		
+		// some tests might want to access the liveness graph after model
+		// checking completed. Thus, prevent the liveness graph from being
+		// closed too earlier.
+		System.setProperty(ModelChecker.class.getName() + ".vetoCleanup", "true");
+
 		try {
 			// TEST_MODEL is where TLC should look for user defined .tla files
 			ToolIO.setUserDir(BASE_DIR + TEST_MODEL + path);
 			
 			MP.setRecorder(recorder);
 			
-			final TLC tlc = new TLC();
+			// Increase the liveness checking threshold to prevent liveness
+			// checking of an incomplete graph. Most tests check that the 
+			// state queue is empty and fail if not. This is only given 
+			// when liveness checking is executed when all states have been
+			// generated.
+			TLCGlobals.livenessThreshold = Double.MAX_VALUE;
+			
+			tlc = new TLC();
+			tlc.setResolver(new SimpleFilenameToStream());
 			// * We want *no* deadlock checking to find the violation of the
 			// temporal formula
 			// * We use (unless overridden) a single worker to simplify
@@ -80,7 +135,17 @@ public abstract class ModelCheckerTestCase extends TestCase {
 			// *Don't* check for deadlocks. All tests are interested in liveness
 			// checks which are shielded away by deadlock checking. TLC finds a
 			// deadlock (if it exists) before it finds most liveness violations.
-			args.add("-deadlock");
+			if (!checkDeadLock()) {
+				args.add("-deadlock");
+			}
+			
+			args.add("-fp");
+			args.add("0");
+			
+			if (doCoverage()) {
+				args.add("-coverage");
+				args.add("1");
+			}
 			
 			args.add("-workers");
 			args.add(Integer.toString(getNumberOfThreads()));
@@ -88,7 +153,14 @@ public abstract class ModelCheckerTestCase extends TestCase {
 			// Never create checkpoints. They distort performance tests and are
 			// of no use anyway.
 			args.add("-checkpoint");
-			args.add("0");
+			args.add(Integer.toString(doCheckpoint()));
+			
+			// Always print the state graph in dot file notation.
+			if (doDump()) {
+				args.add("-dump");
+				args.add("dot");
+				args.add("${metadir}" + FileUtil.separator + getClass().getCanonicalName() + ".dot");
+			}
 
 			args.addAll(Arrays.asList(extraArguments));
 			
@@ -96,14 +168,78 @@ public abstract class ModelCheckerTestCase extends TestCase {
 			tlc.handleParameters(args.toArray(new String[args.size()]));
 			
 			// Run the ModelChecker
-			tlc.process();
+			final int errorCode = tlc.process();
+			actualExitStatus = EC.ExitStatus.errorConstantToExitStatus(errorCode);
 			
 		} catch (Exception e) {
 			fail(e.getMessage());
 		}
 	}
 
+	protected void beforeTearDown() {
+		// No-op
+	}
+	
+	@After
+	public void tearDown() {
+		beforeTearDown();
+		
+		assertExitStatus();
+	}
+	
+	protected void assertExitStatus() {
+		assertEquals(expectedExitStatus, actualExitStatus);
+	}
+	
+	protected boolean doCoverage() {
+		return true;
+	}
+	
+	/**
+	 * @return True if TLC is to be called with "-deadlock".
+	 */
+	protected boolean checkDeadLock() {
+		return false;
+	}
+	
+	protected boolean doDump() {
+		return true;
+	}
+
+	protected int doCheckpoint() {
+		return 0;
+	}
+
+	/**
+	 * @return The number of worker threads TLC should use.
+	 */
 	protected int getNumberOfThreads() {
 		return 1;
+	}
+	
+	protected void setExitStatus(final int exitStatus) {
+		this.expectedExitStatus = exitStatus;
+	}
+	
+	/**
+	 * E.g. 
+	 * ILiveCheck liveCheck = (ILiveCheck) getField(AbstractChecker.class, "liveCheck",
+	 * 				getField(TLC.class, "instance", tlc));
+	 */
+	protected Object getField(Class<?> targetClass, String fieldName, Object instance) {
+		try {
+			Field field = targetClass.getDeclaredField(fieldName);
+			field.setAccessible(true);
+			return field.get(instance);
+		} catch (NoSuchFieldException e) {
+			e.printStackTrace();
+		} catch (SecurityException e) {
+			e.printStackTrace();
+		} catch (IllegalArgumentException e) {
+			e.printStackTrace();
+		} catch (IllegalAccessException e) {
+			e.printStackTrace();
+		}
+		return null;
 	}
 }

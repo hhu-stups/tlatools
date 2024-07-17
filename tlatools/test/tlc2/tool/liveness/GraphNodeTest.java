@@ -26,14 +26,18 @@
 
 package tlc2.tool.liveness;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
-import junit.framework.TestCase;
+import org.junit.Test;
 
-public class GraphNodeTest extends TestCase {
+public class GraphNodeTest {
 
+	@Test
 	public void testAllocateRealign() {
 		// Create a random graph node (fingerprint/tableau don't matter)
 		final GraphNode node = new GraphNode(0, 0);
@@ -48,13 +52,14 @@ public class GraphNodeTest extends TestCase {
 		int overallocated = node.realign();
 		assertTrue("Allocation overallocated", overallocated == 0);
 
-		assertTrue("Lost a transition during this allocation business", node.transExists(1, -1));
-		assertTrue("Lost a transition during this allocation business", node.transExists(2, -1));
-		assertTrue("Lost a transition during this allocation business", node.transExists(3, -1));
-		assertTrue("Lost a transition during this allocation business", node.transExists(4, -1));
-		assertTrue("Lost a transition during this allocation business", node.transExists(5, -1));
+		assertTrue("Lost a transition during the allocation business", node.transExists(1, -1));
+		assertTrue("Lost a transition during the allocation business", node.transExists(2, -1));
+		assertTrue("Lost a transition during the allocation business", node.transExists(3, -1));
+		assertTrue("Lost a transition during the allocation business", node.transExists(4, -1));
+		assertTrue("Lost a transition during the allocation business", node.transExists(5, -1));
 	}
 
+	@Test
 	public void testRealign() {
 		// Create a random graph node (fingerprint/tableau don't matter)
 		final GraphNode node = new GraphNode(0, 0);
@@ -67,9 +72,10 @@ public class GraphNodeTest extends TestCase {
 		overallocated = node.realign();
 		assertTrue("Allocation overallocated", overallocated == 0);
 
-		assertTrue("Lost a transition during this allocation business", node.transExists(1, -1));
+		assertTrue("Lost a transition during the allocation business", node.transExists(1, -1));
 	}
 
+	@Test
 	public void testAllocateNested() {
 		// Create a random graph node (fingerprint/tableau don't matter)
 		final GraphNode node = new GraphNode(0, 0);
@@ -91,6 +97,7 @@ public class GraphNodeTest extends TestCase {
 		}
 	}
 
+	@Test
 	public void testAllocateNestedRandom() {
 		// Create a random graph node (fingerprint/tableau don't matter)
 		final GraphNode node = new GraphNode(0, 0);
@@ -117,6 +124,7 @@ public class GraphNodeTest extends TestCase {
 		}
 	}
 
+	@Test
 	public void testAllocateNegative() {
 		// Create a random graph node (fingerprint/tableau don't matter)
 		final GraphNode node = new GraphNode(0, 0);
@@ -124,6 +132,7 @@ public class GraphNodeTest extends TestCase {
 		assertTrue("overallocated", node.realign() == 0);
 	}
 	
+	@Test
 	public void testAllocateAndSuccessorSize() {
 		// Hint to allocate 100 transitions and make sure the actual number of
 		// transitions is 1.

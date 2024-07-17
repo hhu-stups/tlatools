@@ -2,11 +2,7 @@ package util;
 
 import java.io.PipedOutputStream;
 import java.io.PrintStream;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-
-import tla2sany.semantic.SemanticNode;
+import java.util.Locale;
 
 /***************************************************************************
 * SANY and TLC were written to communicate only by calling the             *
@@ -76,18 +72,12 @@ public class ToolIO
 	 * Care must be taken with out and err not being synchronized. Concurrent
 	 * writes will cause interleaved output.
 	 * 
-	 * @see https://bugzilla.tlaplus.net/show_bug.cgi?id=221
+	 * @see Bug #221 in general/bugzilla/index.html
 	 */
     public static PrintStream err = System.err;
 
     // = 1 for testing. Should be set to reasonable value like 1000.
     private static final int InitialMaxLength = 1;
-
-    /**
-     * List of semantic nodes which are used by tools
-     * @see ToolIO#registerSemanticNode() 
-     */
-    private static List semanticNodes = new LinkedList();
 
     /**
      * The current sequence of messages is messages[0] ...                  
@@ -229,46 +219,6 @@ public class ToolIO
         ToolIO.defaultResolver = resolver;
     }
 
-    /**
-     * Registers the semantic node
-     * @param node the node containing tool specific information
-     * @param toolId the id of the tool (currently not used)
-     * 
-     * <br><b>Note:</b><br>
-     * This method is called from {@link SemanticNode#setToolObject(int, Object)} 
-     * and identifies the semantic node that carries tool specific information. 
-     * This information can be deleted using {@link ToolIO#cleanToolObjects(int)} 
-     */
-    public static void registerSemanticNode(SemanticNode node, int toolId)
-    {
-        if (!semanticNodes.contains(node)) 
-        {
-            semanticNodes.add(node);
-        }
-    }
-
-    /**
-     * Sets the tool-specific object for all listed semantic nodes to <code>null</code>
-     * @param toolId the Id of the tool to reset the tool specific information
-     */
-    public static void cleanToolObjects(int toolId)
-    {
-        Iterator iter = semanticNodes.iterator();
-        while(iter.hasNext())
-        {
-            SemanticNode node = (SemanticNode) iter.next();
-            node.setToolObject(toolId, null);
-        }
-    }
-
-    /**
-     * Deletes the information about semantic nodes used with tool-specific information
-     */
-    public static void unregisterSemanticNodes()
-    {
-        semanticNodes = new LinkedList();
-    }
-
 } // class ToolIO
 
 class ToolPrintStream extends PrintStream
@@ -282,8 +232,28 @@ class ToolPrintStream extends PrintStream
         ToolIO.out = this;
         ToolIO.err = this;
     }
+    
+    /* (non-Javadoc)
+     * @see java.io.PrintStream#printf(java.lang.String, java.lang.Object[])
+     */
+    @Override
+	public PrintStream printf(String format, Object... args) {
+		// See special logic in println. If super.printf(...) gets used, Toolbox
+		// functionality breaks.
+    	throw new UnsupportedOperationException("use println instead");
+	}
 
-    /**
+	/* (non-Javadoc)
+	 * @see java.io.PrintStream#printf(java.util.Locale, java.lang.String, java.lang.Object[])
+	 */
+	@Override
+	public PrintStream printf(Locale l, String format, Object... args) {
+		// See special logic in println. If super.printf(...) gets used, Toolbox
+		// functionality breaks.
+    	throw new UnsupportedOperationException("use println instead");
+	}
+
+	/**
      * Prints a string in to the ToolIO buffer in a separate line
      * @param str String to be printed
      */

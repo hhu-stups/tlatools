@@ -14,6 +14,7 @@ import java.rmi.RemoteException;
 
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.tool.TLCTrace;
 import tlc2.util.SetOfLong;
 import util.Assert;
 import util.FileUtil;
@@ -33,9 +34,10 @@ public final class MemFPSet1 extends FPSet {
     this.set = new SetOfLong(10001, 0.75f);
   }
 
-  public final void init(int numThreads, String metadir, String filename) {
+  public final FPSet init(int numThreads, String metadir, String filename) {
     this.metadir = metadir;
     this.filename = filename;
+	return this;
   }
 
   public final long size() { return this.set.size(); }
@@ -51,6 +53,7 @@ public final class MemFPSet1 extends FPSet {
   }
 
   public final void exit(boolean cleanup) throws IOException {
+    super.exit(cleanup);
     if (cleanup) {
       // Delete the metadata directory:
       File file = new File(this.metadir);
@@ -61,7 +64,7 @@ public final class MemFPSet1 extends FPSet {
     System.exit(0);    
   }
 
-  public final double checkFPs() { return this.set.checkFPs(); }
+  public final long checkFPs() { return this.set.checkFPs(); }
 
   /* Checkpoint. */
   public final void beginChkpt(String fname) throws IOException {
@@ -95,18 +98,14 @@ public final class MemFPSet1 extends FPSet {
     this.commitChkpt(this.filename);
   }
   
-  public final void recover() throws IOException {
+  public final void recover(TLCTrace trace) throws IOException {
     this.recover(this.filename);
   }
-
-  public final void prepareRecovery() throws IOException { /*SKIP*/ }
 
   public final void recoverFP(long fp) throws IOException {
     Assert.check(!this.set.put(fp), EC.TLC_FP_NOT_IN_SET);
   }
   
-  public final void completeRecovery() throws IOException { /*SKIP*/ }
-
   private final String chkptName(String fname, String ext) {
     return this.metadir + FileUtil.separator + fname + ".fp." + ext;
   }

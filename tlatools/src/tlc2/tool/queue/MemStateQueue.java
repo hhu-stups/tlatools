@@ -7,6 +7,7 @@ package tlc2.tool.queue;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 
 import tlc2.output.EC;
 import tlc2.tool.TLCState;
@@ -23,6 +24,13 @@ public final class MemStateQueue extends StateQueue {
   private int start = 0;
   private String diskdir;
     
+  /**
+   * TESTING ONLY!
+   */
+  MemStateQueue() throws IOException {
+	  this(Files.createTempDirectory("MemStateQueue").toFile().toString());
+  }
+  
   public MemStateQueue(String metadir) {
     this.states = new TLCState[InitialSize];
     this.start = 0;
@@ -31,7 +39,7 @@ public final class MemStateQueue extends StateQueue {
     
   final void enqueueInner(TLCState state) {
 	if (this.len > Integer.MAX_VALUE) {
-        Assert.fail(EC.SYSTEM_ERROR_WRITING_STATES, "Amount of states exceeds internal storage");
+        Assert.fail(EC.SYSTEM_ERROR_WRITING_STATES, new String[]{"queue", "Amount of states exceeds internal storage"});
 	}
     if (this.len == this.states.length) {
       // grow the array
@@ -59,6 +67,13 @@ public final class MemStateQueue extends StateQueue {
     this.states[this.start] = null;
     this.start = (this.start + 1) % this.states.length;
     return res;
+  }
+  
+  /* (non-Javadoc)
+   * @see tlc2.tool.queue.StateQueue#peekInner()
+   */
+  final TLCState peekInner() {
+	return this.states[this.start];
   }
 
   // Checkpoint.
@@ -95,5 +110,4 @@ public final class MemStateQueue extends StateQueue {
     }
     vis.close();
   }
-
 }

@@ -7,12 +7,15 @@ package tla2sany.semantic;
 
 import java.util.Hashtable;
 
-import tla2sany.parser.SyntaxTreeNode;
-import tla2sany.st.TreeNode;
-import util.UniqueString;
-
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+
+import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
+import tla2sany.parser.SyntaxTreeNode;
+import tla2sany.st.TreeNode;
+import tla2sany.xml.SymbolContext;
+import util.UniqueString;
 
 /**
  * This class represents operators of arity > 0 used as arguments to
@@ -65,6 +68,7 @@ public class OpArgNode extends ExprOrOpArgNode {
   public final ModuleNode   getModule()    { return this.mn; }
 
   /* Level check */
+  @Override
   public final boolean levelCheck(int iter) {
     if (levelChecked >= iter) {return this.levelCorrect; } ;
     levelChecked = iter ;
@@ -108,11 +112,13 @@ public class OpArgNode extends ExprOrOpArgNode {
 //           "ArgLevelParams: "      + this.getArgLevelParams()      + "\n" ;
 //  }
 
-  public final void walkGraph(Hashtable semNodesTable) {
-    Integer uid = new Integer(myUID);
+  @Override
+  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
 
-    semNodesTable.put(new Integer(myUID), this);
+    semNodesTable.put(uid, this);
+    visitor.preVisit(this);
 
     /***********************************************************************
     * Modified on 28 Mar 2007 by LL to walk the operator node of the       *
@@ -122,9 +128,11 @@ public class OpArgNode extends ExprOrOpArgNode {
     * walking the node representing the declaration or definition of the   *
     * operator.                                                            *
     ***********************************************************************/
-    if (op != null) {op.walkGraph(semNodesTable) ;} ;
+    if (op != null) {op.walkGraph(semNodesTable, visitor) ;} ;
+    visitor.postVisit(this);
   }
 
+  @Override
   public final String toString(int depth) {
     if (depth <= 0) return "";
 
@@ -134,11 +142,17 @@ public class OpArgNode extends ExprOrOpArgNode {
       "  op: " + (op != null ? "" + ((SemanticNode)op).getUid() : "null" );
   }
 
-  protected Element getLevelElement(Document doc, tla2sany.xml.SymbolContext context) {
+  @Override
+  protected Element getLevelElement(Document doc, SymbolContext context) {
     Element e = doc.createElement("OpArgNode");
+    Element n = doc.createElement("argument");
+    //Element ope = op.getSymbolElement(doc, context);
+    Element ope = op.export(doc, context);
+    n.appendChild(ope);
+    e.appendChild(n);
 
-    e.appendChild(appendText(doc,"uniquename",getName().toString()));
-    e.appendChild(appendText(doc,"arity", Integer.toString(getArity())));
+    //e.appendChild(appendText(doc,"uniquename",getName().toString()));
+    //e.appendChild(appendText(doc,"arity", Integer.toString(getArity())));
 
     return e;
   }

@@ -1,33 +1,39 @@
 // Copyright (c) 2003 Compaq Corporation.  All rights reserved.
 // Portions Copyright (c) 2003 Microsoft Corporation.  All rights reserved.
-// Last modified on Wed  4 Jul 2007 at 17:46:34 PST by lamport  
-//      modified on Fri Jan 18 11:33:51 PST 2002 by yuanyu   
+// Last modified on Wed 12 Jul 2017 at 16:10:00 PST by ian morris nieves
+//      modified on Wed  4 Jul 2007 at 17:46:34 PST by lamport
+//      modified on Fri Jan 18 11:33:51 PST 2002 by yuanyu
 
 package tlc2.tool;
 
+import java.io.File;
 import java.io.IOException;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 
-import tla2sany.modanalyzer.SpecObj;
-import tla2sany.semantic.ExprNode;
+import tla2sany.semantic.OpDeclNode;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
-import tlc2.output.OutputCollector;
 import tlc2.tool.fp.FPSet;
 import tlc2.tool.fp.FPSetConfiguration;
 import tlc2.tool.fp.FPSetFactory;
+import tlc2.tool.impl.CallStackTool;
 import tlc2.tool.liveness.LiveCheck;
+import tlc2.tool.queue.DiskByteArrayQueue;
 import tlc2.tool.queue.DiskStateQueue;
 import tlc2.tool.queue.IStateQueue;
-import tlc2.util.IdThread;
-import tlc2.util.LongVec;
-import tlc2.util.ObjLongTable;
+import tlc2.util.IStateWriter;
+import tlc2.util.SetOfStates;
 import tlc2.util.statistics.BucketStatistics;
-import tlc2.value.Value;
+import util.Assert;
 import util.DebugPrinter;
 import util.FileUtil;
 import util.FilenameToStream;
+import util.TLAFlightRecorder;
 import util.UniqueString;
 
 /** 
@@ -41,52 +47,73 @@ import util.UniqueString;
 public class ModelChecker extends AbstractChecker
 {
 
+	protected static final boolean coverage = TLCGlobals.isCoverageEnabled();
 	/**
 	 * If the state/ dir should be cleaned up after a successful model run
 	 */
-	private static final boolean VETO_CLEANUP = Boolean.getBoolean(ModelChecker.class.getName() + ".vetoCleanup");
+	public static final boolean VETO_CLEANUP = Boolean.getBoolean(ModelChecker.class.getName() + ".vetoCleanup");
 
+	private long numberOfInitialStates;
     public FPSet theFPSet; // the set of reachable states (SZ: note the type)
     public IStateQueue theStateQueue; // the state queue
-    public TLCTrace trace; // the trace file
-    protected Worker[] workers; // the workers
+    public final ConcurrentTLCTrace trace; // the trace file
     // used to calculate the spm metric
     public long distinctStatesPerMinute, statesPerMinute = 0L;
     protected long oldNumOfGenStates, oldFPSetSize = 0L;
+    /**
+	 * The ratio between time spend on safety checking and liveness checking.
+	 */
+    private double runtimeRatio = 0d;
+	/**
+	 * Flag set via JMX if liveness checking should be triggered.
+	 */
+	private boolean forceLiveCheck = false;
 
     /* Constructors  */
-    /**
-     * The only used constructor of the TLA+ model checker
-     * SZ Feb 20, 2009
-     * @param resolver name resolver to be able to load files (specs and configs) from managed environments 
-     * @param specObj external SpecObj added to enable to work on existing specification 
-     * Modified on 6 Apr 2010 by Yuan Yu to add fpMemSize parameter.
-     */
-    public ModelChecker(String specFile, String configFile, String dumpFile, boolean deadlock, String fromChkpt,
-            FilenameToStream resolver, SpecObj specObj, final FPSetConfiguration fpSetConfig) throws EvalException, IOException
-    {
-        // call the abstract constructor
-        super(specFile, configFile, dumpFile, deadlock, fromChkpt, true, resolver, specObj);
-
-        // SZ Feb 20, 2009: this is a selected alternative
-        this.theStateQueue = new DiskStateQueue(this.metadir);
-        // this.theStateQueue = new MemStateQueue(this.metadir);
-
-        //TODO why used to div by 20?
-		this.theFPSet = FPSetFactory.getFPSet(fpSetConfig);
-
-        // initialize the set
-        this.theFPSet.init(TLCGlobals.getNumWorkers(), this.metadir, specFile);
-
-        // Finally, initialize the trace file:
-        this.trace = new TLCTrace(this.metadir, specFile, this.tool);
+    public ModelChecker(ITool tool, String metadir, final IStateWriter stateWriter, boolean deadlock, String fromChkpt,
+            final Future<FPSet> future, long startTime) throws EvalException, IOException, InterruptedException, ExecutionException {
+    	this(tool, metadir, stateWriter, deadlock, fromChkpt, startTime);
+    	this.theFPSet = future.get();
 
         // Initialize all the workers:
         this.workers = new Worker[TLCGlobals.getNumWorkers()];
         for (int i = 0; i < this.workers.length; i++)
         {
-            this.workers[i] = new Worker(i, this);
+            this.workers[i] = this.trace.addWorker(new Worker(i, this, this.metadir, this.tool.getRootName()));
         }
+    }
+    
+    public ModelChecker(ITool tool, String metadir, final IStateWriter stateWriter, boolean deadlock, String fromChkpt,
+            final FPSetConfiguration fpSetConfig, long startTime) throws EvalException, IOException {
+    	this(tool, metadir, stateWriter, deadlock, fromChkpt, startTime);
+    	this.theFPSet = FPSetFactory.getFPSet(fpSetConfig).init(TLCGlobals.getNumWorkers(), metadir, tool.getRootName());
+
+        // Initialize all the workers:
+        this.workers = new Worker[TLCGlobals.getNumWorkers()];
+        for (int i = 0; i < this.workers.length; i++)
+        {
+            this.workers[i] = this.trace.addWorker(new Worker(i, this, this.metadir, this.tool.getRootName()));
+        }
+    }
+    
+    /**
+     * The only used constructor of the TLA+ model checker
+     * SZ Feb 20, 2009
+     * @param resolver name resolver to be able to load files (specs and configs) from managed environments 
+     * @param specObj external SpecObj added to enable to work on existing specification 
+     */
+	private ModelChecker(ITool tool, String metadir, final IStateWriter stateWriter, boolean deadlock, String fromChkpt,
+			long startTime) throws EvalException, IOException    {
+        // call the abstract constructor
+        super(tool, metadir, stateWriter, deadlock, fromChkpt, startTime);
+
+		this.theStateQueue = useByteArrayQueue()
+				? new DiskByteArrayQueue(this.metadir)
+				: new DiskStateQueue(this.metadir);
+        // this.theStateQueue = new MemStateQueue(this.metadir);
+
+        // Finally, initialize the trace file:
+        this.trace = new ConcurrentTLCTrace(this.metadir, this.tool.getRootName(), this.tool);
     }
 
     /**
@@ -95,30 +122,37 @@ public class ModelChecker extends AbstractChecker
      * next states have not been explored are stored in the variable
      * theStateQueue.
      */
-    public void modelCheck() throws Exception
+	@Override
+    protected int modelCheckImpl() throws Exception
     {
+		int result = EC.NO_ERROR;
         report("entering modelCheck()");
         
         // needed to calculate state/minute in final progress report
-        final long startTime = System.currentTimeMillis();
 
-        boolean recovered = this.recover();
+		boolean recovered = this.recover();
         if (!recovered)
         {
 
+			if (this.checkLiveness && liveCheck.getNumChecker() == 0) {
+				return MP.printError(EC.TLC_LIVE_FORMULA_TAUTOLOGY);
+			}
+        	
             // We start from scratch. Initialize the state queue and the
-            // state set to contain all the initial states.
-            if (!this.checkAssumptions())
-                return;
+			// state set to contain all the initial states.
+			result = this.checkAssumptions();
+            if (result != EC.NO_ERROR)
+                return result;
             try
             {
                 report("doInit(false)");
                 MP.printMessage(EC.TLC_COMPUTING_INIT);
-                // SZ Feb 23, 2009: do not ignore cancel on creation of the init states
-                if (!this.doInit(false))
+				// SZ Feb 23, 2009: do not ignore cancel on creation of the init states
+				result = this.doInit(false);
+                if (result != EC.NO_ERROR)
                 {
                     report("exiting, because init failed");
-                    return;
+                    return result;
                 }
             } catch (Throwable e)
             {
@@ -149,97 +183,122 @@ public class ModelChecker extends AbstractChecker
                 }
 
                 // Replay the error with the error stack recorded:
-                this.tool.setCallStack();
+                final CallStackTool cTool = new CallStackTool(this.tool);
                 try
                 {
-                    this.numOfGenStates = new AtomicLong(0);
+                    numberOfInitialStates = 0;
                     // SZ Feb 23, 2009: ignore cancel on error reporting
-                    this.doInit(true);
-                } catch (Throwable e1)
-                {
+					this.doInit(cTool, true);
+                } catch (FingerprintException fe){
+                    result = MP.printError(EC.TLC_FINGERPRINT_EXCEPTION, new String[]{fe.getTrace(), fe.getRootCause().getMessage()});
+                } catch (Throwable e1) {
                     // Assert.printStack(e);
-                    MP.printError(EC.TLC_NESTED_EXPRESSION, this.tool.getCallStack().toString());
+                    result = MP.printError(EC.TLC_NESTED_EXPRESSION, cTool.toString());
                 }
                 this.printSummary(false, startTime);
                 this.cleanup(false);
                 report("exiting, because init failed with exception");
-                return;
+                return result;
             }
 
-            if (this.numOfGenStates.get() == this.theFPSet.size())
+            long statesGenerated = getStatesGenerated();
+            final String plural = (statesGenerated == 1) ? "" : "s";
+            if (statesGenerated == this.theFPSet.size())
             {
-                String plural = (this.numOfGenStates.get() == 1) ? "" : "s";
-                MP.printMessage(EC.TLC_INIT_GENERATED1, new String[] { String.valueOf(this.numOfGenStates), plural });
+                MP.printMessage(EC.TLC_INIT_GENERATED1, new String[] { String.valueOf(statesGenerated), plural });
             } else
             {
-                MP.printMessage(EC.TLC_INIT_GENERATED1, new String[] { String.valueOf(this.numOfGenStates),
+                MP.printMessage(EC.TLC_INIT_GENERATED2, new String[] { String.valueOf(statesGenerated), plural,
                         String.valueOf(this.theFPSet.size()) });
             }
         }
 
         report("init processed");
+        
         // Finished if there is no next state predicate:
-        if (this.actions.length == 0)
+        if (this.tool.getActions().length == 0)
         {
-            reportSuccess(this.theFPSet, this.numOfGenStates.get());
-            this.printSummary(true, startTime);
+        	if (this.theStateQueue.isEmpty()) {
+        		reportSuccess(this.theFPSet, getStatesGenerated());
+        		this.printSummary(true, startTime);
+        	} else {
+        		result = MP.printError(EC.TLC_STATES_AND_NO_NEXT_ACTION);
+        	}
             this.cleanup(true);
             report("exiting with actions.length == 0");
-            return;
+            return result;
         }
 
-        boolean success = false;
+        result = EC.GENERAL;
         try
         {
             report("running TLC");
-            success = this.runTLC(Integer.MAX_VALUE);
-            if (!success)
+            result = this.runTLC(Integer.MAX_VALUE);
+            if (result != EC.NO_ERROR)
             {
                 report("TLC terminated with error");
-                return;
+                return result;
             }
             if (this.errState == null)
             {
                 // Always check liveness properties at the end:
                 if (this.checkLiveness)
                 {
-					MP.printMessage(EC.TLC_CHECKING_TEMPORAL_PROPS,
-							new String[] { "complete", Long.toString(this.theFPSet.size()) });
+					// Print progress statistics prior to liveness checking.
+					// Liveness checking can take a substantial amount of time
+					// and thus give the user some clues at what stage safety
+					// checking is.
+            		MP.printMessage(EC.TLC_PROGRESS_STATS, new String[] {
+                            String.valueOf(this.trace.getLevelForReporting()),
+                            MP.format(getStatesGenerated()),
+                            MP.format(theFPSet.size()),
+                            MP.format(this.theStateQueue.size()) });
+                	
                     report("checking liveness");
-                    success = liveCheck.finalCheck();
+                    result = liveCheck.finalCheck(tool);
                     report("liveness check complete");
-                    if (!success)
+                    if (result != EC.NO_ERROR)
                     {
                         report("exiting error status on liveness check");
-                        return;
+                        return result;
                     }
                 }
 
                 // We get here because the checking has been completed.
-                success = true;
-                reportSuccess(this.theFPSet, this.numOfGenStates.get());
+                result = EC.NO_ERROR;
+                reportSuccess(this.theFPSet, getStatesGenerated());
             } else if (this.keepCallStack)
             {
                 // Replay the error with the error stack recorded:
-                this.tool.setCallStack();
+            	final CallStackTool cTool = new CallStackTool(this.tool);
                 try
                 {
-                    this.doNext(this.predErrState, new ObjLongTable(10));
+					// Not adding newly created Worker to trace#addWorker because it is not supposed
+					// to rewrite the trace file but to reconstruct actual states referenced by
+					// their fingerprints in the trace.
+					this.doNext(cTool, this.predErrState, this.checkLiveness ? new SetOfStates() : null,
+							new Worker(4223, this, this.metadir, tool.getRootName()));
+                } catch (FingerprintException e)
+                {
+                    result = MP.printError(EC.TLC_FINGERPRINT_EXCEPTION, new String[]{e.getTrace(), e.getRootCause().getMessage()});
+                } catch (EvalException e) {
+                	// Do not replace the actual error code, such as assert violation, with TLC_NESTED_EXPRESSION.
+	                MP.printError(EC.TLC_NESTED_EXPRESSION, cTool.toString());
+	                result = e.getErrorCode();
                 } catch (Throwable e)
                 {
                     // Assert.printStack(e);
-                    MP.printError(EC.TLC_NESTED_EXPRESSION, this.tool.getCallStack().toString());
+                    result = MP.printError(EC.TLC_NESTED_EXPRESSION, cTool.toString());
                 }
             }
         } catch (Exception e)
         {
             report("TLC terminated with error");
             // Assert.printStack(e);
-            success = false;
-            MP.printError(EC.GENERAL, e);  // LL changed call 7 April 2012
+            result = MP.printError(EC.GENERAL, e);  // LL changed call 7 April 2012
         } finally
         {
-        	
+        	final boolean success = result == EC.NO_ERROR;
         	this.printSummary(success, startTime);
 
         	if (this.checkLiveness) {
@@ -255,42 +314,19 @@ public class ModelChecker extends AbstractChecker
         	}
 
             this.cleanup(success);
-        }
 
-        report("exiting modelCheck()");
+			report("exiting modelCheck()");
+		}
+
+		return result;
     }
 
     /** 
      * Check the assumptions.  
      */
-    public boolean checkAssumptions()
+    public int checkAssumptions()
     {
-        ExprNode[] assumps = this.tool.getAssumptions();
-        boolean[] isAxiom = this.tool.getAssumptionIsAxiom();
-        boolean assumptionsAreTRUE = true;
-        for (int i = 0; i < assumps.length; i++)
-        {
-            try
-            {
-                if ((!isAxiom[i]) && !this.tool.isValid(assumps[i]))
-                {
-                	OutputCollector.addViolatedAssumption(assumps[i]);
-                    MP.printError(EC.TLC_ASSUMPTION_FALSE, assumps[i].toString());
-                    //return false;
-                    assumptionsAreTRUE = false;
-                }
-            } catch (Exception e)
-            {
-                // Assert.printStack(e);
-            	OutputCollector.addViolatedAssumption(assumps[i]);
-                MP.printError(EC.TLC_ASSUMPTION_EVALUATION_ERROR,
-                        new String[] { assumps[i].toString(), e.getMessage() });
-                //return false;
-                assumptionsAreTRUE = false;
-            }
-        }
-        //return true;
-        return assumptionsAreTRUE;
+    	return this.tool.checkAssumptions();
     }
 
     /**
@@ -298,92 +334,52 @@ public class ModelChecker extends AbstractChecker
      * @return status, if false, the processing should be stopped
      * @throws Throwable
      */
-    public final boolean doInit(boolean ignoreCancel) throws Throwable
-    {
-        // SZ Feb 23, 2009: cancel flag set, quit
-        if (!ignoreCancel && this.cancellationFlag)
-        {
-            return false;
-        }
-
-        TLCState curState = null;
-
-        try
-        {
-            // Generate the initial states:
-            StateVec theInitStates = this.tool.getInitStates();
-            this.numOfGenStates.set(theInitStates.size());
-            for (int i = 0; i < theInitStates.size(); i++)
-            {
-                curState = theInitStates.elementAt(i);
-                // Check if the state is a legal state
-                if (!this.tool.isGoodState(curState))
-                {
-                    MP.printError(EC.TLC_INITIAL_STATE, curState.toString());
-                    return false;
-                }
-                boolean inModel = this.tool.isInModel(curState);
-                boolean seen = false;
-                if (inModel)
-                {
-                    long fp = curState.fingerPrint();
-                    seen = this.theFPSet.put(fp);
-                    if (!seen)
-                    {
-                        if (this.allStateWriter != null)
-                        {
-                            this.allStateWriter.writeState(curState);
-                        }
-                        curState.uid = this.trace.writeState(fp);
-                        this.theStateQueue.enqueue(curState);
-
-                        // build behavior graph for liveness checking
-                        if (this.checkLiveness)
-                        {
-                            liveCheck.addInitState(curState, fp);
-                        }
-                    }
-                }
-                // Check properties of the state:
-                OutputCollector.setInitialState(curState);
-                if (!seen)
-                {
-                    for (int j = 0; j < this.invariants.length; j++)
-                    {
-                        if (!this.tool.isValid(this.invariants[j], curState))
-                        {
-                            // We get here because of invariant violation:
-                        	MP.printError(EC.TLC_INVARIANT_VIOLATED_INITIAL, new String[] {
-                                    this.tool.getInvNames()[j].toString(), curState.toString() });
-                        	if (!TLCGlobals.continuation)
-                                return false;
-                        }
-                    }
-                    for (int j = 0; j < this.impliedInits.length; j++)
-                    {
-                        if (!this.tool.isValid(this.impliedInits[j], curState))
-                        {
-                            // We get here because of implied-inits violation:
-                            MP.printError(EC.TLC_PROPERTY_VIOLATED_INITIAL, new String[] {
-                                    this.tool.getImpliedInitNames()[j], curState.toString() });
-                            return false;
-                        }
-                    }
-                }
-            }
-        } catch (Throwable e)
-        {
-            // Assert.printStack(e);
-            if (e instanceof OutOfMemoryError)
-            {
-                MP.printError(EC.SYSTEM_OUT_OF_MEMORY_TOO_MANY_INIT);
-                return false;
-            }
-            this.errState = curState;
-            throw e;
-        }
-        return true;
+    @Override
+    public final int doInit(boolean ignoreCancel) throws Throwable {
+    	return doInit(this.tool, ignoreCancel);
     }
+    
+    private final int doInit(final ITool tool, boolean ignoreCancel) throws Throwable
+    {
+		// Generate the initial states.
+        //
+		// The functor is passed to getInitStates() to - instead of adding all
+		// init states into an intermediate StateVec to check and add each state
+		// in a subsequent loop - directly check each state one-by-one and add
+		// it to the queue, fingerprint set and trace file. This avoids
+		// allocating memory for StateVec (which depending on the number of init
+		// states can grow to be GBs) and the subsequent loop over StateVec.
+        final DoInitFunctor functor;
+        if (ignoreCancel) {
+			// Rerunning state space exploration to reconstruct the error stack to determine
+			// what caused Tool to fail to evaluate the init predicate expressions. Thus,
+			// re-check all invariants even if state is already known (= part of theFPSet).
+        	functor = new DoInitFunctor(tool, ignoreCancel);
+        } else {
+        	functor = new DoInitFunctor(tool);
+        }
+		try {
+			tool.getInitStates(functor);
+		} catch (DoInitFunctor.InvariantViolatedException ive) {
+			this.errState = functor.errState;
+			return functor.returnValue;
+		} catch (Assert.TLCRuntimeException e) {
+			this.errState = functor.errState;
+			throw e;
+		}
+		
+		// Iff one of the init states' checks violates any properties, the
+		// functor will record it.
+		if (functor.errState != null) {
+			this.errState = functor.errState;
+			if (functor.e != null) {
+				throw functor.e;
+			}
+		}
+		
+		// Return whatever the functor has recorded.
+		return functor.returnValue;
+	}
 
     /**
      * Compute the set of the next states.  For each next state, check that
@@ -393,257 +389,266 @@ public class ModelChecker extends AbstractChecker
      * 
      * This method is called from the workers on every step
      */
-    public final boolean doNext(TLCState curState, ObjLongTable counts) throws Throwable
+    private final boolean doNext(final ITool tool, TLCState curState, final SetOfStates liveNextStates, final Worker worker) throws Throwable
     {
-        // SZ Feb 23, 2009: cancel the calculation
-        if (this.cancellationFlag)
-        {
-            return false;
-        }
-
         boolean deadLocked = true;
         TLCState succState = null;
-        StateVec liveNextStates = null;
-        LongVec liveNextFPs = null;
-
-        if (this.checkLiveness)
-        {
-            liveNextStates = new StateVec(2);
-            liveNextFPs = new LongVec(2);
-        }
-
         try
         {
-            int k = 0;
-            // <--
-            // <--
-            for (int i = 0; i < this.actions.length; i++)
+            for (int i = 0; i < tool.getActions().length; i++)
             {
-                // SZ Feb 23, 2009: cancel the calculation
-                if (this.cancellationFlag)
-                {
-                    return false;
-                }
-
-                StateVec nextStates = this.tool.getNextStates(this.actions[i], curState);
-                int sz = nextStates.size();
-                this.incNumOfGenStates(sz);
-                deadLocked = deadLocked && (sz == 0);
+				final Action action = tool.getActions()[i];
+				final StateVec nextStates = tool.getNextStates(action, curState);
+				final int sz = nextStates.size();
+				worker.incrementStatesGenerated(sz);
+				deadLocked = deadLocked && (sz == 0);
 
                 for (int j = 0; j < sz; j++)
                 {
-                    succState = nextStates.elementAt(j);
-                    // Check if succState is a legal state.
-                    if (!this.tool.isGoodState(succState))
+					succState = nextStates.elementAt(j);
+					// Check if succState is a legal state.
+                    if (!tool.isGoodState(succState))
                     {
-                        if (this.setErrState(curState, succState, false))
-                        {
-                            MP.printError(EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT);
-                            this.trace.printTrace(curState, succState);
-                            this.theStateQueue.finishAll();
+                    	return doNextSetErr(curState, succState, action);
+					}
 
-                            synchronized (this)
-                            {
-                                this.notify();
-                            }
-                        }
-                        return true;
-                    }
-                    if (TLCGlobals.coverageInterval >= 0)
-                    {
-                        ((TLCStateMutSource) succState).addCounts(counts);
-                    }
-
-                    boolean inModel = (this.tool.isInModel(succState) && this.tool.isInActions(curState, succState));
-                    boolean seen = false;
+					final boolean inModel = (tool.isInModel(succState) && tool.isInActions(curState, succState));
+					boolean unseen = true;
                     if (inModel)
                     {
-                        long fp = succState.fingerPrint();
-                        seen = this.theFPSet.put(fp);
-                        if (!seen)
-                        {
-                            // Write out succState when needed:
-                            if (this.allStateWriter != null)
-                            {
-                                this.allStateWriter.writeState(succState);
-                            }
-                            // Enqueue succState only if it satisfies the model constraints:
-                            long loc = this.trace.writeState(curState, fp);
-                            succState.uid = loc;
-                            this.theStateQueue.sEnqueue(succState);
-                        }
-                        // For liveness checking:
-                        if (this.checkLiveness)
-                        {
-                            liveNextStates.addElement(succState);
-                            liveNextFPs.addElement(fp);
-                        }
-                    }
-                    // Check if succState violates any invariant:
-                    if (!seen)
+						unseen = !isSeenState(curState, succState, action, worker, liveNextStates);
+					}
+					// Check if an unseen succState violates any invariant:
+                    if (unseen)
                     {
-                        try
-                        {
-                            int len = this.invariants.length;
-                            for (k = 0; k < len; k++)
-                            {
-                                // SZ Feb 23, 2009: cancel the calculation
-                                if (this.cancellationFlag)
-                                {
-                                    return false;
-                                }
-
-                                if (!tool.isValid(this.invariants[k], succState))
-                                {
-                                    // We get here because of invariant violation:
-                                    synchronized (this)
-                                    {
-                                        if (TLCGlobals.continuation)
-                                        {
-                                            MP.printError(EC.TLC_INVARIANT_VIOLATED_BEHAVIOR,
-                                                    this.tool.getInvNames()[k]);
-                                            this.trace.printTrace(curState, succState);
-                                            break;
-                                        } else
-                                        {
-                                            if (this.setErrState(curState, succState, false))
-                                            {
-                                                MP.printError(EC.TLC_INVARIANT_VIOLATED_BEHAVIOR, this.tool
-                                                        .getInvNames()[k]);
-                                                this.trace.printTrace(curState, succState);
-                                                this.theStateQueue.finishAll();
-                                                this.notify();
-                                            }
-                                            return true;
-                                        }
-                                    }
-                                }
-                            }
-                            if (k < len)
-                                continue;
-                        } catch (Exception e)
-                        {
-                            if (this.setErrState(curState, succState, true))
-                            {
-                                MP.printError(EC.TLC_INVARIANT_EVALUATION_FAILED, new String[] {
-                                        this.tool.getInvNames()[k], 
-                                        (e.getMessage()==null)?e.toString():e.getMessage() });
-                                this.trace.printTrace(curState, succState);
-                                this.theStateQueue.finishAll();
-                                this.notify();
-                            }
-                            throw e;
-                        }
-                    }
+                    	if (doNextCheckInvariants(tool, curState, succState)) {
+                    		return true;
+                    	}
+					}
                     // Check if the state violates any implied action. We need to do it
                     // even if succState is not new.
-                    try
-                    {
-                        int len = this.impliedActions.length;
-                        for (k = 0; k < len; k++)
-                        {
-                            // SZ Feb 23, 2009: cancel the calculation
-                            if (this.cancellationFlag)
-                            {
-                                return false;
-                            }
-
-                            if (!tool.isValid(this.impliedActions[k], curState, succState))
-                            {
-                                // We get here because of implied-action violation:
-                                synchronized (this)
-                                {
-                                    if (TLCGlobals.continuation)
-                                    {
-                                        MP.printError(EC.TLC_ACTION_PROPERTY_VIOLATED_BEHAVIOR, this.tool
-                                                .getImpliedActNames()[k]);
-                                        this.trace.printTrace(curState, succState);
-                                        break;
-                                    } else
-                                    {
-                                        if (this.setErrState(curState, succState, false))
-                                        {
-                                            MP.printError(EC.TLC_ACTION_PROPERTY_VIOLATED_BEHAVIOR, this.tool
-                                                    .getImpliedActNames()[k]);
-                                            this.trace.printTrace(curState, succState);
-                                            this.theStateQueue.finishAll();
-                                            this.notify();
-                                        }
-                                        return true;
-                                    }
-                                }
-                            }
-                        }
-                        if (k < len)
-                            continue;
-                    } catch (Exception e)
-                    {
-                        if (this.setErrState(curState, succState, true))
-                        {
-                            MP.printError(EC.TLC_ACTION_PROPERTY_EVALUATION_FAILED, new String[] {
-                                    this.tool.getImpliedActNames()[k], 
-                                    (e.getMessage()==null)?e.toString():e.getMessage() });
-                            this.trace.printTrace(curState, succState);
-                            this.theStateQueue.finishAll();
-                            this.notify();
-                        }
-                        throw e;
+                    if (doNextCheckImplied(tool, curState, succState)) {
+                    	return true;
                     }
-                }
-                // Must set state to null!!!
-                succState = null;
-            }
-            // Check for deadlock:
+                    if (inModel && unseen) {
+						// The state is inModel, unseen and neither invariants
+						// nor implied actions are violated. It is thus eligible
+						// for further processing by other workers.
+						this.theStateQueue.sEnqueue(succState);
+                    }
+				}
+				// Must set state to null!!!
+				succState = null;
+			}
+			// Check for deadlock:
             if (deadLocked && this.checkDeadlock)
             {
-                synchronized (this)
-                {
-                    if (this.setErrState(curState, null, false))
-                    {
-                        MP.printError(EC.TLC_DEADLOCK_REACHED);
-                        this.trace.printTrace(curState, null);
-                        this.theStateQueue.finishAll();
-                        this.notify();
-                    }
-                }
-                return true;
-            }
-            // Finally, add curState into the behavior graph for liveness checking:
-            if (this.checkLiveness)
-            {
-                // Add the stuttering step:
-                long curStateFP = curState.fingerPrint();
-                liveNextStates.addElement(curState);
-                liveNextFPs.addElement(curStateFP);
-                liveCheck.addNextState(curState, curStateFP, liveNextStates, liveNextFPs);
-            }
-            return false;
-        } catch (Throwable e)
+                return doNextSetErr(curState, null, false, EC.TLC_DEADLOCK_REACHED, null);
+			}
+			return false;
+        } catch (final Throwable e)
         {
-            // Assert.printStack(e);
-            boolean keep = ((e instanceof StackOverflowError) || (e instanceof OutOfMemoryError));
-            synchronized (this)
-            {
-                if (this.setErrState(curState, succState, !keep))
-                {
-                    if (e instanceof StackOverflowError)
-                    {
-                        MP.printError(EC.SYSTEM_STACK_OVERFLOW, e);
-                    } else if (e instanceof OutOfMemoryError)
-                    {
-                        MP.printError(EC.SYSTEM_OUT_OF_MEMORY, e);
-                    } else if (e.getMessage() != null)
-                    {
-                        MP.printError(EC.GENERAL, e);  // LL changed call 7 April 2012
-                    }
-                    this.trace.printTrace(curState, succState);
-                    this.theStateQueue.finishAll();
-                    this.notify();
-                }
-            }
-            throw e;
-        }
+			doNextFailed(curState, succState, e);
+			throw e;
+		}
     }
+
+	private final boolean isSeenState(final TLCState curState, final TLCState succState,
+			final Action action, final Worker worker, final SetOfStates liveNextStates) throws IOException {
+		final long fp = succState.fingerPrint();
+		final boolean seen = this.theFPSet.put(fp);
+		// Write out succState when needed:
+		this.allStateWriter.writeState(curState, succState, !seen, action);
+		if (!seen)
+		{
+			// Write succState to trace only if it satisfies the
+			// model constraints. Do not enqueue it yet, but wait
+		    // for implied actions and invariants to be checked.
+		    // Those checks - if violated - will cause model checking
+		    // to terminate. Thus we cannot let concurrent workers start
+		    // exploring this new state. Conversely, the state has to
+		    // be in the trace in case either invariant or implied action
+		    // checks want to print the trace. 
+			worker.writeState(curState, fp, succState);
+			if (coverage) {
+				action.cm.incSecondary();
+			}
+		}
+		// For liveness checking:
+		if (this.checkLiveness)
+		{
+			liveNextStates.put(fp, succState);
+		}
+		return seen;
+	}
+
+	private final boolean doNextCheckInvariants(final ITool tool, final TLCState curState, final TLCState succState) throws IOException, WorkerException, Exception {
+        int k = 0;
+		try
+        {
+			for (k = 0; k < tool.getInvariants().length; k++)
+            {
+                if (!tool.isValid(tool.getInvariants()[k], succState))
+                {
+                    // We get here because of invariant violation:
+                	if (TLCGlobals.continuation) {
+                        synchronized (this)
+                        {
+							MP.printError(EC.TLC_INVARIANT_VIOLATED_BEHAVIOR,
+									tool.getInvNames()[k]);
+							this.trace.printTrace(curState, succState);
+							return false;
+                        }
+                	} else {
+						return doNextSetErr(curState, succState, false,
+								EC.TLC_INVARIANT_VIOLATED_BEHAVIOR, tool.getInvNames()[k]);
+                	}
+				}
+			}
+        } catch (Exception e)
+        {
+			doNextEvalFailed(curState, succState, EC.TLC_INVARIANT_EVALUATION_FAILED,
+					tool.getInvNames()[k], e);
+		}
+		return false;
+	}
+
+	private final boolean doNextCheckImplied(final ITool tool, final TLCState curState, final TLCState succState) throws IOException, WorkerException, Exception {
+		int k = 0;
+        try
+        {
+			for (k = 0; k < tool.getImpliedActions().length; k++)
+            {
+                if (!tool.isValid(tool.getImpliedActions()[k], curState, succState))
+                {
+                    // We get here because of implied-action violation:
+                    if (TLCGlobals.continuation)
+                    {
+                        synchronized (this)
+                        {
+                            MP.printError(EC.TLC_ACTION_PROPERTY_VIOLATED_BEHAVIOR, tool
+                                    .getImpliedActNames()[k]);
+							this.trace.printTrace(curState, succState);
+							return false;
+                       }
+                    } else {
+						return doNextSetErr(curState, succState, false,
+								EC.TLC_ACTION_PROPERTY_VIOLATED_BEHAVIOR,
+								tool.getImpliedActNames()[k]);
+                	}
+				}
+			}
+        } catch (Exception e)
+        {
+			doNextEvalFailed(curState, succState, EC.TLC_ACTION_PROPERTY_EVALUATION_FAILED,
+					tool.getImpliedActNames()[k], e);
+		}
+        return false;
+	}
+
+	final boolean doNextSetErr(TLCState curState, TLCState succState, boolean keep, int ec, String param) throws IOException, WorkerException {
+		synchronized (this)
+		{
+		    if (this.setErrState(curState, succState, keep, ec))
+		    {
+		    	if (param == null) {
+		    		MP.printError(ec);
+		    	} else {
+		    		MP.printError(ec, param);
+		    	}
+				this.trace.printTrace(curState, succState);
+				this.theStateQueue.finishAll();
+				this.notify();
+			}
+		}
+		return true;
+	}
+
+	final boolean doNextSetErr(TLCState curState, TLCState succState, Action action) throws IOException, WorkerException {
+		synchronized (this) {
+			final int errorCode = EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT;
+			if (this.setErrState(curState, succState, false, errorCode))
+			{
+				final Set<OpDeclNode> unassigned = succState.getUnassigned();
+				if (this.tool.getActions().length == 1) {
+					MP.printError(errorCode,
+							new String[] { unassigned.size() > 1 ? "s are" : " is",
+									unassigned.stream().map(n -> n.getName().toString())
+											.collect(Collectors.joining(", ")) });
+				} else {
+					MP.printError(errorCode,
+							new String[] { action.getName().toString(),
+									unassigned.size() > 1 ? "s are" : " is",
+									unassigned.stream().map(n -> n.getName().toString())
+											.collect(Collectors.joining(", ")) });
+				}
+				this.trace.printTrace(curState, succState);
+				this.theStateQueue.finishAll();
+				this.notify();
+			}
+			return true;
+		}
+	}
+
+	final void doNextEvalFailed(TLCState curState, TLCState succState, int ec, String param, Exception e)
+			throws IOException, WorkerException, Exception {
+		synchronized (this) {
+		    if (this.setErrState(curState, succState, true, ec))
+		    {
+				MP.printError(ec, new String[] { param, (e.getMessage() == null) ? e.toString() : e.getMessage() });
+				this.trace.printTrace(curState, succState);
+				this.theStateQueue.finishAll();
+				this.notify();
+			}
+			throw e;
+		}
+	}
+
+	final void doNextFailed(TLCState curState, TLCState succState, Throwable e)
+			throws IOException, WorkerException, Throwable {
+		// Assert.printStack(e);
+		final boolean keep = ((e instanceof StackOverflowError) || (e instanceof OutOfMemoryError)
+		        || (e instanceof AssertionError));
+		synchronized (this)
+		{
+			final int ec;
+			if (e instanceof StackOverflowError)
+			{
+				ec = EC.SYSTEM_STACK_OVERFLOW;
+			} else if (e instanceof OutOfMemoryError)
+			{
+				ec = EC.SYSTEM_OUT_OF_MEMORY;
+			} else if (e instanceof AssertionError)
+			{
+				ec = EC.TLC_BUG;
+			} else if (e instanceof EvalException)
+			{
+				ec = ((EvalException) e).getErrorCode();
+			} else
+			{
+				ec = EC.GENERAL;
+			}
+
+			if (this.setErrState(curState, succState, !keep, ec))
+		    {
+				if (!(ec == EC.GENERAL && e.getMessage() == null))
+		        {
+					if (e instanceof EvalException && ((EvalException) e).hasParameters()) {
+						// An EvalException pretty-prints itself in its constructor, i.e. converts the
+						// parameters into the human readable string. However, MP.print* will
+						// pretty-print it a second time, which is why we pass the original parameters
+						// instead of the EvalException itself.  Exception handling in TLC is a mess!
+						MP.printError(ec, ((EvalException) e).getParameters(), e);
+					} else {
+						MP.printError(ec, e);
+					}
+		        }
+				this.trace.printTrace(curState, succState);
+				this.theStateQueue.finishAll();
+				this.notify();
+			}
+		}
+	}
 
     /**
      * Things need to be done here:
@@ -651,47 +656,114 @@ public class ModelChecker extends AbstractChecker
      * Create checkpoint: checkpoint three data structures: the state set,
      *                    the state queue, and the state trace.
      */
-    public final boolean doPeriodicWork() throws Exception
+    @Override
+    public final int doPeriodicWork() throws Exception
     {
+		// Remember if checkpointing should be run. doCheckPoint() when called
+		// internally diffs the time expired since its last invocation which is
+		// only milliseconds here when called twice.
+		final boolean createCheckPoint = TLCGlobals.doCheckPoint();
+		if ((!this.checkLiveness || runtimeRatio > TLCGlobals.livenessRatio || !liveCheck.doLiveCheck()) && !forceLiveCheck && !createCheckPoint) {
+			updateRuntimeRatio(0L);
+			
+			// Do not suspend the state queue if neither check-pointing nor
+			// liveness-checking is going to happen. Suspending is expensive.
+			// It stops all workers.
+			return EC.NO_ERROR;
+		}
+   	
         if (this.theStateQueue.suspendAll())
         {
             // Run liveness checking, if needed:
-            if (this.checkLiveness)
+			// The ratio set in TLCGlobals defines an upper bound for the
+			// runtime dedicated to liveness checking.
+            if (this.checkLiveness && (runtimeRatio < TLCGlobals.livenessRatio || forceLiveCheck))
             {
-                if (!liveCheck.check(false))
-                    return false;
+				final long preLivenessChecking = System.currentTimeMillis();
+				final int result = liveCheck.check(tool, forceLiveCheck);
+                if (result != EC.NO_ERROR)
+                {
+                    return result;
+                }
+                forceLiveCheck = false;
+                updateRuntimeRatio(System.currentTimeMillis() - preLivenessChecking);
+            } else if (runtimeRatio > TLCGlobals.livenessRatio) {
+            	updateRuntimeRatio(0L);
             }
 
-            if (TLCGlobals.doCheckPoint()) {
+            if (createCheckPoint) {
             	// Checkpoint:
-            	MP.printMessage(EC.TLC_CHECKPOINT_START, this.metadir);
-            	
-            	// start checkpointing:
-            	this.theStateQueue.beginChkpt();
-            	this.trace.beginChkpt();
-            	this.theFPSet.beginChkpt();
-            	this.theStateQueue.resumeAll();
-            	UniqueString.internTbl.beginChkpt(this.metadir);
-            	if (this.checkLiveness)
-            	{
-            		liveCheck.beginChkpt();
-            	}
-            	// commit checkpoint:
-            	this.theStateQueue.commitChkpt();
-            	this.trace.commitChkpt();
-            	this.theFPSet.commitChkpt();
-            	UniqueString.internTbl.commitChkpt(this.metadir);
-            	if (this.checkLiveness)
-            	{
-            		liveCheck.commitChkpt();
-            	}
-            	MP.printMessage(EC.TLC_CHECKPOINT_END);
+            	checkpoint();
             } else {
 				// Just resume worker threads when checkpointing is skipped
             	this.theStateQueue.resumeAll();
             }
         }
-        return true;
+        return EC.NO_ERROR;
+    }
+
+	protected void checkpoint() throws IOException {
+		// start checkpointing:
+       	MP.printMessage(EC.TLC_CHECKPOINT_START, this.metadir);
+		this.theStateQueue.beginChkpt();
+		this.trace.beginChkpt();
+		this.theFPSet.beginChkpt();
+		this.theStateQueue.resumeAll();
+		UniqueString.internTbl.beginChkpt(this.metadir);
+		if (this.checkLiveness)
+		{
+			liveCheck.beginChkpt();
+		}
+		// commit checkpoint:
+		this.theStateQueue.commitChkpt();
+		this.trace.commitChkpt();
+		this.theFPSet.commitChkpt();
+		UniqueString.internTbl.commitChkpt(this.metadir);
+		if (this.checkLiveness)
+		{
+			liveCheck.commitChkpt();
+		}
+    	MP.printMessage(EC.TLC_CHECKPOINT_END);
+	}
+
+	public void forceLiveCheck() {
+		forceLiveCheck = true;
+	}
+    
+    protected void updateRuntimeRatio(final long delta) {
+    	assert delta >= 0L;
+
+    	// Absolute runtime from TLC startup to now (includes liveness
+		// checking, even the current delta).
+		long totalRuntime = System.currentTimeMillis() - startTime;
+		
+		// Subtract a progressInterval to account for the fact that the
+		// previously recorded runtimeRatio was calculated with totalRuntime
+		// from the previous progressReporting interval. updateRuntimeRatio is
+		// called from doPeriodicWork which executes every progressIntervall.
+		// This is an approximation because the last invocation could have
+		// happened longer ago than progressInterval if e.g. checkpointing
+		// blocked the doPeriodicWork thread.
+		totalRuntime = totalRuntime - TLCGlobals.progressInterval;
+		
+		// Subtract delta from the totalRuntime
+		totalRuntime = totalRuntime - delta;
+		
+		// Absolute time spent on all liveness checks from TLC
+		// startup up to now (without delta). Iff no liveness checking has been
+		// executed so far, the absolute time is obviously 0. totalRuntime
+		// can also be negative.
+		final double absLivenessRuntime = Math.max(totalRuntime * runtimeRatio, 0);
+
+		// Sum up the absLivenessRuntime with the new delta. It is the current
+		// absolute time for liveness checking. Divide it by overall
+		// totalRuntime (including progressInterval and delta) to calculate the
+		// new ratio.
+		runtimeRatio = (delta + absLivenessRuntime) / (totalRuntime + TLCGlobals.progressInterval + delta);
+    }
+    
+    public double getRuntimeRatio() {
+    	return runtimeRatio;
     }
 
     public final boolean recover() throws IOException
@@ -703,31 +775,55 @@ public class ModelChecker extends AbstractChecker
             MP.printMessage(EC.TLC_CHECKPOINT_RECOVER_START, this.fromChkpt);
             this.trace.recover();
             this.theStateQueue.recover();
-            this.theFPSet.recover();
+            this.theFPSet.recover(this.trace);
             if (this.checkLiveness)
             {
+				// Liveness checking requires the initial states to be
+				// available as part of behaviors. Initial states are not part
+				// of the checkpoint, but we can easily recreate them.
+				// See bug #22 "Recovering from a checkpoint silently breaks
+				// liveness checking" at
+				// https://github.com/tlaplus/tlaplus/issues/22
+            	this.tool.getInitStates(new IStateFunctor() {
+					public Object addElement(TLCState state) {
+						liveCheck.addInitState(tool, state, state.fingerPrint());
+						return true;
+					}
+				});
                 liveCheck.recover();
             }
             MP.printMessage(EC.TLC_CHECKPOINT_RECOVER_END, new String[] { String.valueOf(this.theFPSet.size()),
                     String.valueOf(this.theStateQueue.size()) });
             recovered = true;
-            this.numOfGenStates.set(this.theFPSet.size());
+            // Not all states are true initial states, but who cares at this point?
+            numberOfInitialStates = this.theFPSet.size();
         }
         return recovered;
     }
 
     private final void cleanup(boolean success) throws IOException
     {
+    	boolean vetoCleanup = VETO_CLEANUP;
+    	
+		// If model checking is not done, checkpoints are (explicitly) enabled, and
+		// either and error has been found or time-bound model checking is enabled, take
+		// a snapshot to allow users to continue model checking if needed.
+		if (TLCGlobals.chkptExplicitlyEnabled()
+				&& !theStateQueue.isEmpty() && (this.errState != null || isTimeBound())) {
+			checkpoint();
+			vetoCleanup = true;
+		}
+    	
         this.theFPSet.close();
         this.trace.close();
-        if (this.checkLiveness)
-            liveCheck.close();
-        if (this.allStateWriter != null)
-            this.allStateWriter.close();
-        	if (!VETO_CLEANUP) {
-        		FileUtil.deleteDir(this.metadir, success);
-        	}
-		}
+        if (this.checkLiveness) {
+        	liveCheck.close();
+        }
+        this.allStateWriter.close();
+    	if (!vetoCleanup) {
+    		FileUtil.deleteDir(this.metadir, success);
+    	}
+	}
 
     public final void printSummary(boolean success, final long startTime) throws IOException
     {
@@ -740,18 +836,32 @@ public class ModelChecker extends AbstractChecker
          */
         if (TLCGlobals.tool)
         {	
-        	printProgresStats(startTime);
+        	printProgresStats(startTime, true);
         }
 
-        MP.printMessage(EC.TLC_STATS, new String[] { String.valueOf(this.numOfGenStates),
+        MP.printMessage(EC.TLC_STATS, new String[] { String.valueOf(getStatesGenerated()),
                 String.valueOf(this.theFPSet.size()), String.valueOf(this.theStateQueue.size()) });
         if (success)
         {
             MP.printMessage(EC.TLC_SEARCH_DEPTH, String.valueOf(this.trace.getLevelForReporting()));
+			
+        	// Aggregate outdegree from statistics maintained by individual workers. 
+        	final BucketStatistics aggOutDegree = new BucketStatistics("State Graph OutDegree");
+        	for (IWorker worker : workers) {
+				aggOutDegree.add(((Worker) worker).getOutDegree());
+			}
+        	// Print graph statistics iff data points were actually collected.
+        	if (aggOutDegree.getObservations() > 0) {
+				MP.printMessage(EC.TLC_STATE_GRAPH_OUTDEGREE,
+						new String[] { Integer.toString(aggOutDegree.getMin()),
+								Long.toString(Math.round(aggOutDegree.getMean())),
+								Long.toString(Math.round(aggOutDegree.getPercentile(.95))),
+								Integer.toString(aggOutDegree.getMax()) });
+        	}
         }
     }
     
-    private final void printProgresStats(final long startTime) throws IOException {
+    private final void printProgresStats(final long startTime, final boolean isFinal) throws IOException {
         final long fpSetSize = this.theFPSet.size();
         
         // print progress showing states per minute metric (spm)
@@ -764,245 +874,52 @@ public class ModelChecker extends AbstractChecker
         	oldFPSetSize = 0;
         	factor = (System.currentTimeMillis() - startTime) / 60000d;
         }
-		long l = numOfGenStates.get();
+		final long l = getStatesGenerated();
 		statesPerMinute = (long) ((l - oldNumOfGenStates) / factor);
         oldNumOfGenStates = l;
         distinctStatesPerMinute = (long) ((fpSetSize - oldFPSetSize) / factor);
         oldFPSetSize = fpSetSize;
         
-		MP.printMessage(EC.TLC_PROGRESS_STATS, new String[] { String.valueOf(this.trace.getLevelForReporting()),
-                String.valueOf(this.numOfGenStates), String.valueOf(fpSetSize),
-                String.valueOf(this.theStateQueue.size()), String.valueOf(statesPerMinute), String.valueOf(distinctStatesPerMinute) });
+		MP.printMessage(EC.TLC_PROGRESS_STATS, new String[] {
+                String.valueOf(this.trace.getLevelForReporting()),
+                MP.format(l),
+                MP.format(fpSetSize),
+                MP.format(this.theStateQueue.size()),
+                MP.format(statesPerMinute),
+                MP.format(distinctStatesPerMinute) });
+		
+		TLAFlightRecorder.progress(isFinal, this.trace.getLevelForReporting(), l, fpSetSize, this.theStateQueue.size(),
+				statesPerMinute, distinctStatesPerMinute);
     }
 
     public static final void reportSuccess(final FPSet anFpSet, final long numOfGenStates) throws IOException
     {
-        final long fpSetSize = anFpSet.size();
-        final double actualProb = anFpSet.checkFPs();
-        reportSuccess(fpSetSize,  actualProb, numOfGenStates);
-    }
-    
-    public static final void reportSuccess(final long numOfDistinctStates, final double actualProb, final long numOfGenStates) throws IOException
-    {
-        // shown as 'calculated' in Toolbox
-        final double optimisticProb = numOfDistinctStates * ((numOfGenStates - numOfDistinctStates) / Math.pow(2, 64));
-        /* The following code added by LL on 3 Aug 2009 to print probabilities
-         * to only one decimal point.  Removed by LL on 17 April 2012 because it
-         * seemed to report probabilities > 10-4 as probability 0.
-         */
-         // final PrintfFormat fmt = new PrintfFormat("val = %.1G");
-         // final String optimisticProbStr = fmt.sprintf(optimisticProb);
-         // final String actualProbStr = fmt.sprintf(actualProb);
-        
-        // Following two lines added by LL on 17 April 2012
-        final String optimisticProbStr = "val = " + ProbabilityToString(optimisticProb, 2);
-        // shown as 'observed' in Toolbox
-        final String actualProbStr = "val = " + ProbabilityToString(actualProb, 2);
-        MP.printMessage(EC.TLC_SUCCESS, new String[] { optimisticProbStr, actualProbStr });
-    }
-    
-    /**
-     * This method added by LL on 17 April 2012 to replace the use of the PrintfFormat
-     * method in reportSuccess.
-     * 
-     * Returns a string representing the decimal representation of a probability to
-     * a given number of significant digits.  If the input is not a probability, or if
-     * some error is found, then it returns the result of applying Double.toString(long)
-     * to the value.
-     * 
-     * Warning: the code makes the following assumption:
-     *  - Double.toString(v) returns a decimal representation of v of the
-     *    form  [d]* ["." [d]+ ["E" [+ | -] [d]+]  where d is a decimal digit and
-     *      [x]   = 0 or 1 instance of x
-     *      [x]*  = any number of instances of x
-     *      [x]+  = any non-zero number of instances of x
-     *      x | y = an x or a y
-     * 
-     * @param val                - the probability represented as a long; must satisfy 0 <= val <= 1.
-     * @param significantDigits  - the number of significant digits to include; must be > 0.
-     * @return
-     */
-    private static final String ProbabilityToString(double val, int significantDigits) {
-        /*
-         * If val = 0 (which shouldn't happen), return "0.0"
-         */
-        if (val == 0) {
-            return "0.0";
-        }
-                
-        String valString = Double.toString(val) ;
-        int valStringLen = valString.length();
-        
-        String result = "";
-        int next = 0; // pointer to the next character in valString to examine.
-        int significantDigitsFound = 0;
-        
-        /*
-         * Skip past leading zeros.
-         */
-        while ((next < valStringLen)  && (valString.charAt(next) == '0')) {
-            next++ ;
-        }
-        
-        /*
-         * Append all the following digits to result, incrementing
-         * significantDigits for each one.  
-         */
-        while ( (next < valStringLen)  && 
-                Character.isDigit(valString.charAt(next))) {
-            result = result + valString.charAt(next);
-            significantDigitsFound++;
-            next++ ;
-         }
-        
-        /*
-         * IF next character is not "." 
-         *   THEN IF at end THEN return result
-         *                  ELSE return valString.
-         */
-        if (next == valStringLen) {
-            return result;
-        } else if (valString.charAt(next) != '.') {
-            return valString;
-        }
-        
-        
-        /*
-         * IF significantDigitsFound >= significantDigits, 
-         *    THEN skip over "." and the following digits.
-         *         (this should not happen)
-         *    ELSE append "." to result ;
-         *         IF significantDigitsFound = 0  
-         *           THEN copy each of the following "0"s of valString to result;
-         *         copy up to significantDigits - significantDigitsFound
-         *            following digits of valString to result;
-         *         IF next char of valString a digit >= "5"
-         *           THEN propagate a carry backwards over the digits of result
-         *                 -- e.g., changing ".019" to ".020";
-         *         Skip over remaining digits of valString;
-         */
-        if (significantDigitsFound >= significantDigits) {
-            next++ ;
-            while ( (next < valStringLen)  && 
-                    Character.isDigit(valString.charAt(next))) {
-                 next++ ;
-             }
+        final long numOfDistinctStates = anFpSet.size();
+        final double optimisticProb = calculateOptimisticProbability(numOfDistinctStates, numOfGenStates);
+        if (optimisticProb < 1E-10) {
+			// If the optimistic probability is sufficiently low, don't waste time
+			// calculating the actual probability.
+        	reportSuccess(numOfDistinctStates, numOfGenStates);
         } else {
-            next++;
-            result = result + ".";
-            if (significantDigitsFound == 0) {
-                while ((next < valStringLen)  && (valString.charAt(next) == '0')) {
-                    next++ ;
-                    result = result + "0";
-                }
-            }
-            while ((next < valStringLen)  && 
-                  Character.isDigit(valString.charAt(next)) &&
-                  significantDigitsFound < significantDigits ) {
-                      result = result + valString.charAt(next);
-                      next++;
-                      significantDigitsFound++;
-             }
-            if ((next < valStringLen)  &&  
-                 Character.isDigit(valString.charAt(next)) &&
-                 Character.digit(valString.charAt(next), 10) >= 5) {
-                int prev = result.length()-1; // the next digit of result to increment
-                boolean done = false;
-                while (!done) {
-                    if (prev < 0) {
-                        result = "1" + result;
-                        done = true;
-                    } else {
-                        char prevChar = result.charAt(prev);
-                        String front = result.substring(0, prev);
-                        String back = result.substring(prev+1);
-                        if (Character.isDigit(prevChar)) {
-                            if (prevChar == '9') {
-                                result = front + '0' + back;
-                            } else {
-                                result = front + Character.forDigit(Character.digit(prevChar, 10)+1, 10) + back;
-                                done = true;
-                            }
-                            
-                        } else {
-                            // prevChar must be '.', so just continue
-                        }
-                    }
-                    prev--;
-                }
-            }
-            while ((next < valStringLen)  &&  
-                    Character.isDigit(valString.charAt(next))) {
-                next++;
-            }
+        	reportSuccess(numOfDistinctStates, anFpSet.checkFPs(), numOfGenStates);
         }
-        
-        /*
-         * IF next at end of valString or at "E"
-         *   THEN copy remaining chars of valString to result;
-         *        return result
-         *   ELSE return valString
-         */
-        if (next >= valStringLen) {
-            return result;
-        }
-        if (valString.charAt(next)=='E') {
-            next++;
-            result = result + "E";
-            while (next < valStringLen) {
-                result = result + valString.charAt(next);
-                next++;
-            }
-            return result;
-        }
-        return valString;
-    }
-
-// The following method used for testing ProbabilityToString
-//
-//    public static void main(String[] args) {
-//        double[] test = new double[] {.5, .0995, .00000001, 001.000, .0022341, 
-//                                      .0022351, 3.14159E-12, 
-//                                      00.999, .002351111, 22.8E-14, 0.000E-12,
-//                                      37, 0033D, 04.85, -35.3};
-//        int i = 0;
-//        while (i < test.length) {
-//            System.out.println("" + i + ": " + Double.toString(test[i]) + " -> " + ProbabilityToString(test[i],2));
-//            i++;
-//        }    
-//    }
-
-    public final void setAllValues(int idx, Value val)
-    {
-        for (int i = 0; i < this.workers.length; i++)
-        {
-            workers[i].setLocalValue(idx, val);
-        }
-    }
-
-    public final Value getValue(int i, int idx)
-    {
-        return workers[i].getLocalValue(idx);
     }
 
     /**
      * Spawn the worker threads
      */
-    protected IdThread[] startWorkers(AbstractChecker checker, int checkIndex)
+    protected IWorker[] startWorkers(AbstractChecker checker, int checkIndex)
     {
+		// Generation of initial states is done at this point. Thus set the
+		// number of workers on the fpset, for it to adapt any synchronization
+    	// if necessary (e.g. OffHeapDiskFPSet).
+        this.theFPSet.incWorkers(this.workers.length);
+
         for (int i = 0; i < this.workers.length; i++)
         {
             this.workers[i].start();
         }
         return this.workers;
-    }
-
-    /**
-     * Work to be done prior entering to the worker loop
-     */
-    protected void runTLCPreLoop()
-    {
-        // nothing to do in this implementation
     }
 
     /**
@@ -1026,7 +943,7 @@ public class ModelChecker extends AbstractChecker
     {
         final int level = this.trace.getLevel();
         
-    	printProgresStats(-1);
+    	printProgresStats(-1, false);
         
         if (level > depth)
         {
@@ -1060,8 +977,207 @@ public class ModelChecker extends AbstractChecker
     {
         DebugPrinter.print(e);
     }
+    
+	private static boolean useByteArrayQueue() {
+		return Boolean.getBoolean(ModelChecker.class.getName() + ".BAQueue");
+	}
+
+	public static String getStateQueueName() {
+		// Ideally, this wouldn't hard-code the simple name of the classes but we don't
+		// have access to the class file yet.
+		return useByteArrayQueue() ? "DiskByteArrayQueue" : "DiskStateQueue";
+	}
 
     public long getStatesGenerated() {
-    	return numOfGenStates.get();
+    	long sum = numberOfInitialStates;
+    	for (final IWorker worker : workers) {
+			sum += ((Worker) worker).getStatesGenerated();
+		}
+    	return sum;
     }
+
+	/* (non-Javadoc)
+	 * @see tlc2.tool.AbstractChecker#getProgress()
+	 */
+	@Override
+	public int getProgress() {
+		try {
+			return trace.getLevelForReporting();
+		} catch (IOException e) {
+			// The modelchecker trace file might be closed already (e.g. it
+			// gets closed at the end of the modelchecker run)
+			return -1;
+		}
+	}
+	
+	/* (non-Javadoc)
+	 * @see tlc2.tool.AbstractChecker#stop()
+	 */
+	@Override
+	public void stop() {
+		synchronized (this) {
+			this.setDone();
+			this.theStateQueue.finishAll();
+			this.notifyAll();
+		}
+	}
+	
+	public void suspend() {
+		synchronized (this) {
+			this.theStateQueue.suspendAll();
+			this.notifyAll();
+		}
+	}
+
+	public void resume() {
+		synchronized (this) {
+			this.theStateQueue.resumeAll();
+			this.notifyAll();
+		}
+	}
+
+	/* (non-Javadoc)
+	 * @see tlc2.tool.AbstractChecker#getStateQueueSize()
+	 */
+	@Override
+	public long getStateQueueSize() {
+		return theStateQueue.size();
+	}
+
+	/* (non-Javadoc)
+	 * @see tlc2.tool.AbstractChecker#getDistinctStatesGenerated()
+	 */
+	@Override
+	public long getDistinctStatesGenerated() {
+		return theFPSet.size();
+	}
+   
+	/**
+	 * An implementation of {@link IStateFunctor} for
+	 * {@link ModelChecker#doInit(boolean)}.
+	 */
+	private class DoInitFunctor implements IStateFunctor {
+
+		@SuppressWarnings("serial")
+		public class InvariantViolatedException extends RuntimeException {
+		}
+		
+		/**
+		 * Non-Null iff a violation occurred.
+		 */
+		private TLCState errState;
+		private Throwable e;
+
+		/**
+		 * The return values of addElement are meaningless, but doInit wants to
+		 * know the actual outcome when all init states have been processed.
+		 * This outcome is stored as returnValue.
+		 */
+		private int returnValue = EC.NO_ERROR;
+		
+		private final boolean forceChecks;
+		private final ITool tool;
+		
+		public DoInitFunctor(ITool tool) {
+			this(tool, false);
+		}
+		
+		public DoInitFunctor(ITool tool, boolean forceChecks) {
+			this.forceChecks = forceChecks;
+			this.tool = tool;
+		}
+
+		/* (non-Javadoc)
+		 * @see tlc2.tool.IStateFunctor#addElement(tlc2.tool.TLCState)
+		 */
+		public Object addElement(final TLCState curState) {
+			if (Long.bitCount(numberOfInitialStates) == 1 && numberOfInitialStates > 1) {
+				MP.printMessage(EC.TLC_COMPUTING_INIT_PROGRESS, Long.toString(numberOfInitialStates));
+			}
+			numberOfInitialStates++;
+			
+			// getInitStates() does not support aborting init state generation
+			// once a violation has been found (that is why the return values of
+			// addElement are meaningless). It continues until all init
+			// states have been generated. Thus, the functor simply ignores
+			// subsequent states once a violation has been recorded.
+			if (errState != null) {
+				if (returnValue == EC.NO_ERROR)
+				  returnValue = EC.TLC_INITIAL_STATE;
+				return returnValue;
+			}
+			
+			try {
+				// Check if the state is a legal state
+				if (!tool.isGoodState(curState)) {
+					MP.printError(EC.TLC_INITIAL_STATE, new String[]{ "current state is not a legal state", curState.toString() });
+					this.errState = curState;
+					returnValue = EC.TLC_INITIAL_STATE;
+					throw new InvariantViolatedException();
+				}
+				boolean inModel = tool.isInModel(curState);
+				boolean seen = false;
+				if (inModel) {
+					long fp = curState.fingerPrint();
+					seen = theFPSet.put(fp);
+					if (!seen) {
+						allStateWriter.writeState(curState);
+						((Worker) workers[0]).writeState(curState, fp);
+						theStateQueue.enqueue(curState);
+
+						// build behavior graph for liveness checking
+						if (checkLiveness) {
+							liveCheck.addInitState(tool, curState, fp);
+						}
+					}
+				}
+				// Check properties of the state:
+				if (!seen || forceChecks) {
+					for (int j = 0; j < tool.getInvariants().length; j++) {
+						if (!tool.isValid(tool.getInvariants()[j], curState)) {
+							// We get here because of invariant violation:
+							MP.printError(EC.TLC_INVARIANT_VIOLATED_INITIAL,
+									new String[] { tool.getInvNames()[j].toString(), curState.toString() });
+							if (!TLCGlobals.continuation) {
+								this.errState = curState;
+								returnValue = EC.TLC_INVARIANT_VIOLATED_INITIAL;
+								throw new InvariantViolatedException();
+							}
+						}
+					}
+					for (int j = 0; j < tool.getImpliedInits().length; j++) {
+						if (!tool.isValid(tool.getImpliedInits()[j], curState)) {
+							// We get here because of implied-inits violation:
+							MP.printError(EC.TLC_PROPERTY_VIOLATED_INITIAL,
+									new String[] { tool.getImpliedInitNames()[j], curState.toString() });
+							this.errState = curState;
+							returnValue = EC.TLC_PROPERTY_VIOLATED_INITIAL;
+							throw new InvariantViolatedException();
+						}
+					}
+				}
+			} catch (InvariantViolatedException | Assert.TLCRuntimeException | EvalException e) {
+				// IVE gets thrown above when an Invariant is violated. TLCRuntimeException gets
+				// thrown when Tool fails to evaluate a statement because of e.g. too large sets
+				// or type errors such as in DoInitFunctorInvariantMinimalErrorStackTest test.
+				this.errState = curState;
+				this.e = e;
+				throw e;
+			} catch (OutOfMemoryError e) {
+				MP.printError(EC.SYSTEM_OUT_OF_MEMORY_TOO_MANY_INIT);
+				returnValue = EC.SYSTEM_OUT_OF_MEMORY_TOO_MANY_INIT;
+				return returnValue;
+			} catch (Throwable e) {
+				// Assert.printStack(e);
+				this.errState = curState;
+				this.e = e;
+			}
+			return returnValue;
+		}
+	}
+
+	public List<File> getModuleFiles(FilenameToStream resolver) {
+		return this.tool.getModuleFiles(resolver);
+	}
 }
+	

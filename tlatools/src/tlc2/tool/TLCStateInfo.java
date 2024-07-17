@@ -10,17 +10,49 @@ public class TLCStateInfo {
   public long stateNumber;
   public TLCState state;
   public Object info;
+  public Long fp;
+
+	public TLCStateInfo(TLCState initialState) {
+		this.state = initialState;
+		this.info = "<Initial predicate>";
+		this.stateNumber = 1;
+		this.fp = initialState.fingerPrint();
+	}
 
   public TLCStateInfo(TLCState s, Object info) {
     this.state = s;
     this.info = info;
   }
 
+  public TLCStateInfo(TLCState s, String info, int stateNum, long fp) {
+	  this(s, info);
+	  stateNumber = stateNum;
+	  this.fp = fp;
+  }
+
   public final long fingerPrint() {
-    return this.state.fingerPrint();
+	  if (fp == null) {
+		  fp = this.state.fingerPrint();
+	  }
+	  return fp.longValue();
   }
 
   public final String toString() {
     return this.state.toString();
+  }
+  
+  public boolean equals(Object other) {
+	  if (other instanceof TLCStateInfo) {
+		  TLCStateInfo sinfo = (TLCStateInfo) other;
+		  return this.state.equals(sinfo.state);
+	  } else if (other instanceof TLCState) {
+		  TLCState state = (TLCState) other;
+		  return this.state.equals(state);
+	  }
+	  return false;
+  }
+
+  public int hashCode() {
+	  return this.state.hashCode();
   }
 }

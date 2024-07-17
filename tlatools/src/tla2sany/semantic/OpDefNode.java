@@ -35,16 +35,20 @@ import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Iterator;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
+import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.parser.SyntaxTreeNode;
 import tla2sany.st.Location;
 import tla2sany.st.TreeNode;
 import tla2sany.utilities.Strings;
 import tla2sany.utilities.Vector;
+import tla2sany.xml.SymbolContext;
+import tlc2.tool.BuiltInOPs;
 import util.UniqueString;
 import util.WrongInvocationException;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
 
   /**
    * An OpDefNode can have one of the following kinds:
@@ -620,11 +624,52 @@ public class OpDefNode extends OpDefOrDeclNode
 
   /**
    * This method tests whether an operand is a legal instance of an
-   * operator being passed as argument to another operator
+   * operator being passed as argument to another operator.
+   * 
+   * Bug discovered in July 2017: This method was testing if the
+   * arg is an operator argument that may be used as parameter 
+   * number i of the operator described by this OpDefNode.  For example,
+   * if
+   * 
+   *     D(Op(_)) == Op(42)
+   *     
+   * then the argument of D must be an operator that takes a single
+   * expression as an argument.  However, this method returned true
+   * if the argument is an operator like D, that takes a single
+   * OPERATOR as an argument.  LL rewrote the code on 22 July 2017 
+   * to catch this case.
+   * 
+   * @see IllegalOperatorTest
    */
   private boolean matchingOpArgOperand (ExprOrOpArgNode arg, int i) {
-    return ((arg instanceof OpArgNode) &&
-            params[i].getArity() == ((OpArgNode)arg).getArity());
+	  // Set result to true iff arg is an operator argument of the
+	  // correct arity.
+	  boolean result = (arg instanceof OpArgNode) &&
+			           (params[i].getArity() == ((OpArgNode)arg).getArity()) ;
+	  
+	  // We now must check that arg does not expect an operator as any
+	  // of its arguments.  The comments in OpArgNode.java state that 
+	  // OpArgNode.op is an OpDefNode, OpDeclNode, or FormalParamNode.  Of
+	  // those, only an OpDefNode represents an operator that can have 
+	  // an argument that is an operator.  Note that an argument j of an
+	  // OpDefNode is an operator iff its arity is  0.
+	  if (result) {
+		  OpArgNode argOpArg = (OpArgNode) arg ;
+		  if (argOpArg.getOp() instanceof OpDefNode) {
+			  OpDefNode opdefArg = (OpDefNode) argOpArg.getOp() ;
+			  for (int j = 0; j < opdefArg.getArity() ; j++) {
+				  if (opdefArg.getParams()[j].getArity() > 0) {
+					  result = false ;
+				  }
+			  }
+		  }
+	  }
+		  
+      return result ;
+	  	           
+   // Code before 22 July 2017 change.
+   //    return ((arg instanceof OpArgNode) &&
+   //              params[i].getArity() == ((OpArgNode)arg).getArity());
   }
 
   /* This method shortens the match() method right after it */
@@ -904,6 +949,7 @@ public class OpDefNode extends OpDefOrDeclNode
 //    this.argLevelParams      = EmptySet;
   }
 
+  @Override
   public final boolean levelCheck(int itr) {
     if (   (this.levelChecked >= itr)
         || (    (! inRecursiveSection)
@@ -1103,6 +1149,7 @@ public class OpDefNode extends OpDefOrDeclNode
    * toString, levelDataToString, and walkGraph methods to implement
    * ExploreNode interface
    */
+  @Override
   public final String levelDataToString() {
     if (   (this.getKind() == ModuleInstanceKind)
         || (this.getKind() == NumberedProofStepKind)) {return "";} ;
@@ -1165,10 +1212,15 @@ public class OpDefNode extends OpDefOrDeclNode
   }
 
 
+  public boolean hasOpcode(final int opCode) {
+      return opCode == BuiltInOPs.getOpCode(getName());
+  }
+
   /**
    * The body is the node's only child.
    */
 
+  @Override
   public SemanticNode[] getChildren() {
     return new SemanticNode[] {this.body};
   }
@@ -1178,24 +1230,53 @@ public class OpDefNode extends OpDefOrDeclNode
    * and inserts them in the Hashtable semNodesTable for use by
    * the Explorer tool.
    */
-  public final void walkGraph(Hashtable semNodesTable) {
-    Integer uid = new Integer(myUID);
+  @Override
+  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
     semNodesTable.put(uid, this);
+    visitor.preVisit(this);
     if (params != null && params.length > 0) {
       for (int i = 0; i < params.length; i++) {
-        if (params[i] != null) params[i].walkGraph(semNodesTable);
+        if (params[i] != null) params[i].walkGraph(semNodesTable, visitor);
       }
     }
-    if (body != null) body.walkGraph(semNodesTable);
-    if (stepNode != null) stepNode.walkGraph(semNodesTable);
+    if (body != null) body.walkGraph(semNodesTable, visitor);
+    if (stepNode != null) stepNode.walkGraph(semNodesTable, visitor);
+    visitor.postVisit(this);
   }
+
+	@Override
+	public String getSignature() {
+		final StringBuffer buf = new StringBuffer();
+		buf.append(getName().toString());
+		if (getArity() > 0 && getKind() != ASTConstants.BuiltInKind) {
+			buf.append("(");
+			//TODO This hack doesn't work for infix operators
+			final FormalParamNode[] params = getParams();
+			for (int i = 0; i < params.length - 1; i++) {
+				final FormalParamNode formalParamNode = params[i];
+				if (formalParamNode.getTreeNode() != null) {
+					final SyntaxTreeNode treeNode = (SyntaxTreeNode) formalParamNode.getTreeNode();
+					buf.append(treeNode.getHumanReadableImage());
+					buf.append(", ");
+				}
+			}
+			if (params[params.length - 1].getTreeNode() != null) {
+				final TreeNode treeNode = params[params.length - 1].getTreeNode();
+				buf.append(treeNode.getHumanReadableImage());
+			}
+			buf.append(")");
+		}
+		return buf.toString();
+	}
 
   /**
    * Displays this node as a String, implementing ExploreNode
    * interface; depth parameter is a bound on the depth of the portion
    * of the tree that is displayed.
    */
+  @Override
   public final String toString(int depth) {
     if (depth <= 0) return "";
 
@@ -1270,6 +1351,25 @@ public class OpDefNode extends OpDefOrDeclNode
     return ret;
   }
 
+	@Override
+	public String getHumanReadableImage() {
+		// This ony gets pre-comments (directly in front of the operator definition).
+		// In-line comments - e.g. found in the standard modules - are not pre-comments.
+		final String comment = getComment();
+		
+		final StringBuffer buf = new StringBuffer(comment);
+		buf.append("\n");
+		
+		TreeNode[] ones = getTreeNode().one();
+		for (TreeNode treeNode : ones) {
+			// TODO This omits all whitespaces from the definition and is thus hard to read.
+			// I couldn't figure out a better way to obtain the original image though.
+			buf.append(treeNode.getHumanReadableImage());
+			buf.append(" ");
+		}
+		return buf.toString().trim();
+	}
+  
   protected String getNodeRef() {
     switch (getKind()) {
       case UserDefinedOpKind:
@@ -1282,7 +1382,7 @@ public class OpDefNode extends OpDefOrDeclNode
     }
   }
 
-  protected Element getSymbolElement(Document doc, tla2sany.xml.SymbolContext context) {
+  protected Element getSymbolElement(Document doc, SymbolContext context) {
     Element ret = null;
     switch (getKind()) {
       case UserDefinedOpKind:

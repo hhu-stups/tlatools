@@ -14,6 +14,7 @@ import java.net.UnknownHostException;
 import java.rmi.ConnectException;
 import java.rmi.Naming;
 import java.rmi.NoSuchObjectException;
+import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.Date;
@@ -305,8 +306,8 @@ public class TLCWorker extends UnicastRemoteObject implements TLCWorkerRMI {
 		cdl = new CountDownLatch(numCores);
 		
 		try {
-			String url = "//" + serverName + ":" + TLCServer.Port
-					+ "/TLCServer";
+			final String url = "//" + serverName + ":" + TLCServer.Port
+					+ "/" + TLCServer.SERVER_WORKER_NAME;
 			
 			// try to repeatedly connect to the server until it becomes available
 			int i = 1;
@@ -331,7 +332,30 @@ public class TLCWorker extends UnicastRemoteObject implements TLCWorkerRMI {
 						// how to handle
 						throw e;
 					}
+				} catch (NotBoundException e) {
+					// Registry is available but no object by "TLCServer". This
+					// happens when TLCServer makes it registry available but
+					// has't registered itself yet.
+					long sleep = (long) Math.sqrt(i);
+					ToolIO.out.println("Server " + serverName + " reachable but not ready yet, sleeping " + sleep
+							+ "s for server to come online...");
+					Thread.sleep(sleep * 1000);
+					i *= 2;
 				}
+				// It is vital to *not* catch NoRouteToHostException or
+				// UnknownHostException. TLCWorker is supposed to terminate when
+				// either of the two is thrown. The rational is that the while
+				// loop could be going while TLCServer is busy generating a huge
+				// set of init states. Close to completion, it finds a violating
+				// state and terminates. In case of cloud distributed TLC 
+				// (see CloudDistributedTLCJob), the host/vm running the master
+				// immediately shuts down. That is when the NoRouteToHostException
+				// will make sure that the set of TLCWorkers will terminate the VM
+				// and shutdown the vm too. There is obviously the chance that
+				// another vm gets the IP of the former master assigned and boots
+				// up during a sleep period above. Even though I do not know what
+				// holding period IP address have across the various cloud providers,
+				// I find this rather unlikely.
 			}
 
 			long irredPoly = server.getIrredPolyForFP();
@@ -348,8 +372,7 @@ public class TLCWorker extends UnicastRemoteObject implements TLCWorkerRMI {
 			fts.setTLCServer(server);
 			
 			DistApp work = new TLCApp(server.getSpecFileName(),
-					server.getConfigFileName(), server.getCheckDeadlock(),
-					server.getPreprocess(), fts);
+					server.getConfigFileName(), server.getCheckDeadlock(), fts);
 
 			final IFPSetManager fpSetManager = server.getFPSetManager();
 			

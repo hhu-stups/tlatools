@@ -2,13 +2,20 @@
 // Portions Copyright (c) 2003 Microsoft Corporation.  All rights reserved.
 package tla2sany.modanalyzer;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.Hashtable;
+import java.util.Set;
 
+import pcal.Validator;
+import pcal.Validator.ValidationResult;
 import tla2sany.semantic.AbortException;
 import tla2sany.semantic.Errors;
 import tla2sany.semantic.ExternalModuleTable;
+import tla2sany.semantic.ModuleNode;
 import tla2sany.st.TreeNode;
 import tla2sany.utilities.Vector;
 import util.FileUtil;
@@ -28,7 +35,7 @@ public class SpecObj
     // The raw file name for the root (top) module, unprocessed by adding
     // ".tla" or by prepending the full file system path to it)
 
-    ExternalModuleTable externalModuleTable = new ExternalModuleTable();
+    final ExternalModuleTable externalModuleTable = new ExternalModuleTable();
     // This is the one ExternalModuleTable for the entire specification;
     // it includes ModuleNode's for the root module, and for all modules
     // that it depends on directly or indirectly by EXTENDS or INSTANCE
@@ -38,7 +45,7 @@ public class SpecObj
     // must be done, i.e. if MODULE A references B, A is lower
     // on the stack. The same module name can occur multiple times.
 
-    public Hashtable parseUnitContext = new Hashtable();
+    public Hashtable<String, ParseUnit> parseUnitContext = new Hashtable<String, ParseUnit>();
     // Holds all known ParseUnit objects, i.e external, top-level
     // modules that have so far been encountered, keyed by module
     // (parseUnit) string name
@@ -159,6 +166,10 @@ public class SpecObj
     {
         return primaryFileName;
     }
+    
+    public final ModuleNode getRootModule() {
+    	return getExternalModuleTable().getRootModule();
+    }
 
     /**
      * Returns the ExternalModuleTable object that contains all of the
@@ -215,10 +226,19 @@ public class SpecObj
         return semanticErrors;
     }
 
+	public Set<String> getModuleNames() {
+		final Set<String> s = new HashSet<>();
+		final Enumeration<ModulePointer> modules = getModules();
+		while (modules.hasMoreElements()) {
+			s.add(modules.nextElement().getName());
+		}
+		return s;
+	}
+
     // Returns enumeration of the modules so far included in the spec.
     // As whoever wrote this documentation didn't think was worth mentioning,
     // it appears that the "modules" being returned are ModulePointer objects.
-    public final Enumeration getModules()
+    public final Enumeration<ModulePointer> getModules()
     {
         return moduleRelationshipsSpec.getKeys();
     }
@@ -232,12 +252,12 @@ public class SpecObj
     // Prints the context of one ParseUnit
     public final void printParseUnitContext()
     {
-        Enumeration enumerate = parseUnitContext.keys();
+        Enumeration<String> enumerate = parseUnitContext.keys();
 
         ToolIO.out.println("parseUnitContext =");
         while (enumerate.hasMoreElements())
         {
-            String key = (String) enumerate.nextElement();
+            String key = enumerate.nextElement();
             ToolIO.out.println("  " + key + "-->" + ((ParseUnit) parseUnitContext.get(key)).getName());
         }
     }
@@ -348,7 +368,7 @@ public class SpecObj
     // parseUnitName. If there is, cause an abort; otherwise return.
     private void nonCircularityTest(ParseUnit parseUnit, Errors errors) throws AbortException
     {
-        HashSet alreadyVisited = new HashSet();
+        Set<ParseUnit> alreadyVisited = new HashSet<ParseUnit>();
         Vector circularPath = new Vector();
 
         circularPath.addElement(parseUnit);
@@ -361,7 +381,7 @@ public class SpecObj
     // errors, and the method aborts. The set alreadyVisited is
     // used to prevent searching paths through the same candidate
     // multiple times.
-    private void nonCircularityBody(ParseUnit parseUnit, ParseUnit candidate, Errors errors, HashSet alreadyVisited,
+    private void nonCircularityBody(ParseUnit parseUnit, ParseUnit candidate, Errors errors, Set<ParseUnit> alreadyVisited,
             Vector circularPath) throws AbortException
     {
         // If we have already checked for circularities through this
@@ -874,18 +894,33 @@ public class SpecObj
     }
 
     /**
-     * This method "loads" an entire specification, starting with the
-     * top-level rootExternalModule and followed by all of the external
-     * modules it references via EXTENDS and INSTANCE statements.
+     * This invokes {@code loadSpec(rootExternalModuleName, errors, false);}
      */
-    public boolean loadSpec(String rootExternalModuleName, Errors errors) throws AbortException
-    {
+    public boolean loadSpec(final String rootExternalModuleName, final Errors errors) throws AbortException {
+    	return loadSpec(rootExternalModuleName, errors, false);
+    }
+    
+    /**
+	 * This method "loads" an entire specification, starting with the top-level
+	 * rootExternalModule and followed by all of the external modules it references
+	 * via EXTENDS and INSTANCE statements.
+	 * 
+	 * @param validateParseUnits if true, each parseable unit will be checked for
+	 *                           PlusCal and its accompanied TLA translation block,
+	 *                           followed by a validation of them if they exist
+	 * @see Validator
+	 */
+	public boolean loadSpec(final String rootExternalModuleName, final Errors errors, final boolean validateParseUnits)
+			throws AbortException {
         // If rootExternalModuleName" has *not* already been parsed, then
         // go to the file system and find the file containing it, create a
         // ParseUnit for it, and parse it. Parsing includes determining
         // module relationships. Aborts if not found in file system
         rootParseUnit = findOrCreateParsedUnit(rootExternalModuleName, errors, true /* first call */);
         rootModule = rootParseUnit.getRootModule();
+        if (validateParseUnits) {
+        	validateParseUnit(rootParseUnit);
+        }
 
         // Retrieve and parse all module extentions: As long as there is
         // another unresolved module name...
@@ -924,6 +959,10 @@ public class SpecObj
 
             if (extentionFound)
             {
+                if (validateParseUnits) {
+                	validateParseUnit(nextExtentionOrInstantiationParseUnit);
+                }
+
                 extenderOrInstancerParseUnit.addExtendee(nextExtentionOrInstantiationParseUnit);
                 nextExtentionOrInstantiationParseUnit.addExtendedBy(extenderOrInstancerParseUnit);
             }
@@ -963,6 +1002,54 @@ public class SpecObj
         return true;
         // loadUnresolvedRelatives(moduleRelationshipsSpec, rootModule, errors);
     }
+	
+	private void validateParseUnit(final ParseUnit parseUnit) {
+    	final File f = parseUnit.getNis().sourceFile();
+    	
+    	try (final FileInputStream fis = new FileInputStream(f)) {
+    		final Set<ValidationResult> results = Validator.validate(parseUnit, fis);
+    		
+    		if (results.contains(ValidationResult.TLA_DIVERGENCE_EXISTS) && results.contains(ValidationResult.PCAL_DIVERGENCE_EXISTS)) {
+    		/* Both hashes are invalid.
+    	       This is probably a sequel to Case 3, in which the user has decided either
+    	       (1) she has fixed the bug or (2) wants to change the spec and will later
+    	       modify the translation.
+    	       TLC called: By default, a warning should be raised.  It should be considered
+    	          the same as Case 2. */
+				ToolIO.out.println(String.format(
+						"!! WARNING: The PlusCal algorithm and its TLA+ translation in "
+								+ "module %s filename since the last translation.",
+						parseUnit.getName()));
+    		} else if (results.contains(ValidationResult.TLA_DIVERGENCE_EXISTS)) {
+      	      /* The algorithm hash is valid and the translation hash is invalid.
+     	       There are two reasons: (1) The user is debugging the spec, or
+     	       (2) She needed to modify the translation because she wants a spec that can't
+     	       be produced by PlusCal.  
+     	       TLC called: In both cases, no warning should be needed.  However,
+     	          in (1), she might have finished debugging and forgotten to run the 
+     	          translator.  To handle case (1), I suggest the default should be to run
+     	          TLC but raise a transient window with a warning that is easily ignored.  
+     	          For case (2), it should be possible to put something in a translation 
+     	          comment to disable the warning. */
+				ToolIO.out.println(String.format("!! WARNING: The TLA+ translation in "
+						+ "module %s has changed since its last translation.", parseUnit.getName()));
+    		} else if (results.contains(ValidationResult.PCAL_DIVERGENCE_EXISTS)) {
+       	      /* The algorithm hash is invalid and the translation hash is valid.
+     	       TLC called: By default, a warning should be generated.  I see little reason 
+     	         for not generating the warning.  So, it doesn't matter if its inconvenient
+     	         to turn off the warning, but turning it off should affect only the current
+     	         spec; and it should be easy to turn back on. */
+				ToolIO.out.println(String.format("!! WARNING: The PlusCal algorithm in "
+						+ "module %s has changed since its last translation.", parseUnit.getName()));
+    		} else if (results.contains(ValidationResult.ERROR_ENCOUNTERED)) {
+				ToolIO.err.println("A unexpected problem was encountered attempting to validate the specification for "
+						+ parseUnit.getName());
+    		}
+    	} catch (final IOException e) {
+    		ToolIO.err.println("Encountered an exception while attempt to validate " + f.getAbsolutePath() + " - "
+    				+ e.getMessage());
+    	}
+	}
 
     /**
      * Getter for the name resolver used in the Spec
@@ -980,5 +1067,9 @@ public class SpecObj
     {
         this.globalContextErrors = globalContextErrors;
     }
+
+	public ParseUnit getRootParseUnit() {
+		return this.parseUnitContext.get(this.getName());
+	}
 
 }

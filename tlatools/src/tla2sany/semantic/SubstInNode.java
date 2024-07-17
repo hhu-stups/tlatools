@@ -24,13 +24,16 @@ import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Iterator;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
+import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.st.TreeNode;
 import tla2sany.utilities.Strings;
 import tla2sany.utilities.Vector;
+import tla2sany.xml.SymbolContext;
 import util.UniqueString;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
 
 public class SubstInNode extends ExprNode {
   /**
@@ -80,7 +83,7 @@ public class SubstInNode extends ExprNode {
    * substitutions is to be produced.
    */
   public SubstInNode(TreeNode treeNode, SymbolTable instancerST,
-		     Vector instanceeDecls, ModuleNode ingmn, ModuleNode edmn)
+		     Vector<OpDeclNode> instanceeDecls, ModuleNode ingmn, ModuleNode edmn)
   throws AbortException {
     super(SubstInKind, treeNode);
     this.instantiatingModule = ingmn;
@@ -130,17 +133,17 @@ public class SubstInNode extends ExprNode {
    * OpApplNode or an OpArgNode substituted for each CONSTANT of
    * VARIABLE OpDeclNode in vector v.
    */
-  final void constructSubst(Vector instanceeDecls, SymbolTable instancerST,
+  final void constructSubst(Vector<OpDeclNode> instanceeDecls, SymbolTable instancerST,
 			    TreeNode treeNode)
   throws AbortException {
-    Vector vtemp = new Vector();
+    Vector<Subst> vtemp = new Vector<>();
 
     // for each CONSTANT or VARIABLE declared in module being
     // instantiated (the instancee)
     for ( int i = 0; i < instanceeDecls.size(); i++ ) {
       // Get the OpDeclNode for the CONSTANT or VARIABLE being
       // substituted for, i.e. "c" in" c <- e"
-      OpDeclNode decl = (OpDeclNode)instanceeDecls.elementAt(i);
+      OpDeclNode decl = instanceeDecls.elementAt(i);
 
       // Try to resolve the name in the instancer module so we can see
       // if it is recognized as an operator, and if so, what kind of
@@ -196,7 +199,8 @@ public class SubstInNode extends ExprNode {
    * to this method can contain a mixture of explicit and implicit
    * substitutions
    */
-  final void addExplicitSubstitute(Context instanceeCtxt, UniqueString lhs,
+  @SuppressWarnings("unused")	// TODO final else block is dead code 
+  final void addExplicitSubstitute(Context instanceCtxt, UniqueString lhs,
                                    TreeNode stn, ExprOrOpArgNode sub) {
     int index;
     for (index = 0; index < this.substs.length; index++) {
@@ -224,7 +228,7 @@ public class SubstInNode extends ExprNode {
       // the instancee context
 
       // look up the lhs symbol in the instancee context
-      SymbolNode lhsSymbol = instanceeCtxt.getSymbol(lhs);
+      SymbolNode lhsSymbol = instanceCtxt.getSymbol(lhs);
 
       // lhs must be an OpDeclNode; if not just return, as this error
       // will have been earlier, though semantic analysis was allowed
@@ -261,10 +265,10 @@ public class SubstInNode extends ExprNode {
    * possible, because X is not defined in the instantiating module,
    * then we have an error.
    */
-  final void matchAll(Vector decls) {
+  final void matchAll(Vector<OpDeclNode> decls) {
     for (int i = 0; i < decls.size(); i++) {
       // Get the name of the i'th operator that must be substituted for
-      UniqueString opName = ((OpDeclNode)decls.elementAt(i)).getName();
+      UniqueString opName = decls.elementAt(i).getName();
 
       // See if it is represented in the substitutions array
       int j;
@@ -276,7 +280,7 @@ public class SubstInNode extends ExprNode {
       if ( j >= this.substs.length ) {
         errors.addError(stn.getLocation(),
 			"Substitution missing for symbol " + opName + " declared at " +
-			((OpDeclNode)(decls.elementAt(i))).getTreeNode().getLocation() +
+			decls.elementAt(i).getTreeNode().getLocation() +
 			" \nand instantiated in module " + instantiatingModule.getName() + "." );
       }
     }
@@ -291,6 +295,8 @@ public class SubstInNode extends ExprNode {
 //  private SetOfArgLevelConstraints argLevelConstraints;
 //  private HashSet argLevelParams;
 
+  @Override
+  @SuppressWarnings("unchecked")
   public final boolean levelCheck(int itr) {
     if (this.levelChecked >= itr) return this.levelCorrect;
     this.levelChecked = itr ;
@@ -311,7 +317,7 @@ public class SubstInNode extends ExprNode {
 
     // Calculate the level information
     this.level = this.body.getLevel();
-    HashSet lpSet = this.body.getLevelParams();
+    HashSet<SymbolNode> lpSet = this.body.getLevelParams();
     for (int i = 0; i < this.substs.length; i++) {
       if (lpSet.contains(this.getSubFor(i))) {
 	this.level = Math.max(level, this.getSubWith(i).getLevel());
@@ -319,10 +325,9 @@ public class SubstInNode extends ExprNode {
     }
 
 //    this.levelParams = new HashSet();
-    Iterator iter = lpSet.iterator();
+    Iterator<SymbolNode> iter = lpSet.iterator();
     while (iter.hasNext()) {
-      Object param = iter.next();
-      this.levelParams.addAll(Subst.paramSet(param, this.substs));
+      this.levelParams.addAll(Subst.paramSet(iter.next(), this.substs));
         /*******************************************************************
         * At this point, levelCheck(itr) has been invoked on              *
         * this.substs[i].getExpr() (which equals this.getSubWith(i)).      *
@@ -353,8 +358,8 @@ public class SubstInNode extends ExprNode {
     * 23 February 2009: Added ".clone" to the following statements to fix  *
     * bug.                                                                 *
     ***********************************************************************/
-    this.allParams        = (HashSet) this.body.getAllParams().clone() ;
-    this.nonLeibnizParams = (HashSet) this.body.getNonLeibnizParams().clone() ;
+    this.allParams        = (HashSet<SymbolNode>)this.body.getAllParams().clone() ;
+    this.nonLeibnizParams = (HashSet<SymbolNode>)this.body.getNonLeibnizParams().clone() ;
     for (int i = 0 ; i < this.substs.length ; i++) {
       OpDeclNode param = substs[i].getOp() ;
       if (this.allParams.contains(param)) {
@@ -460,6 +465,7 @@ public class SubstInNode extends ExprNode {
 //           "ArgLevelParams: "      + this.argLevelParams      + "\n" ;
 //  }
 
+  @Override
   public final String toString(int depth) {
     if (depth <= 0) return "";
 
@@ -489,6 +495,7 @@ public class SubstInNode extends ExprNode {
    * The children of this node are the body and the expressions
    * being substituted for symbols.
    */
+  @Override
   public SemanticNode[] getChildren() {
      SemanticNode[] res = new SemanticNode[this.substs.length + 1];
      res[0] = this.body;
@@ -498,31 +505,46 @@ public class SubstInNode extends ExprNode {
      return res;
   }
 
-  public final void walkGraph(Hashtable semNodesTable) {
-    Integer uid = new Integer(myUID);
+  @Override
+  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
 
-    semNodesTable.put(new Integer(myUID), this);
+    semNodesTable.put(uid, this);
+    visitor.preVisit(this);
 
     if (this.substs != null) {
       for (int i = 0; i < this.substs.length; i++) {
-        if (this.substs[i] != null) this.substs[i].walkGraph(semNodesTable);
+        if (this.substs[i] != null) this.substs[i].walkGraph(semNodesTable, visitor);
       }
     }
-    if (this.body != null) this.body.walkGraph(semNodesTable);
+    if (this.body != null) this.body.walkGraph(semNodesTable, visitor);
+    visitor.postVisit(this);
     return;
   }
 
-  protected Element getLevelElement(Document doc, tla2sany.xml.SymbolContext context) {
+  @Override
+  protected Element getLevelElement(Document doc, SymbolContext context) {
       Element sbts = doc.createElement("substs");
       for (int i=0; i<substs.length; i++) {
         sbts.appendChild(substs[i].export(doc,context));
       }
       Element bdy = doc.createElement("body");
       bdy.appendChild(body.export(doc,context));
+
+      Element from = doc.createElement("instFrom");
+      Element fromchild = this.instantiatingModule.export(doc, context);
+      from.appendChild(fromchild);
+
+      Element to = doc.createElement("instTo");
+      Element tochild = instantiatedModule.export(doc,context);
+      to.appendChild(tochild);
+
       Element ret = doc.createElement("SubstInNode");
       ret.appendChild(sbts);
       ret.appendChild(bdy);
+      ret.appendChild(from);
+      ret.appendChild(to);
       // at the end, we append the context of the symbols used in this node
       //ret.appendChild(instanceeCtxt.export(doc));
 

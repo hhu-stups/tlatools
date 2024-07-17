@@ -26,10 +26,16 @@
 
 package tlc2.tool.liveness;
 
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import java.util.ArrayList;
 import java.util.List;
 
+import org.junit.Test;
+
 import tlc2.output.EC;
-import tlc2.tool.TLCStateInfo;
+import tlc2.output.EC.ExitStatus;
 
 /**
  * see http://tlaplus.codeplex.com/workitem/8
@@ -37,45 +43,38 @@ import tlc2.tool.TLCStateInfo;
 public class CodePlexBug08EWD840FL4Test extends ModelCheckerTestCase {
 
 	public CodePlexBug08EWD840FL4Test() {
-		super("EWD840MC4", "CodePlexBug08");
+		super("EWD840MC4", "CodePlexBug08", ExitStatus.VIOLATION_LIVENESS);
 	}
 	
+	@Test
 	public void testSpec() {
 		// ModelChecker has finished and generated the expected amount of states
 		assertTrue(recorder.recorded(EC.TLC_FINISHED));
-		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "15986", "1566"));
+		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "15986", "1566", "0"));
+		assertFalse(recorder.recorded(EC.GENERAL));
 		
 		// Assert it has found the temporal violation and also a counter example
 		assertTrue(recorder.recorded(EC.TLC_TEMPORAL_PROPERTY_VIOLATED));
 		assertTrue(recorder.recorded(EC.TLC_COUNTER_EXAMPLE));
 		
+		assertNodeAndPtrSizes(135540L, 23456L);
+		
 		// Assert the error trace
 		assertTrue(recorder.recorded(EC.TLC_STATE_PRINT2));
-		List<Object> records = recorder.getRecords(EC.TLC_STATE_PRINT2);
-
-		int i = 0; // State's position in records
-		Object[] objs = (Object[]) records.get(i++);
-		TLCStateInfo stateInfo = (TLCStateInfo) objs[0];
-		assertEquals("/\\ tpos = 0\n"
+		final List<String> expectedTrace = new ArrayList<String>();
+		expectedTrace.add("/\\ tpos = 0\n"
 				   + "/\\ active = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE @@ 3 :> TRUE)\n"
 				   + "/\\ tcolor = \"black\"\n"
-				   + "/\\ color = (0 :> \"white\" @@ 1 :> \"white\" @@ 2 :> \"white\" @@ 3 :> \"white\")", 
-				   stateInfo.toString().trim()); // trimmed to remove any newlines or whitespace
-		assertEquals(i, objs[1]);
-		
-		objs = (Object[]) records.get(i++);
-		stateInfo = (TLCStateInfo) objs[0];
-		assertEquals("/\\ tpos = 3\n"
+				   + "/\\ color = (0 :> \"white\" @@ 1 :> \"white\" @@ 2 :> \"white\" @@ 3 :> \"white\")");
+		expectedTrace.add("/\\ tpos = 3\n"
 				   + "/\\ active = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE @@ 3 :> TRUE)\n"
 				   + "/\\ tcolor = \"white\"\n"
-				   + "/\\ color = (0 :> \"white\" @@ 1 :> \"white\" @@ 2 :> \"white\" @@ 3 :> \"white\")", 
-				   stateInfo.toString().trim());
+				   + "/\\ color = (0 :> \"white\" @@ 1 :> \"white\" @@ 2 :> \"white\" @@ 3 :> \"white\")");
+		assertTraceWith(recorder.getRecords(EC.TLC_STATE_PRINT2), expectedTrace);
 		
 		// state 3 is stuttering
-		assertTrue(recorder.recorded(EC.TLC_STATE_PRINT3));
-		List<Object> stutter = recorder.getRecords(EC.TLC_STATE_PRINT3);
-		assertTrue(stutter.size() > 0);
-		Object[] object = (Object[]) stutter.get(0);
-		assertEquals(3, object[1]);
+		assertStuttering(3);
+
+	assertZeroUncovered();
 	}
 }

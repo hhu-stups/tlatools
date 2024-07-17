@@ -30,6 +30,7 @@ import java.io.IOException;
 
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.tool.ITool;
 import tlc2.util.LongVec;
 import tlc2.util.MemIntQueue;
 import tlc2.util.statistics.IBucketStatistics;
@@ -69,7 +70,7 @@ public class TableauDiskGraph extends AbstractDiskGraph {
 	 * long as it has been recorded with recordNode().
 	 * <p>
 	 * A node is logically undone when it's an initial state and added via
-	 * {@link LiveCheck#addInitState(tlc2.tool.TLCState, long)} but not yet
+	 * {@link LiveCheck#addInitState(ITool, tlc2.tool.TLCState, long)} but not yet
 	 * added via
 	 * {@link LiveCheck#addNextState(tlc2.tool.TLCState, long, tlc2.tool.StateVec, LongVec)}
 	 * . A second case is when a successor node in the behavior graph is added
@@ -112,10 +113,17 @@ public class TableauDiskGraph extends AbstractDiskGraph {
 	}
 
 	/* (non-Javadoc)
-	 * @see tlc2.tool.liveness.DiskGraph#putNode(tlc2.tool.liveness.GraphNode, long)
+	 * @see tlc2.tool.liveness.AbstractDiskGraph#putNode(tlc2.tool.liveness.GraphNode, long)
 	 */
 	protected void putNode(GraphNode node, long ptr) {
 		this.nodePtrTbl.put(node.stateFP, node.tindex, ptr);
+	}
+	
+	/* (non-Javadoc)
+	 * @see tlc2.tool.liveness.AbstractDiskGraph#checkDuplicate(tlc2.tool.liveness.GraphNode)
+	 */
+	protected boolean checkDuplicate(final GraphNode node) {
+		return this.nodePtrTbl.get(node.stateFP, node.tindex) != -1;
 	}
 
 	/**
@@ -156,16 +164,17 @@ public class TableauDiskGraph extends AbstractDiskGraph {
 	}
 
 	/* (non-Javadoc)
-	 * @see tlc2.tool.liveness.DiskGraph#getLink(long, int)
+	 * @see tlc2.tool.liveness.AbstractDiskGraph#getLink(long, int)
 	 */
 	public long getLink(long state, int tidx) {
 		return this.nodePtrTbl.get(state, tidx);
 	}
 
 	/* (non-Javadoc)
-	 * @see tlc2.tool.liveness.DiskGraph#putLink(long, int, long)
+	 * @see tlc2.tool.liveness.AbstractDiskGraph#putLink(long, int, long)
 	 */
 	public long putLink(long state, int tidx, long link) {
+		assert MAX_PTR <= link && link < MAX_LINK; 
 		int[] node = this.nodePtrTbl.getNodes(state);
 		int cloc = this.nodePtrTbl.getIdx(node, tidx);
 		long oldLink = TableauNodePtrTable.getElem(node, cloc);
@@ -177,7 +186,7 @@ public class TableauDiskGraph extends AbstractDiskGraph {
 	}
 
 	/* (non-Javadoc)
-	 * @see tlc2.tool.liveness.DiskGraph#setMaxLink(long, int)
+	 * @see tlc2.tool.liveness.AbstractDiskGraph#setMaxLink(long, int)
 	 */
 	public void setMaxLink(long state, int tidx) {
 		this.nodePtrTbl.put(state, tidx, MAX_LINK);
@@ -197,7 +206,7 @@ public class TableauDiskGraph extends AbstractDiskGraph {
 	}
 
 	/* (non-Javadoc)
-	 * @see tlc2.tool.liveness.DiskGraph#makeNodePtrTbl(long)
+	 * @see tlc2.tool.liveness.AbstractDiskGraph#makeNodePtrTbl(long)
 	 */
 	protected void makeNodePtrTbl(final long ptr) throws IOException  {
 		makeNodePtrTbl(ptr, nodePtrTbl);
@@ -256,9 +265,11 @@ public class TableauDiskGraph extends AbstractDiskGraph {
 	}
 
 	/* (non-Javadoc)
-	 * @see tlc2.tool.liveness.DiskGraph#toDotViz()
+	 * @see tlc2.tool.liveness.AbstractDiskGraph#toDotViz(tlc2.tool.liveness.OrderOfSolution)
 	 */
-	public final String toDotViz() {
+	public final String toDotViz(final OrderOfSolution oos) {
+		final int slen = oos.getCheckState().length;
+		final int alen = oos.getCheckAction().length;
 
 		// The following code relies on gnodes not being null, thus safeguard
 		// against accidental invocations.
@@ -274,6 +285,9 @@ public class TableauDiskGraph extends AbstractDiskGraph {
 			sb.append("digraph DiskGraph {\n");
 			sb.append("nodesep = 0.7\n");
 			sb.append("rankdir=LR;\n"); // Left to right rather than top to bottom
+			sb.append(toDotVizLegend(oos));
+			sb.append("subgraph cluster_graph {\n"); 
+	        sb.append("color=\"white\";\n"); // no border.
 			//TODO Reading the file front to end potentially yields node duplicates in the output. Better to create a (temporary) nodeptrtable and traverse it instead.
 			long nodePtr = this.nodeRAF.getFilePointer();
 			long nodePtrPtr = this.nodePtrRAF.getFilePointer();
@@ -284,9 +298,9 @@ public class TableauDiskGraph extends AbstractDiskGraph {
 				int tidx = nodePtrRAF.readInt();
 				long loc = nodePtrRAF.readLongNat();
 				GraphNode gnode = this.getNode(fp, tidx, loc);
-				sb.append(gnode.toDotViz(isInitState(gnode), true));
+				sb.append(gnode.toDotViz(isInitState(gnode), true, slen, alen));
 			}
-			sb.append("}");
+			sb.append("}}");
 			this.nodeRAF.seek(nodePtr);
 			this.nodePtrRAF.seek(nodePtrPtr);
 		} catch (IOException e) {
@@ -380,7 +394,21 @@ public class TableauDiskGraph extends AbstractDiskGraph {
 					continue;
 				}
 				if (nextState == state && nextTidx == tidx) {
-					// Stop BFS (see MemIntQUEUE above), we found a path to state.
+					// Stop BFS (see MemIntQUEUE above), we found a path to
+					// state. The path might not necessarily be the shortest one
+					// possible. A non-optimal path is returned if the BFS
+					// search happens to produce a path <<fp1, fp2, fp3>> first
+					// before it finds <<fp1, fp1, fp2>> (the first two elements
+					// share the same fingerprint and only differ in the
+					// discarded tableau id). The caller LiveWorker#printTrace
+					// collapses contiguous segments (identical fingerprint) in
+					// the path into a single state. E.g. the second example
+					// above will be printed as two states: <<State(fp1),
+					// State(fp2)>>. Hence, it is shorter than <<State(fp1),
+					// State(fp2), State(fp3)>>. Note that the search does *not*
+					// stop after the second node from the end in <<fp1, fp1, fp2>>
+					// because this node - due to its tableau id - does not
+					// correspond to an initial state in reversablePtrTable.
 					return reconstructReversePath(reversablePtrTable, curState, curTidx, nextState, nextTidx);
 				}
 
@@ -503,6 +531,12 @@ public class TableauDiskGraph extends AbstractDiskGraph {
 		return res;
 	}
 	
+	/**
+	 * This implementation extends {@link TableauNodePtrTable} to additionally
+	 * store the tableau index of the predecessor node. It is needed to traverse
+	 * the {@link ReverseTraversableTableauNodePtrTable} backwards once a error
+	 * trace path has been created.
+	 */
 	private class ReverseTraversableTableauNodePtrTable extends TableauNodePtrTable {
 
 		public ReverseTraversableTableauNodePtrTable(final int size) {
@@ -543,9 +577,9 @@ public class TableauDiskGraph extends AbstractDiskGraph {
 		}
 
 		/* (non-Javadoc)
-		 * @see tlc2.tool.liveness.TableauNodePtrTable#addElem(int[], int, long)
+		 * @see tlc2.tool.liveness.TableauNodePtrTable#appendElem(int[], int, long)
 		 */
-		protected int[] addElem(final int[] node, final int tidx, final long elem) {
+		protected int[] appendElem(final int[] node, final int tidx, final long elem) {
 			int len = node.length;
 			int[] newNode = new int[len + getElemLength()];
 			System.arraycopy(node, 0, newNode, 0, len);

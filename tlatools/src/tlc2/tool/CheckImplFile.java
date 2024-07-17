@@ -19,9 +19,11 @@ import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.tool.fp.FPSetConfiguration;
+import tlc2.tool.impl.FastTool;
 import tlc2.util.FP64;
 import util.Assert;
 import util.FileUtil;
+import util.TLAConstants;
 import util.ToolIO;
 import util.UniqueString;
 
@@ -39,10 +41,10 @@ public class CheckImplFile extends CheckImpl
      * to ModelChecker constructor.
      * 
      */
-    public CheckImplFile(String specFile, String configFile, boolean deadlock, int depth, String fromChkpt,
+    public CheckImplFile(ITool tool, String metadir, boolean deadlock, int depth, String fromChkpt,
             String traceFile, final FPSetConfiguration fpSetConfig) throws IOException
     {
-        super(specFile, configFile, deadlock, depth, fromChkpt, fpSetConfig);
+        super(tool, metadir, deadlock, depth, fromChkpt, fpSetConfig);
         this.traceFile = traceFile;
         this.states = null;
         this.sidx = 0;
@@ -178,9 +180,11 @@ public class CheckImplFile extends CheckImpl
             index++;
             if (index < args.length) {
                 configFile = args[index++];
-                int len = configFile.length();
-                if (configFile.startsWith(".cfg", len-4)) {
-                    configFile = configFile.substring(0, len-4);
+                if (configFile.endsWith(TLAConstants.Files.CONFIG_EXTENSION))
+                {
+                    configFile
+                    	= configFile.substring(0,
+                    			(configFile.length() - TLAConstants.Files.CONFIG_EXTENSION.length()));
                 }
             }
             else {
@@ -280,13 +284,12 @@ public class CheckImplFile extends CheckImpl
                 return;
             }
             if (mainFile != null) {
-                printErrorMsg(MP.getError(EC.CHECK_PARAM_UNRECOGNIZED, new String[]{mainFile, args[index] }));
+                printErrorMsg(MP.getError(EC.CHECK_PARAM_UNRECOGNIZED, new String[]{args[index], mainFile }));
                 return;
             }
             mainFile = args[index++];
-            int len = mainFile.length();
-            if (mainFile.startsWith(".tla", len-4)) {
-                mainFile = mainFile.substring(0, len-4);
+            if (mainFile.endsWith(TLAConstants.Files.TLA_EXTENSION)) {
+                mainFile = mainFile.substring(0, (mainFile.length() - TLAConstants.Files.TLA_EXTENSION.length()));
             }
         }
     }
@@ -299,6 +302,9 @@ public class CheckImplFile extends CheckImpl
     if (configFile == null) configFile = mainFile;
     if (traceFile == null) traceFile = mainFile + "_trace";
 
+    final File f = new File(mainFile);
+	String metadir = FileUtil.makeMetaDir(f.isAbsolute() ? f.getParent() : "", fromChkpt);
+
     try {
       // Initialize:
       if (fromChkpt != null) {
@@ -308,7 +314,8 @@ public class CheckImplFile extends CheckImpl
       FP64.Init(0);
       
       // Start the checker:
-      CheckImplFile checker = new CheckImplFile(mainFile, configFile, deadlock,
+      final ITool tool = new FastTool(mainFile, configFile);
+      CheckImplFile checker = new CheckImplFile(tool, metadir, deadlock,
 						depth, fromChkpt, traceFile, new FPSetConfiguration());
       checker.init();
       while (true) {

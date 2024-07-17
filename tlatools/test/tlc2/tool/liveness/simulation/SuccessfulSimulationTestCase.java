@@ -26,6 +26,11 @@
 
 package tlc2.tool.liveness.simulation;
 
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import org.junit.Test;
+
 import tlc2.output.EC;
 import tlc2.tool.liveness.ModelCheckerTestCase;
 
@@ -43,6 +48,11 @@ public abstract class SuccessfulSimulationTestCase extends ModelCheckerTestCase 
 		super(spec, path, extraArguments);
 	}
 	
+	public SuccessfulSimulationTestCase(String spec, String path, String[] extraArguments, int exitStatus) {
+		super(spec, path, extraArguments, exitStatus);
+	}
+	
+	@Test
 	public void testSpec() {
 		// Simulation must *NOT* show a counterexample. Regular model-checking
 		// shows that the liveness property holds.
@@ -53,6 +63,7 @@ public abstract class SuccessfulSimulationTestCase extends ModelCheckerTestCase 
 
 		// Finished...
 		assertTrue(recorder.recorded(EC.TLC_FINISHED));
+		assertFalse(recorder.recorded(EC.GENERAL));
 		// No temporal violation
 		assertFalse(recorder.recorded(EC.TLC_TEMPORAL_PROPERTY_VIOLATED));
 		// No counterexample

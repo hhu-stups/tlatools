@@ -8,18 +8,60 @@
     <artifactId>parent</artifactId>
     <groupId>tlatoolbox</groupId>
     <version>0.0.1-SNAPSHOT</version>
-    <relativePath>../pom.xml</relativePath>
+    <relativePath>../../pom.xml</relativePath>
   </parent>
   <groupId>tlatoolbox</groupId>
   <artifactId>org.lamport.tlatools</artifactId>
   <version>1.0.0-SNAPSHOT</version>
   <packaging>eclipse-plugin</packaging>
 
+  <properties>
+    <!-- tlatools is a non-standard maven project. Its heart is customBuild.xml written for ant          -->
+    <!-- which gets invoked from maven. Unfortunately, it means that the tasks which are executed        -->
+    <!-- by ant are not visible to maven. In this case it results in sonar not finding necessary         -->
+    <!-- data to include coverage information. The properties below make sure that sonar finds the data. -->
+	<sonar.sources>src,src-aj</sonar.sources>
+	<sonar.tests>test,test-verify,test-long,test-concurrent</sonar.tests>
+
+	<sonar.java.binaries>class</sonar.java.binaries>
+	<sonar.java.libraries>lib/*.jar</sonar.java.libraries>
+	
+	<sonar.java.test.binaries>class,test-class</sonar.java.test.binaries>
+	<sonar.java.test.libraries>lib/*.jar</sonar.java.test.libraries>
+	 
+	<sonar.java.coveragePlugin>jacoco</sonar.java.coveragePlugin>
+	<sonar.surefire.reportsPath>target/surefire-reports</sonar.surefire.reportsPath>
+	<sonar.junit.reportsPath>target/surefire-reports</sonar.junit.reportsPath>
+	<sonar.jacoco.reportPaths>target/code-coverage.exec</sonar.jacoco.reportPaths>
+  </properties>
+
+
     <build>
     <plugins>
-	   <plugin>
+		<!-- Delete the ../states/ folder created by the Ant JUnit tests as part 
+			of the maven-antrun-plugin of customBuild.xml. On the CI-machine, the ../states/ 
+			folder gradually grows to eventually fill-up the entire disk. -->
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-clean-plugin</artifactId>
+            <version>3.0.0</version>
+            <configuration>
+                <filesets>
+                    <fileset>
+                        <directory>../states/</directory>
+                        <includes>
+                            <include>**/*</include>
+                        </includes>
+                        <followSymlinks>false</followSymlinks>
+                    </fileset>
+                </filesets>
+            </configuration>
+        </plugin>
+        
+        <plugin>
 	    <groupId>org.apache.maven.plugins</groupId>
 	    <artifactId>maven-antrun-plugin</artifactId>
+	    <version>1.8</version>
 	    <executions>
 	    	<execution>
 	    		<id>compile</id>
@@ -33,9 +75,32 @@
 
 		    			<property name="build.compiler" value="extJavac"/>
 		    			<property name="maven.test.skip" value="${maven.test.skip}"/>
+		    			<property name="maven.test.halt" value="${maven.test.halt}"/>
 	    				<ant antfile="customBuild.xml" inheritRefs="true">
-	    					<target name="default" />
-	    					<target name="dist-mixed-zip" />
+	    					<target name="default-maven" />
+	    				</ant>
+	    			</tasks>
+	    		</configuration>
+	    		<goals>
+	    			<goal>run</goal>
+	    		</goals>
+	    	</execution>
+	    	<!-- Run customBuild.xml's clean target -->
+	    	<execution>
+	    		<id>clean</id>
+	    		<phase>clean</phase>
+	    		<configuration>
+	    			<tasks>
+
+						<taskdef name="junit"
+							classname="org.apache.tools.ant.taskdefs.optional.junit.JUnitTask"
+							classpathref="maven.test.classpath" />
+
+		    			<property name="build.compiler" value="extJavac"/>
+		    			<property name="maven.test.skip" value="${maven.test.skip}"/>
+		    			<property name="maven.test.halt" value="${maven.test.halt}"/>
+	    				<ant antfile="customBuild.xml" inheritRefs="true">
+	    					<target name="clean" />
 	    				</ant>
 	    			</tasks>
 	    		</configuration>
@@ -60,11 +125,52 @@
 	        </configuration>
 	      </plugin>
 
+			<!-- Update the Manifest.mf packaged into the OSGi variant of tla2tools.jar 
+				which is embedded in the Toolbox. The standalone tla2tools.jar (see customBuild.xml) 
+				defines various properties in its manifest among which are the git revision 
+				and the implementation title. These two properties are read by TLCGlobals 
+				to determine TLCs revision. This is turn is reported as part of execution statistics.
+				To correctly report the TLC revision when it is launched from inside the Toolbox, the
+				embedded tla2tools.jar created here has to also include the two properties. -->
+			<plugin>
+				<groupId>org.codehaus.mojo</groupId>
+				<artifactId>buildnumber-maven-plugin</artifactId>
+				<version>1.4</version>
+				<executions>
+					<execution>
+						<phase>validate</phase>
+						<goals>
+							<goal>create</goal>
+						</goals>
+					</execution>
+				</executions>
+				<configuration>
+					<getRevisionOnlyOnce>true</getRevisionOnlyOnce>
+				    <shortRevisionLength>7</shortRevisionLength>
+					<doCheck>false</doCheck>
+					<doUpdate>false</doUpdate>
+				</configuration>
+			</plugin>
+      		<plugin>
+				<groupId>org.eclipse.tycho</groupId>
+				<artifactId>tycho-packaging-plugin</artifactId>
+				<version>${tycho-version}</version>
+				<configuration>
+					<archive>
+						<manifestEntries>
+							<Implementation-Title>TLA+ Tools</Implementation-Title>
+							<X-Git-ShortRevision>${buildNumber}</X-Git-ShortRevision>
+						</manifestEntries>
+					</archive>
+				</configuration>
+			</plugin>
+
 			<!-- Compile aspects -->
             <plugin>
-                <groupId>org.codehaus.mojo</groupId>
+                <!-- https://github.com/nickwongdev/aspectj-maven-plugin -->
+                <groupId>com.nickwongdev</groupId>
                 <artifactId>aspectj-maven-plugin</artifactId>
-                <version>1.7</version>
+                <version>1.12.1</version>
                 <configuration>
                     <ajdtBuildDefFile>build.ajproperties</ajdtBuildDefFile>
                 </configuration>
@@ -73,6 +179,11 @@
                         <goals>
                             <goal>compile</goal>
                         </goals>
+                        <configuration>
+                            <complianceLevel>1.8</complianceLevel>
+                            <source>1.8</source>
+                            <target>1.8</target>
+                        </configuration>
                     </execution>
                </executions>
            </plugin>
@@ -81,15 +192,15 @@
 
   <dependencies>
 	<dependency>
-		<groupId>ant</groupId>
+		<groupId>org.apache.ant</groupId>
 		<artifactId>ant-junit</artifactId>
-		<version>1.6.2</version>
+		<version>1.7.3</version>
 		<scope>compile</scope>
 	</dependency>
   		<dependency>
             <groupId>org.aspectj</groupId>
             <artifactId>aspectjrt</artifactId>
-            <version>1.8.2</version>
+            <version>1.9.1</version>
         </dependency>
       </dependencies>
 

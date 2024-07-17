@@ -4,11 +4,12 @@ package tla2sany.semantic;
 import java.util.HashSet;
 import java.util.Iterator;
 
-import tla2sany.st.TreeNode;
-import util.WrongInvocationException;
-
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+
+import tla2sany.st.TreeNode;
+import tla2sany.xml.SymbolContext;
+import util.WrongInvocationException;
 
 /***************************************************************************
 * Note: The SANY1 level checking algorithm is specified in the file        *
@@ -63,10 +64,10 @@ public class LevelNode extends SemanticNode {
 ***************************************************************************/
 public boolean                   levelCorrect        = true ;
 public int                       level               = ConstantLevel ;
-public HashSet                   levelParams         = new HashSet() ;
+public HashSet<SymbolNode>       levelParams         = new HashSet<>() ;
 public SetOfLevelConstraints     levelConstraints    = new SetOfLevelConstraints();
 public SetOfArgLevelConstraints  argLevelConstraints = new SetOfArgLevelConstraints();
-public HashSet                   argLevelParams      = new HashSet() ;
+public HashSet<ArgLevelParam>    argLevelParams      = new HashSet<>() ;
 
 /***************************************************************************
 * The following HashSets are used in computing Leibnizity.                 *
@@ -80,8 +81,8 @@ public HashSet                   argLevelParams      = new HashSet() ;
 * See the file leibniz-checking.txt, appended below, for an explanation    *
 * of Leibnizity and Leibniz checking.                                      *
 ***************************************************************************/
-public HashSet                   allParams           = new HashSet() ;
-public HashSet                   nonLeibnizParams    = new HashSet() ;
+public HashSet<SymbolNode>       allParams           = new HashSet<>() ;
+public HashSet<SymbolNode>       nonLeibnizParams    = new HashSet<>() ;
 
 public int levelChecked   = 0 ;
   /*************************************************************************
@@ -178,11 +179,11 @@ public int levelChecked   = 0 ;
   * instantiated by a temporal formula.  Added by LL on 1 Mar 2009         *
   *************************************************************************/
   static void addTemporalLevelConstraintToConstants(
-                 HashSet params,
+                 HashSet<SymbolNode> params,
                  SetOfLevelConstraints constrs ) {
-      Iterator iter = params.iterator();
+      Iterator<SymbolNode> iter = params.iterator();
       while (iter.hasNext()) {
-        LevelNode node = (LevelNode) iter.next() ;
+        SymbolNode node = iter.next() ;
         if (node.getKind() == ConstantDeclKind) {
           constrs.put(node, Levels[ActionLevel]);
          };
@@ -191,6 +192,10 @@ public int levelChecked   = 0 ;
 /***************************************************************************
 * The checks in the following methods should probably be eliminated after  *
 * SANY2 is debugged.                                                       *
+*  <ul><li>0 for constant                                                  *
+*  <li>1 for non-primed variable                                           *
+*  <li>2 for primed variable                                               *
+*  <li>3 for temporal formula</ul>                                         *
 ***************************************************************************/
   public int getLevel(){
     if (this.levelChecked == 0)
@@ -198,7 +203,7 @@ public int levelChecked   = 0 ;
     return this.level;
   }
 
-  public HashSet getLevelParams(){
+  public HashSet<SymbolNode> getLevelParams(){
     /***********************************************************************
     * Seems to return a HashSet of OpDeclNode objects.  Presumably, these  *
     * are the parameters from the local context that contribute to the     *
@@ -209,7 +214,7 @@ public int levelChecked   = 0 ;
     return this.levelParams;
    }
 
-  public HashSet getAllParams(){
+  public HashSet<SymbolNode> getAllParams(){
     /***********************************************************************
     * Returns a HashSet of OpDeclNode objects, which are the parameters    *
     * from the local context that appear within the object.                *
@@ -219,7 +224,7 @@ public int levelChecked   = 0 ;
     return this.allParams;
    }
 
-  public HashSet getNonLeibnizParams(){
+  public HashSet<SymbolNode> getNonLeibnizParams(){
     /***********************************************************************
     * Returns a HashSet of OpDeclNode objects, which is the subset of      *
     * parameters returned by getAllParams() that appear within a           *
@@ -254,7 +259,7 @@ public int levelChecked   = 0 ;
     return this.argLevelConstraints;
    }
 
-  public HashSet getArgLevelParams(){
+  public HashSet<ArgLevelParam> getArgLevelParams(){
     /***********************************************************************
     * Seems to return a HashSet of ArgLevelParam objects.  (See            *
     * ArgLevelParam.java for an explanation of those objects.)             *
@@ -278,32 +283,32 @@ public int levelChecked   = 0 ;
        "NonLeibnizParams: "    + HashSetToString(this.getNonLeibnizParams()) ;
     }
 
-  public static String HashSetToString(HashSet hs) {
+  public static String HashSetToString(HashSet<? extends SymbolNode> hs) {
     /***********************************************************************
     * Converts a HashSet of SymbolNodes to a printable string.             *
     ***********************************************************************/
     String rval = "{" ;
     boolean first = true ;
-    Iterator iter = hs.iterator();
+    final Iterator<? extends SymbolNode> iter = hs.iterator();
     while (iter.hasNext()) {
       if (! first) {rval = rval + ", ";} ;
-      rval = rval + ((SymbolNode) iter.next()).getName() ;
+      rval = rval + iter.next().getName() ;
       first = false ;
      } ;
     rval = rval + "}" ;
     return rval ;
    }
 
-  public static String ALPHashSetToString(HashSet hs) {
+  public static String ALPHashSetToString(HashSet<ArgLevelParam> hs) {
     /***********************************************************************
     * Converts a HashSet of ArgLevelParam objects to a printable string.   *
     ***********************************************************************/
     String rval = "{" ;
     boolean first = true ;
-    Iterator iter = hs.iterator();
+    Iterator<ArgLevelParam> iter = hs.iterator();
     while (iter.hasNext()) {
       if (! first) {rval = rval + ", ";} ;
-      ArgLevelParam alp = (ArgLevelParam) iter.next();
+      ArgLevelParam alp = iter.next();
       rval = rval + "<" + alp.op.getName() + ", " + alp.i + ", " +
                      alp.param.getName() + ">" ;
       first = false;
@@ -322,9 +327,10 @@ public int levelChecked   = 0 ;
     return this.defaultLevelDataToString() ;}
 
 
-  protected Element getSemanticElement(Document doc, tla2sany.xml.SymbolContext context) {
+  @Override
+  protected Element getSemanticElement(Document doc, SymbolContext context) {
       // T.L. abstract method used to add data from subclasses
-      Element e = getLevelElement(doc, context);
+      Element e = getLevelElement(doc, context); //SymbolElement.getLevelElement is not supposed to be called
       try {
         Element l = appendText(doc,"level",Integer.toString(getLevel()));
         e.insertBefore(l,e.getFirstChild());
@@ -338,7 +344,7 @@ public int levelChecked   = 0 ;
      * T.L. October 2014
      * Abstract method for subclasses of LevelNode to add their information
      * */
-  protected Element getLevelElement(Document doc, tla2sany.xml.SymbolContext context) {
+  protected Element getLevelElement(Document doc, SymbolContext context) {
       throw new UnsupportedOperationException("xml export is not yet supported for: " + getClass() + " with toString: " + toString(100));
     }
 
@@ -606,6 +612,28 @@ public int levelChecked   = 0 ;
 // (* instances of Bar result in level-correct expressions.  I can't think of *)
 // (* any reasonable case where this will disallow a level-correct expression *)
 // (* that a user is likely to write.                                         *)
+// (*                                                                         *)
+// (* The decision to simplify the bookkeeping results in the following,      *)
+// (* somewhat less unlikely problem.  With the definitions                   *)
+// (*                                                                         *)
+// (*    ApplyToPrime(Op(_)) == Op(x')                                        *)
+// (*    EqualsNoPrime(a) == x                                                *)
+// (*                                                                         *)
+// (* the expression  ApplyToPrime(EqualsNoPrime)' , which equals x', is      *)
+// (* considered to be illegal.  This is because the algorithm to compute the *)
+// (* level makes the assumption that ApplyToPrime will always be applied to  *)
+// (* operators Op for which the level of Op(exp) depends on the level of     *)
+// (* exp.  Hence, SANY's algorithm gives ApplyToPrime(Op) a level of at      *)
+// (* least 2 (primed expression) for any operator Op.  A slightly more       *)
+// (* realistic example can be constructed by modifying ApplyToPrime a bit    *)
+// (* and applying it to ENABLED.                                             *)
+// (* TLC warns users about this bug if it reports an invariant to be         *)
+// (* level-incorrect in tlc2.tool.Spec.processConfigInvariants() with error  *)
+// (* code tlc2.output.EC.TLC_INVARIANT_VIOLATED_LEVEL.                       *)
+// (* A corresponding test can be found in test52. Its invariant "Invariant"  *)
+// (* covers the ENABLED scenario. However, the invariant remains disabled    *)
+// (* for as long as this bug is open. The invariant Invariant can be         *)
+// (* re-enabled in test52.cfg once this bug is closed.                       *)
 // (*                                                                         *)
 // (* To compute the values of op.level, op.weights, and op.minMaxLevel for   *)
 // (* an OpDefNode op corresponding to a definition, a level-checking         *)
@@ -1834,7 +1862,7 @@ public int levelChecked   = 0 ;
 //         (* I believe this shold be OpDeclNode. (LL, Mar 2007)              *)
 //         (*******************************************************************)
 //       param == op.params
-//   IN  /\ n.level = Max(op.level,
+//   IN  /\ n.level = NumMax(op.level,
 //                        SetMax({arg[i].level : i \in 1..p})
 //            (****************************************************************)
 //            (* For an operator parameter, we assume that the weights of     *)

@@ -10,9 +10,9 @@ import java.io.IOException;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.tool.StateVec;
 import tlc2.tool.TLCState;
 import tlc2.tool.Worker;
-import util.Assert;
 
 /**
  * 
@@ -84,6 +84,29 @@ public abstract class StateQueue implements IStateQueue {
 			this.notifyAll();
 		}
 	}
+	
+	public final synchronized void sEnqueue(final StateVec stateVec) {
+		int cnt = 0;
+		for (int j = 0; j < stateVec.size(); j++) {
+			TLCState state = stateVec.elementAt(j);
+			if (state != null) {
+				this.enqueueInner(state);
+				cnt++;
+			}
+		}
+		this.len += cnt;
+		if (this.numWaiting > 0 && !this.stop) {
+			this.notifyAll();
+		}
+	}
+
+
+	public final synchronized TLCState sPeek() {
+		if (this.isAvail()) {
+			return this.peekInner();
+		}
+		return null;
+	}
 
 	/* Return the first element in the queue. Wait if empty. */
 	/* (non-Javadoc)
@@ -93,7 +116,7 @@ public abstract class StateQueue implements IStateQueue {
 		if (this.isAvail()) {
 			final TLCState state = this.dequeueInner();
 			// LL modified error message on 7 April 2012
-			Assert.check(state != null, "Null state found on queue");
+			assert state != null : "Null state found on queue";
 			this.len--;
 			return state;
 		}
@@ -104,7 +127,7 @@ public abstract class StateQueue implements IStateQueue {
 	 * @see tlc2.tool.queue.IStateQueue#sDequeue(int)
 	 */
 	public final synchronized TLCState[] sDequeue(int cnt) {
-		Assert.check(cnt > 0, "Nonpositive number of states requested.");
+		assert cnt > 0 : "Nonpositive number of states requested.";
 		if (this.isAvail()) {
 			if (cnt > len) {
 				// in this case, casting len to int is safe 
@@ -327,6 +350,9 @@ public abstract class StateQueue implements IStateQueue {
 	/* This method must be implemented in the subclass. */
 	abstract TLCState dequeueInner();
 
+	/* This method must be implemented in the subclass. */
+	abstract TLCState peekInner();
+	
 	/* Checkpoint. */
 	/* (non-Javadoc)
 	 * @see tlc2.tool.queue.IStateQueue#beginChkpt()
@@ -342,4 +368,9 @@ public abstract class StateQueue implements IStateQueue {
 	 * @see tlc2.tool.queue.IStateQueue#recover()
 	 */
 	public abstract void recover() throws IOException;
+	
+	@Override
+	public void delete() throws IOException {
+		// no-op
+	}
 }

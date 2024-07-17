@@ -2,33 +2,33 @@
 // Portions Copyright (c) 2003 Microsoft Corporation.  All rights reserved.
 // Last modified on Mon 30 Apr 2007 at 15:29:57 PST by lamport  
 //      modified on Fri Jul 27 10:47:59 PDT 2001 by yuanyu   
-
 package tlc2.tool.distributed;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
 
 import model.InJarFilenameToStream;
 import model.ModelInJar;
 import tlc2.TLCGlobals;
 import tlc2.tool.Action;
+import tlc2.tool.IStateFunctor;
+import tlc2.tool.ITool;
 import tlc2.tool.StateVec;
 import tlc2.tool.TLCState;
 import tlc2.tool.TLCStateInfo;
-import tlc2.tool.Tool;
 import tlc2.tool.WorkerException;
 import tlc2.tool.fp.FPSet;
 import tlc2.tool.fp.FPSetConfiguration;
+import tlc2.tool.impl.CallStackTool;
+import tlc2.tool.impl.FastTool;
 import tlc2.util.FP64;
-import tlc2.value.Value;
 import util.FileUtil;
 import util.FilenameToStream;
+import util.TLAConstants;
 import util.ToolIO;
 import util.UniqueString;
 
-/**
- * @version $Id$
- */
 public class TLCApp extends DistApp {
 
 	private String config;
@@ -36,25 +36,25 @@ public class TLCApp extends DistApp {
 	/* Constructors */
 	public TLCApp(String specFile, String configFile, boolean deadlock,
 			String fromChkpt, FPSetConfiguration fpSetConfig) throws IOException {
-		this(specFile, configFile, deadlock, true, null);
+		this(specFile, configFile, deadlock, null);
 
 		this.fromChkpt = fromChkpt;
-		this.metadir = FileUtil.makeMetaDir(this.tool.specDir, fromChkpt);
+		this.metadir = FileUtil.makeMetaDir(this.tool.getSpecDir(), fromChkpt);
 		this.fpSetConfig = fpSetConfig;
 	}
 	
 	public TLCApp(String specFile, String configFile, boolean deadlock,
 			String fromChkpt, FPSetConfiguration fpSetConfig, FilenameToStream fts) throws IOException {
-		this(specFile, configFile, deadlock, true, fts);
+		this(specFile, configFile, deadlock, fts);
 
 		this.fromChkpt = fromChkpt;
-		this.metadir = FileUtil.makeMetaDir(this.tool.specDir, fromChkpt);
+		this.metadir = FileUtil.makeMetaDir(this.tool.getSpecDir(), fromChkpt);
 		this.fpSetConfig = fpSetConfig;
 	}
 
 	// TODO too many constructors redefinitions, replace with this(..) calls
 	public TLCApp(String specFile, String configFile,
-			Boolean deadlock, Boolean preprocess, FilenameToStream fts) throws IOException {
+			Boolean deadlock, FilenameToStream fts) throws IOException {
 
 		// get the spec dir from the spec file
 		int lastSep = specFile.lastIndexOf(File.separatorChar);
@@ -64,15 +64,11 @@ public class TLCApp extends DistApp {
 		
 		this.config = configFile;
 		
-		// TODO NameResolver
-		this.tool = new Tool(specDir, specFile, configFile, fts);
-		// SZ Feb 24, 2009: setup the user directory
-		ToolIO.setUserDir(specDir);
-
+		
 		this.checkDeadlock = deadlock.booleanValue();
-		this.preprocess = preprocess.booleanValue();
-		// SZ Feb 20, 2009: added null reference to SpecObj
-		this.tool.init(this.preprocess, null);
+		this.preprocess = true;
+		this.tool = new FastTool(specDir, specFile, configFile, fts);
+
 		this.impliedInits = this.tool.getImpliedInits();
 		this.invariants = this.tool.getInvariants();
 		this.impliedActions = this.tool.getImpliedActions();
@@ -80,13 +76,13 @@ public class TLCApp extends DistApp {
 	}
 
 	/* Fields */
-	public Tool tool;
+	public ITool tool;
 	public Action[] invariants; // the invariants to be checked
 	public Action[] impliedInits; // the implied-inits to be checked
 	public Action[] impliedActions; // the implied-actions to be checked
 	public Action[] actions; // the subactions
 	private boolean checkDeadlock; // check deadlock?
-	private boolean preprocess; // preprocess?
+	private final boolean preprocess; // preprocess?
 	private String fromChkpt = null; // recover from this checkpoint
 	private String metadir = null; // the directory pathname for metadata
 	private FPSetConfiguration fpSetConfig;
@@ -109,14 +105,14 @@ public class TLCApp extends DistApp {
 	 * @see tlc2.tool.distributed.DistApp#getFileName()
 	 */
 	public final String getFileName() {
-		return this.tool.rootFile;
+		return this.tool.getRootFile();
 	}
 
 	/* (non-Javadoc)
 	 * @see tlc2.tool.distributed.DistApp#getSpecDir()
 	 */
 	public String getSpecDir() {
-		return this.tool.specDir;
+		return this.tool.getSpecDir();
 	}
 
 	/* (non-Javadoc)
@@ -139,23 +135,16 @@ public class TLCApp extends DistApp {
 	public final boolean canRecover() {
 		return this.fromChkpt != null;
 	}
+	
+	public List<File> getModuleFiles() {
+		return this.tool.getModuleFiles(new InJarFilenameToStream(ModelInJar.PATH));
+    }
 
 	/* (non-Javadoc)
-	 * @see tlc2.tool.distributed.DistApp#getInitStates()
+	 * @see tlc2.tool.distributed.DistApp#getInitStates(tlc2.tool.IStateFunctor)
 	 */
-	public final TLCState[] getInitStates() throws WorkerException {
-		StateVec theInitStates = this.tool.getInitStates();
-		TLCState[] res = new TLCState[theInitStates.size()];
-		for (int i = 0; i < theInitStates.size(); i++) {
-			TLCState curState = theInitStates.elementAt(i);
-			if (!this.tool.isGoodState(curState)) {
-				String msg = "Error: Initial state is not completely specified by the"
-						+ " initial predicate.";
-				throw new WorkerException(msg, curState, null, false);
-			}
-			res[i] = (TLCState) curState;
-		}
-		return res;
+	public final void getInitStates(IStateFunctor functor) {
+		this.tool.getInitStates(functor);
 	}
 
 	/* (non-Javadoc)
@@ -183,6 +172,10 @@ public class TLCApp extends DistApp {
 						+ " the next-state action.";
 				throw new WorkerException(msg, curState, succState, false);
 			}
+			// isInModel, isInAction and invariant and implied action checks are
+			// carried out later in TLCWorker#getNextStates(..) and below in
+			// checkState(State, State) when it is know that the states are new
+			// (after the call to the fingerprint set).
 			res[i] = succState;
 		}
 		return res;
@@ -268,16 +261,14 @@ public class TLCApp extends DistApp {
 	 * @see tlc2.tool.distributed.DistApp#setCallStack()
 	 */
 	public final void setCallStack() {
-		this.tool.setCallStack();
+		this.tool = new CallStackTool(this.tool);
 	}
 
 	/* (non-Javadoc)
 	 * @see tlc2.tool.distributed.DistApp#printCallStack()
 	 */
 	public final String printCallStack() {
-		// SZ Jul 10, 2009: check if this is ok
-		// changed the method signature
-		return this.tool.getCallStack().toString();
+		return this.tool.toString();
 	}
 
 	@SuppressWarnings("deprecation")
@@ -296,9 +287,9 @@ public class TLCApp extends DistApp {
 				index++;
 				if (index < args.length) {
 					configFile = args[index];
-					int len = configFile.length();
-					if (configFile.startsWith(".cfg", len - 4)) {
-						configFile = configFile.substring(0, len - 4);
+					if (configFile.endsWith(TLAConstants.Files.CONFIG_EXTENSION)) {
+						configFile = configFile.substring(0,
+								(configFile.length() - TLAConstants.Files.CONFIG_EXTENSION.length()));
 					}
 					index++;
 				} else {
@@ -340,12 +331,18 @@ public class TLCApp extends DistApp {
 				index++;
 				if (index < args.length) {
 					try {
-						TLCGlobals.coverageInterval = Integer
-								.parseInt(args[index]) * 1000;
-						if (TLCGlobals.coverageInterval < 0) {
-							printErrorMsg("Error: expect a nonnegative integer for -coverage option.");
-							return null;
-						}
+						// Coverage reporting is broken is distributed TLC. Thus
+						// warn the user and continue ignoring the parameter.
+						// Consume its value though.
+						ToolIO.out.println(
+								"Warning: coverage reporting not supported in distributed TLC, ignoring -coverage "
+										+ args[index] + " parameter.");
+//						TLCGlobals.coverageInterval = Integer
+//						.parseInt(args[index]) * 1000;
+//						if (TLCGlobals.coverageInterval < 0) {
+//							printErrorMsg("Error: expect a nonnegative integer for -coverage option.");
+//							return null;
+//						}
 						index++;
 					} catch (Exception e) {
 						printErrorMsg("Error: An integer for coverage report interval required."
@@ -358,7 +355,7 @@ public class TLCApp extends DistApp {
 				}
 			} else if (args[index].equals("-terse")) {
 				index++;
-				Value.expand = false;
+				TLCGlobals.expand = false;
 			} else if (args[index].equals("-nowarning")) {
 				index++;
 				TLCGlobals.warn = false;
@@ -497,9 +494,8 @@ public class TLCApp extends DistApp {
 					return null;
 				}
 				specFile = args[index++];
-				int len = specFile.length();
-				if (specFile.startsWith(".tla", len - 4)) {
-					specFile = specFile.substring(0, len - 4);
+				if (specFile.endsWith(TLAConstants.Files.TLA_EXTENSION)) {
+					specFile = specFile.substring(0, (specFile.length() - TLAConstants.Files.TLA_EXTENSION.length()));
 				}
 			}
 		}
@@ -509,12 +505,13 @@ public class TLCApp extends DistApp {
 			// indicator to check the in-jar model/ folder for a spec.
 			// If a spec is found, use it instead.
 			if (ModelInJar.hasModel()) {
+				ModelInJar.loadProperties(); // Reads result.mail.address and so on.
 				TLCGlobals.tool = true; // always run in Tool mode (to parse output by Toolbox later)
 				TLCGlobals.chkptDuration = 0; // never use checkpoints with distributed TLC (highly inefficient)
 				FP64.Init(fpIndex);
 				FilenameToStream resolver = new InJarFilenameToStream(ModelInJar.PATH);
-				return new TLCApp("MC", "MC", deadlock, fromChkpt,
-						fpSetConfig, resolver);
+				return new TLCApp(TLAConstants.Files.MODEL_CHECK_FILE_BASENAME, TLAConstants.Files.MODEL_CHECK_FILE_BASENAME,
+						deadlock, fromChkpt, fpSetConfig, resolver);
 			}
 			
 			printErrorMsg("Error: Missing input TLA+ module.");

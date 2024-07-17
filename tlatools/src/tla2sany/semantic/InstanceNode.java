@@ -6,12 +6,14 @@ import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Iterator;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
+import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.st.TreeNode;
 import tla2sany.utilities.Strings;
 import util.UniqueString;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
 
 public class InstanceNode extends LevelNode {
 
@@ -397,16 +399,18 @@ public class InstanceNode extends LevelNode {
       return res;
    }
 
-  public final void walkGaph(Hashtable semNodesTable) {
-    Integer uid = new Integer(myUID);
+  public final void walkGaph(Hashtable<Integer, ExploreNode> semNodesTable, final ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
 
-    semNodesTable.put(new Integer(myUID), this);
+    semNodesTable.put(myUID, this);
+    visitor.preVisit(this);
 
     for (int i = 0; i < params.length; i++) {
-      params[i].walkGraph(semNodesTable);
+      params[i].walkGraph(semNodesTable, visitor);
     }
-    module.walkGraph(semNodesTable);
+    module.walkGraph(semNodesTable, visitor);
+    visitor.postVisit(this);
   }
 
   public final String toString(int depth) {
@@ -449,7 +453,8 @@ public class InstanceNode extends LevelNode {
       }
 
       Element ret = doc.createElement("InstanceNode");
-      ret.appendChild(appendText(doc,"uniquename",name.toString()));
+      if (name != null) ret.appendChild(appendText(doc,"uniquename",name.toString()));
+      ret.appendChild(appendText(doc, "module", module.getName().toString() ));
       ret.appendChild(sbts);
       ret.appendChild(prms);
       return ret;

@@ -5,10 +5,13 @@ package tla2sany.semantic;
 import java.math.BigDecimal;
 import java.util.Hashtable;
 
-import tla2sany.st.TreeNode;
-
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+
+import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
+import tla2sany.st.TreeNode;
+import tla2sany.xml.SymbolContext;
 
 /**
  * Describes a decimal like 1347.052.  This number is represented by the
@@ -67,9 +70,11 @@ public class DecimalNode extends ExprNode {
    * Returns the value as a string, exactly the way the user typed it--e.g.,
    * without any normalization, removal of leading or trailing zero's, etc.
    */
+  @Override
   public final String toString() { return this.image; }
 
   /* Level checking */
+  @Override
   public final boolean levelCheck(int iter) {
     levelChecked = iter;
       /*********************************************************************
@@ -109,11 +114,14 @@ public class DecimalNode extends ExprNode {
    * inserts them in the Hashtable semNodesTable for use by the
    * Explorer tool.
    */
-  public final void walkGraph(Hashtable semNodesTable) {
-    Integer uid = new Integer(myUID);
+  @Override
+  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
 
-    semNodesTable.put(new Integer(myUID), this);
+    semNodesTable.put(uid, this);
+    visitor.preVisit(this);
+    visitor.postVisit(this);
   }
 
   /**
@@ -121,6 +129,7 @@ public class DecimalNode extends ExprNode {
    * interface; depth parameter is a bound on the depth of the portion
    * of the tree that is displayed.
    */
+  @Override
   public final String toString(int depth) {
     if (depth <= 0) return "";
     return( "\n*DecimalNode" + super.toString(depth) + "Mantissa: "
@@ -130,7 +139,8 @@ public class DecimalNode extends ExprNode {
           );
   }
 
-  protected Element getLevelElement(Document doc, tla2sany.xml.SymbolContext context) {
+  @Override
+  protected Element getLevelElement(Document doc, SymbolContext context) {
     Element e = doc.createElement("DecimalNode");
     if (bigVal != null) {
       e.appendChild(appendText(doc,"mantissa",bigVal.unscaledValue().toString()));

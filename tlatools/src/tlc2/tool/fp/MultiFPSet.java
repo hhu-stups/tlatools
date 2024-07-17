@@ -8,10 +8,13 @@ import java.io.IOException;
 import java.rmi.NoSuchObjectException;
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.IntStream;
 
 import tlc2.output.EC;
 import tlc2.tool.TLCTrace;
-import tlc2.util.BufferedRandomAccessFile;
+import tlc2.tool.TLCTrace.Enumerator;
 import util.Assert;
 
 /**
@@ -31,7 +34,7 @@ public class MultiFPSet extends FPSet {
 	/**
 	 * Contains all nested {@link FPSet}s 
 	 */
-	protected FPSet[] sets;
+	protected final List<FPSet> sets;
 
 	/**
 	 * Amount of leftmost bits used to determine nested {@link FPSet}
@@ -59,11 +62,10 @@ public class MultiFPSet extends FPSet {
 		this.fpbits = 64 - bits;
 	}
 
-	protected FPSet[] getNestedFPSets(final FPSetConfiguration fpSetConfiguration) throws RemoteException {
-		int len = fpSetConfiguration.getMultiFPSetCnt();
-		final FPSet[] s = new FPSet[len];
-		for (int i = 0; i < len; i++) {
-			s[i] = FPSetFactory.getFPSet(new MultiFPSetConfiguration(fpSetConfiguration));
+	protected List<FPSet> getNestedFPSets(final FPSetConfiguration fpSetConfiguration) throws RemoteException {
+		final List<FPSet> s = new ArrayList<>(fpSetConfiguration.getMultiFPSetCnt());
+		for (int i = 0; i < fpSetConfiguration.getMultiFPSetCnt(); i++) {
+			s.add(FPSetFactory.getFPSet(new MultiFPSetConfiguration(fpSetConfiguration)));
 		}
 		return s;
 	}
@@ -71,10 +73,21 @@ public class MultiFPSet extends FPSet {
 	/* (non-Javadoc)
 	 * @see tlc2.tool.fp.FPSet#init(int, java.lang.String, java.lang.String)
 	 */
-	public final void init(int numThreads, String metadir, String filename) throws IOException {
-		for (int i = 0; i < this.sets.length; i++) {
-			this.sets[i].init(numThreads, metadir, filename + "_" + i);
-		}
+	public final FPSet init(final int numThreads, final String metadir, final String filename) throws IOException {
+		IntStream.range(0, this.sets.size()).parallel().forEach(i -> {
+			try {
+				sets.get(i).init(numThreads, metadir, filename + "_" + i);
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		});
+		return this;
+	}
+
+	
+	@Override
+	public void incWorkers(final int num) {
+		sets.stream().forEach(s -> s.incWorkers(num) );
 	}
 
 	/* (non-Javadoc)
@@ -82,11 +95,7 @@ public class MultiFPSet extends FPSet {
 	 */
 	public final long size() {
 		/* Returns the number of fingerprints in this set. */
-		long sum = 0;
-		for (int i = 0; i < this.sets.length; i++) {
-			sum += this.sets[i].size();
-		}
-		return sum;
+		return sets.parallelStream().mapToLong(FPSet::size).sum();
 	}
 	
 	/**
@@ -98,7 +107,7 @@ public class MultiFPSet extends FPSet {
 		// shifts a zero into the leftmost (msb) position of the first operand for right operand times
 		// and cast it to int loosing the leftmost 32 bit
 		final int idx = (int) (fp >>> this.fpbits);
-		return this.sets[idx];
+		return this.sets.get(idx);
 	}
 
 	/**
@@ -126,8 +135,8 @@ public class MultiFPSet extends FPSet {
 	 * @see tlc2.tool.fp.FPSet#close()
 	 */
 	public final void close() {
-		for (int i = 0; i < this.sets.length; i++) {
-			this.sets[i].close();
+		for (FPSet fpSet : sets) {
+			fpSet.close();
 		}
 	}
 	
@@ -135,8 +144,8 @@ public class MultiFPSet extends FPSet {
 	 * @see tlc2.tool.fp.FPSet#unexportObject(boolean)
 	 */
 	public void unexportObject(boolean force) throws NoSuchObjectException {
-		for (int i = 0; i < this.sets.length; i++) {
-			this.sets[i].unexportObject(force);
+		for (FPSet fpSet : sets) {
+			fpSet.unexportObject(force);
 		}
 		UnicastRemoteObject.unexportObject(this, force);
 	}
@@ -144,21 +153,36 @@ public class MultiFPSet extends FPSet {
 	/* (non-Javadoc)
 	 * @see tlc2.tool.fp.FPSet#checkFPs()
 	 */
-	public final double checkFPs() throws IOException {
-		/* This is not quite correct. */
-		double res = Double.NEGATIVE_INFINITY;
-		for (int i = 0; i < this.sets.length; i++) {
-			res = Math.max(res, this.sets[i].checkFPs());
-		}
-		return res;
+	public final long checkFPs() throws IOException {
+		return sets.parallelStream().mapToLong(s -> {
+			try {
+				return s.checkFPs();
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		}).min().orElse(Long.MAX_VALUE);
+	}
+
+	/* (non-Javadoc)
+	 * @see tlc2.tool.fp.FPSet#checkInvariant()
+	 */
+	public boolean checkInvariant() throws IOException {
+		return sets.parallelStream().allMatch(s -> {
+			try {
+				return s.checkInvariant();
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		});
 	}
 
 	/* (non-Javadoc)
 	 * @see tlc2.tool.fp.FPSet#exit(boolean)
 	 */
 	public final void exit(boolean cleanup) throws IOException {
-		for (int i = 0; i < this.sets.length; i++) {
-			this.sets[i].exit(cleanup);
+	    super.exit(cleanup);
+		for (FPSet fpSet : sets) {
+			fpSet.exit(cleanup);
 		}
 	}
 
@@ -166,8 +190,8 @@ public class MultiFPSet extends FPSet {
 	 * @see tlc2.tool.fp.FPSet#beginChkpt()
 	 */
 	public final void beginChkpt() throws IOException {
-		for (int i = 0; i < this.sets.length; i++) {
-			this.sets[i].beginChkpt();
+		for (FPSet fpSet : sets) {
+			fpSet.beginChkpt();
 		}
 	}
 
@@ -175,40 +199,21 @@ public class MultiFPSet extends FPSet {
 	 * @see tlc2.tool.fp.FPSet#commitChkpt()
 	 */
 	public final void commitChkpt() throws IOException {
-		for (int i = 0; i < this.sets.length; i++) {
-			this.sets[i].commitChkpt();
+		for (FPSet fpSet : sets) {
+			fpSet.commitChkpt();
 		}
 	}
 
 	/* (non-Javadoc)
 	 * @see tlc2.tool.fp.FPSet#recover()
 	 */
-	public final void recover() throws IOException {
-		for (int i = 0; i < this.sets.length; i++) {
-			this.sets[i].prepareRecovery();
-		}
-
-		long recoverPtr = TLCTrace.getRecoverPtr();
-		BufferedRandomAccessFile braf = new BufferedRandomAccessFile(TLCTrace.getFilename(), "r");
-		while (braf.getFilePointer() < recoverPtr) {
-			braf.readLongNat(); /* drop */
-			long fp = braf.readLong();
+	public final void recover(TLCTrace trace) throws IOException {
+		final Enumerator elements = trace.elements();
+		while (elements.nextPos() != -1) {
+			long fp = elements.nextFP();
 			getFPSet(fp).recoverFP(fp);
 		}
-		braf.close();
-
-		for (int i = 0; i < this.sets.length; i++) {
-			this.sets[i].completeRecovery();
-		}
-	}
-
-	/* (non-Javadoc)
-	 * 
-	 * NOOP!
-	 * 
-	 * @see tlc2.tool.fp.FPSet#prepareRecovery()
-	 */
-	public final void prepareRecovery() throws IOException { /* SKIP */
+		elements.close();
 	}
 
 	/* (non-Javadoc)
@@ -219,42 +224,45 @@ public class MultiFPSet extends FPSet {
 	}
 
 	/* (non-Javadoc)
-	 * 
-	 * NOOP!
-	 * 
-	 * @see tlc2.tool.fp.FPSet#completeRecovery()
-	 */
-	public final void completeRecovery() throws IOException { /* SKIP */
-	}
-
-	/* (non-Javadoc)
 	 * @see tlc2.tool.fp.FPSet#beginChkpt(java.lang.String)
 	 */
 	public final void beginChkpt(String filename) throws IOException {
-		for (int i = 0; i < this.sets.length; i++) {
-			this.sets[i].beginChkpt(filename + "_" + i);
-		}
+		IntStream.range(0, this.sets.size()).parallel().forEach(i -> {
+			try {
+				sets.get(i).beginChkpt(filename + "_" + i);
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		});
 	}
 
 	/* (non-Javadoc)
 	 * @see tlc2.tool.fp.FPSet#commitChkpt(java.lang.String)
 	 */
 	public final void commitChkpt(String filename) throws IOException {
-		for (int i = 0; i < this.sets.length; i++) {
-			this.sets[i].commitChkpt(filename + "_" + i);
-		}
+		IntStream.range(0, this.sets.size()).parallel().forEach(i -> {
+			try {
+				sets.get(i).commitChkpt(filename + "_" + i);
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		});
 	}
 
 	/* (non-Javadoc)
 	 * @see tlc2.tool.fp.FPSet#recover(java.lang.String)
 	 */
 	public final void recover(String filename) throws IOException {
-		for (int i = 0; i < this.sets.length; i++) {
-			this.sets[i].recover(filename + "_" + i);
-		}
+		IntStream.range(0, this.sets.size()).parallel().forEach(i -> {
+			try {
+				sets.get(i).recover(filename + "_" + i);
+			} catch (IOException e) {
+				throw new RuntimeException(e);
+			}
+		});
 	}
 
 	public FPSet[] getFPSets() {
-		return sets;
+		return sets.toArray(new FPSet[sets.size()]);
 	}
 }

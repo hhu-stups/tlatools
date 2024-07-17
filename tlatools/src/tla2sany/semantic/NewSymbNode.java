@@ -21,11 +21,14 @@ package tla2sany.semantic;
 
 import java.util.Hashtable;
 
-import tla2sany.st.TreeNode;
-import tla2sany.utilities.Strings;
-
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+
+import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
+import tla2sany.st.TreeNode;
+import tla2sany.utilities.Strings;
+import tla2sany.xml.SymbolContext;
 
 public class NewSymbNode extends LevelNode {
 
@@ -84,6 +87,7 @@ public class NewSymbNode extends LevelNode {
   * level of the `set' expression, if it's non-null.  Any other level      *
   * information comes from the `set' expression.                           *
   *************************************************************************/
+  @Override
   public boolean levelCheck(int iter)       {
 
     if (levelChecked < iter) {
@@ -157,6 +161,7 @@ public class NewSymbNode extends LevelNode {
    * The body is the node's only child.
    */
 
+  @Override
   public SemanticNode[] getChildren() {
     if (this.set == null) {
         return null;
@@ -165,13 +170,17 @@ public class NewSymbNode extends LevelNode {
     }
   }
 
-  public final void walkGraph(Hashtable semNodesTable) {
-    Integer uid = new Integer(myUID);
+  @Override
+  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
-    semNodesTable.put(new Integer(myUID), this);
-    if (set != null) { set.walkGraph(semNodesTable); } ;
+    semNodesTable.put(uid, this);
+    visitor.preVisit(this);
+    if (set != null) { set.walkGraph(semNodesTable, visitor); } ;
+    visitor.postVisit(this);
    }
 
+  @Override
   public final String toString(int depth) {
     if (depth <= 0) return "";
     String setString = "" ;
@@ -187,7 +196,8 @@ public class NewSymbNode extends LevelNode {
              setString);
    }
 
-  protected Element getLevelElement(Document doc, tla2sany.xml.SymbolContext context) {
+  @Override
+  protected Element getLevelElement(Document doc, SymbolContext context) {
     Element e = doc.createElement("NewSymbNode");
     e.appendChild(getOpDeclNode().export(doc,context));
     if (getSet() != null) {

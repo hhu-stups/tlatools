@@ -6,9 +6,16 @@ import java.lang.reflect.InvocationTargetException;
 import java.rmi.RemoteException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
+import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
+import util.TLCRuntime;
+import util.TLCRuntime.ARCH;
 
 public abstract class FPSetFactory {
 
@@ -22,12 +29,49 @@ public abstract class FPSetFactory {
 		return !OffHeapDiskFPSet.class.isAssignableFrom(clazz);
 	}
 
-	static boolean allocatesOnHeap(final String clazz) {
+	public static boolean allocatesOnHeap(final String clazz) {
 		try {
 			final ClassLoader classLoader = FPSet.class.getClassLoader();
+			@SuppressWarnings("unchecked")
 			Class<? extends FPSet> cls = (Class<? extends FPSet>) classLoader
 					.loadClass(clazz);
 			return allocatesOnHeap(cls);
+		} catch (ClassNotFoundException e) {
+			return false;
+		}
+	}
+
+	private static boolean supportsArchitecture(String clazz) {
+		try {
+			final ClassLoader classLoader = FPSet.class.getClassLoader();
+			@SuppressWarnings("unchecked")
+			Class<? extends FPSet> cls = (Class<? extends FPSet>) classLoader
+					.loadClass(clazz);
+			return supports32Bits(cls);
+		} catch (ClassNotFoundException e) {
+			return false;
+		}
+	}
+
+	private static boolean supports32Bits(final Class<? extends FPSet> clazz) {
+		if (TLCRuntime.getInstance().getArchitecture() == TLCRuntime.ARCH.x86
+				&& OffHeapDiskFPSet.class.isAssignableFrom(clazz)) {
+			return false;
+		}
+		return true;
+	}
+	
+	private static boolean isDiskFPSet(Class<? extends FPSet> cls) {
+		return DiskFPSet.class.isAssignableFrom(cls);
+	}
+
+	static boolean isDiskFPSet(final String clazz) {
+		try {
+			final ClassLoader classLoader = FPSet.class.getClassLoader();
+			@SuppressWarnings("unchecked")
+			Class<? extends FPSet> cls = (Class<? extends FPSet>) classLoader
+					.loadClass(clazz);
+			return isDiskFPSet(cls);
 		} catch (ClassNotFoundException e) {
 			return false;
 		}
@@ -55,27 +99,48 @@ public abstract class FPSetFactory {
 		
 		// fpBits > 0 indicates that the consumer requires a MultiFPSet
 		if (fpSetConfig.allowsNesting()) {
-			// A MultiFPSet comes in two flavors:
-			// a) For FPSets that sort on LSB
-			// b) For FPSets that use the MSB to sort the internal hash map
-			if (msbBasedFPSet(implClassname)) {
-				// Pass physical memory instead of logical FP count to adhere to
-				// the general FPSet ctor contract.
-				// @see http://bugzilla.tlaplus.net/show_bug.cgi?id=290
-				return new MSBMultiFPSet(fpSetConfig);
-			} else {
-				// Pass physical memory instead of logical FP count to adhere to
-				// the general FPSet ctor contract.
-				// @see http://bugzilla.tlaplus.net/show_bug.cgi?id=290
-				return new MultiFPSet(fpSetConfig);
-			}
+			// Pass physical memory instead of logical FP count to adhere to
+			// the general FPSet ctor contract.
+			// @see http://bugzilla.tlaplus.net/show_bug.cgi?id=290
+			return new MultiFPSet(fpSetConfig);
 		} else {
 			if (implClassname != null) {
-				return loadImplementation(implClassname, fpSetConfig);
-			} else {
-				return new MSBDiskFPSet(fpSetConfig);
+				if (supportsArchitecture(implClassname)) {
+					return loadImplementation(implClassname, fpSetConfig);
+				} else {
+					final ARCH architecture = TLCRuntime.getInstance().getArchitecture();
+					final String msg = String.format(
+							"Selected fingerprint set (set of visited states) %s does not support current architecture %s. "
+									+ "Reverting to default fingerprint set. "
+									+ "Off-heap memory allocated via -XX:MaxDirectMemorySize flag cannot be used by default "
+									+ "fingerprint set and is therefore wasted.",
+							implClassname, architecture);
+					MP.printWarning(EC.TLC_FEATURE_UNSUPPORTED, msg);
+				}
 			}
+			return new MSBDiskFPSet(fpSetConfig);
 		}
+	}
+	
+
+	/**
+	 * Create and *initialize* the set.
+	 */
+	public static Future<FPSet> getFPSetInitialized(final FPSetConfiguration fpSetConfiguration, final String metadir,
+			final String mainFile) {
+		final ExecutorService es = Executors.newSingleThreadExecutor();
+		return es.submit(new Callable<FPSet>() {
+			@Override
+			public FPSet call() throws Exception {
+				try {
+					final FPSet fpSet = FPSetFactory.getFPSet(fpSetConfiguration);
+					fpSet.init(TLCGlobals.getNumWorkers(), metadir, mainFile);
+					return fpSet;
+				} finally {
+					es.shutdown();
+				}
+			}
+		});
 	}
 
 	/**
@@ -162,19 +227,5 @@ public abstract class FPSetFactory {
 		// LL modified error message on 7 April 2012
 		MP.printWarning(EC.GENERAL, "unsuccessfully trying to load custom FPSet class: " + clazz, exp);
 		return null;
-	}
-
-	/**
-	 * @param userFpsetImplClassname
-	 * @return true iff the given class uses the MSB to pre-sort its fingerprints
-	 */
-	private static boolean msbBasedFPSet(String userFpsetImplClassname) {
-		if (!allocatesOnHeap(userFpsetImplClassname)) {
-			return true;
-		}
-		if (userFpsetImplClassname.equals(MSBDiskFPSet.class.getName())) {
-			return true;
-		}
-		return false;
 	}
 }

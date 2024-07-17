@@ -26,6 +26,9 @@
 
 package tlc2.tool.liveness;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
@@ -35,6 +38,9 @@ import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+
+import org.junit.Before;
+import org.junit.Test;
 
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
@@ -74,6 +80,7 @@ public abstract class MultiThreadedSpecTest extends ModelCheckerTestCase {
 		this.waitedRatio = waitedRatio;
 	}
 
+	@Test
 	public void testSpec() throws BrokenBarrierException, InterruptedException, TimeoutException {
 		// ModelChecker has finished and generated the expected amount of states
 		assertTrue(recorder.recorded(EC.TLC_FINISHED));
@@ -128,6 +135,7 @@ public abstract class MultiThreadedSpecTest extends ModelCheckerTestCase {
 		}
 	}
 	
+	@Before
 	public void setUp() {
 		// Set the threshold before TLC (periodically) checks liveness to
 		// the largest possible value. This essentially stops TLC from checking
@@ -155,8 +163,6 @@ public abstract class MultiThreadedSpecTest extends ModelCheckerTestCase {
 				latch.countDown();
 			}
 		});
-		
-		super.setUp();
 	}
 	
 	protected int getNumberOfThreads() {

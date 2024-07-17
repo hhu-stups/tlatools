@@ -3,10 +3,12 @@
 package tlc2.tool.distributed.management;
 
 import java.io.IOException;
+import java.rmi.RemoteException;
 
 import javax.management.NotCompliantMBeanException;
 
 import tlc2.TLCGlobals;
+import tlc2.tool.TLCState;
 import tlc2.tool.distributed.TLCServer;
 import tlc2.tool.distributed.fp.IFPSetManager;
 import tlc2.tool.management.TLCStandardMBean;
@@ -104,5 +106,90 @@ public class TLCServerMXWrapper extends TLCStandardMBean implements TLCStatistic
 	 */
 	public long getAverageBlockCnt() {
 		return tlcServer.getAverageBlockCnt();
+	}
+
+	/* (non-Javadoc)
+	 * @see tlc2.tool.distributed.management.TLCStatisticsMXBean#getRuntimeRatio()
+	 */
+	public double getRuntimeRatio() {
+		// Distributed TLC does not support liveness checking
+		return 0d;
+	}
+
+	/* (non-Javadoc)
+	 * @see tlc2.tool.distributed.management.TLCStatisticsMXBean#liveCheck()
+	 */
+	public void liveCheck() {
+		// Distributed TLC does not support liveness checking
+	}
+
+	/* (non-Javadoc)
+	 * @see tlc2.tool.distributed.management.TLCStatisticsMXBean#getCurrentState()
+	 */
+	public String getCurrentState() {
+		final TLCState state = tlcServer.stateQueue.sPeek();
+		if (state != null) {
+			return state.toString();
+		}
+		return "N/A";
+	}
+
+	/* (non-Javadoc)
+	 * @see tlc2.tool.distributed.management.TLCStatisticsMXBean#getSpecName()
+	 */
+	public String getSpecName() {
+		if (tlcServer.isRunning()) {
+			try {
+				return tlcServer.getSpecFileName();
+			} catch (RemoteException e) {
+				e.printStackTrace();
+			}
+		}
+		return "N/A";
+	}
+
+	/* (non-Javadoc)
+	 * @see tlc2.tool.distributed.management.TLCStatisticsMXBean#getModelName()
+	 */
+	public String getModelName() {
+		if (tlcServer.isRunning()) {
+			try {
+				return tlcServer.getConfigFileName();
+			} catch (RemoteException e) {
+				e.printStackTrace();
+			}
+		}
+		return "N/A";
+	}
+
+	/* (non-Javadoc)
+	 * @see tlc2.tool.distributed.management.TLCStatisticsMXBean#stop()
+	 */
+	public void stop() {
+		synchronized (tlcServer) {
+			tlcServer.setDone();
+			tlcServer.stateQueue.finishAll();
+			tlcServer.notifyAll();
+		}
+	}
+
+	/* (non-Javadoc)
+	 * @see tlc2.tool.distributed.management.TLCStatisticsMXBean#suspend()
+	 */
+	@Override
+	public void suspend() {
+		synchronized (tlcServer) {
+			tlcServer.stateQueue.suspendAll();
+		}
+	}
+
+	/* (non-Javadoc)
+	 * @see tlc2.tool.distributed.management.TLCStatisticsMXBean#resume()
+	 */
+	@Override
+	public void resume() {
+		synchronized (tlcServer) {
+			tlcServer.stateQueue.resumeAll();
+		}
 	}
 }

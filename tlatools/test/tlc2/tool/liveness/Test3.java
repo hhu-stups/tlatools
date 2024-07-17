@@ -26,21 +26,29 @@
 
 package tlc2.tool.liveness;
 
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import java.util.ArrayList;
 import java.util.List;
 
+import org.junit.Test;
+
 import tlc2.output.EC;
-import tlc2.tool.TLCStateInfo;
+import tlc2.output.EC.ExitStatus;
 
 public class Test3 extends ModelCheckerTestCase {
 
 	public Test3() {
-		super("Test3");
+		super("Test3", ExitStatus.VIOLATION_LIVENESS);
 	}
 	
+	@Test
 	public void testSpec() {
 		// ModelChecker has finished and generated the expected amount of states
 		assertTrue(recorder.recorded(EC.TLC_FINISHED));
-		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "5", "3"));
+		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "5", "3", "0"));
+		assertFalse(recorder.recorded(EC.GENERAL));
 		
 		// Assert it has found the temporal violation and also a counter example
 		assertTrue(recorder.recorded(EC.TLC_TEMPORAL_PROPERTY_VIOLATED));
@@ -48,33 +56,15 @@ public class Test3 extends ModelCheckerTestCase {
 		
 		// Assert the error trace
 		assertTrue(recorder.recorded(EC.TLC_STATE_PRINT2));
-		List<Object> records = recorder.getRecords(EC.TLC_STATE_PRINT2);
+		final List<String> expectedTrace = new ArrayList<String>(4);
+		expectedTrace.add("x = 0");
+		expectedTrace.add("x = 1");
+		expectedTrace.add("x = 0");
+		expectedTrace.add("x = 2");
+		assertTraceWith(recorder.getRecords(EC.TLC_STATE_PRINT2), expectedTrace);
+		
+		assertBackToState(1);
 
-		int i = 0; // State's position in records
-		Object[] objs = (Object[]) records.get(i++);
-		TLCStateInfo stateInfo = (TLCStateInfo) objs[0];
-		assertEquals("x = 0", stateInfo.toString().trim()); // trimmed to remove any newlines or whitespace
-		assertEquals(i, objs[1]);
-		
-		objs = (Object[]) records.get(i++);
-		stateInfo = (TLCStateInfo) objs[0];
-		assertEquals("x = 1", stateInfo.toString().trim());
-		assertEquals(i, objs[1]);
-		
-		objs = (Object[]) records.get(i++);
-		stateInfo = (TLCStateInfo) objs[0];
-		assertEquals("x = 0", stateInfo.toString().trim());
-		assertEquals(i, objs[1]);
-		
-		objs = (Object[]) records.get(i++);
-		stateInfo = (TLCStateInfo) objs[0];
-		assertEquals("x = 2", stateInfo.toString().trim());
-		assertEquals(i, objs[1]);
-		
-		// Assert the error trace ends with "Back to state 1"
-		assertTrue(recorder.recorded(EC.TLC_BACK_TO_STATE));
-		records = recorder.getRecords(EC.TLC_BACK_TO_STATE);
-		objs = (Object[]) records.get(0);
-		assertEquals("1", objs[0]);
+	assertZeroUncovered();
 	}
 }

@@ -2,21 +2,27 @@
 
 package tlc2.tool.fp.iterator;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
 import java.util.NoSuchElementException;
+
+import org.junit.Before;
+import org.junit.Test;
 
 import tlc2.tool.fp.MSBDiskFPSet;
 
-import junit.framework.TestCase;
-
-public class TLCIteratorTest extends TestCase {
+public class TLCIteratorTest {
 
 	private MSBDiskFPSet.TLCIterator itr;
 
 	/* (non-Javadoc)
 	 * @see junit.framework.TestCase#setUp()
 	 */
-	protected void setUp() throws Exception {
-		super.setUp();
+	@Before
+	public void setUp() throws Exception {
 		itr = new MSBDiskFPSet.TLCIterator(getBuffer());
 	}
 	
@@ -52,6 +58,7 @@ public class TLCIteratorTest extends TestCase {
 	/**
 	 * Test method for {@link tlc2.tool.fp.TLCIterator#next()}.
 	 */
+	@Test
 	public void testNext() {
 		long predecessor = -1l;
 		
@@ -72,6 +79,7 @@ public class TLCIteratorTest extends TestCase {
 	/**
 	 * Test method for {@link tlc2.tool.fp.TLCIterator#next()}.
 	 */
+	@Test
 	public void testNoNext() {
 		// read up all real elements
 		while (itr.hasNext()) {
@@ -91,19 +99,8 @@ public class TLCIteratorTest extends TestCase {
 	/**
 	 * Test method for {@link tlc2.tool.fp.TLCIterator#getLast()}.
 	 */
+	@Test
 	public void testGetLast() {
 		assertEquals(getLast(), itr.getLast());
 	}
-
-	public void testGetLastLowBound() {
-		assertEquals(getLast() + 1, itr.getLast(getLast() + 1));
-	}
-	
-	/*
-	 * Use a smaller lower bound element than last in the buffer.
-	 */
-	public void testGetLastLowerBoundNoHit() {
-		assertEquals(getLast(), itr.getLast(20));
-	}
-
 }

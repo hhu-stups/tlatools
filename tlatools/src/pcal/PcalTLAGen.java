@@ -5,7 +5,7 @@ import java.util.Vector;
 import pcal.AST.VarDecl;
 import pcal.exception.PcalTLAGenException;
 import pcal.exception.TLAExprException;
-import tla2tex.Debug;
+import util.TLAConstants;
 
 /****************************************************************************
  * Given an exploded and disambiguated AST, generate the equivalent TLA+.
@@ -77,7 +77,7 @@ public class PcalTLAGen
     private TLAExpr self = null; // changed by LL on 22 jan 2011 from: private String self = null; /* for current process */
     private boolean selfIsSelf = false; 
     
-    private Vector vars = new Vector(); /* list of all disambiguated vars */
+    private final Vector<String> vars = new Vector<String>(); /* list of all disambiguated vars */
     private Vector pcV = new Vector(); /* sublist of vars of variables representing 
                                           procedure parameters and procedure variables */
     private Vector psV = new Vector(); /* sublist of vars local to a process set */
@@ -120,10 +120,10 @@ public class PcalTLAGen
      * @return A vector of strings.
      * @throws PcalTLAGenException
      */
-    public Vector generate(AST ast, PcalSymTab symtab, Vector report) throws PcalTLAGenException
+    public Vector<String> generate(AST ast, PcalSymTab symtab, Vector report) throws PcalTLAGenException
     {
         TLAtoPCalMapping map = PcalParams.tlaPcalMapping;
-        mappingVector = new Vector(50);
+        mappingVector = new Vector<String>(50);
         /*
          * Add the reports of renaming to the output.
          */
@@ -885,8 +885,19 @@ public class PcalTLAGen
         boolean hasMultipleVars = false;
         while (i < ast.ass.size())
         {
-            int iFirst = i;
             AST.SingleAssign sF = (AST.SingleAssign) ast.ass.elementAt(i);
+            
+           /*
+             * Added by LL and MK on 16 May 2018:
+             * Report an error if the variable being assigned is not a 
+             * variable declared in the algorithm (either not declared
+             * at all or is a constant, bound identifier, ...).
+             */
+			if (!this.vars.contains(sF.lhs.var)) {
+				throw new PcalTLAGenException("Assignment to undeclared variable " + sF.lhs.var, sF);
+			}
+
+            int iFirst = i; 
             int iLast = i;
             boolean hasAssignmentWithNoSubscript = false;
             boolean lastAssignmentHasNoSubscript = EmptyExpr(sF.lhs.sub);
@@ -2031,7 +2042,7 @@ public class PcalTLAGen
         } else
         {
 //            res.append("VARIABLE ");
-            addOneTokenToTLA("VARIABLE ");
+            addOneTokenToTLA(TLAConstants.KeyWords.VARIABLE + " ");
         }
         ;
         for (int i = 0; i < varVec.size(); i++)
@@ -2376,7 +2387,7 @@ public class PcalTLAGen
                             addLeftParen(proc.id.getOrigin());
                             addExprToTLA(proc.id);
                             addRightParen(proc.id.getOrigin());
-                            addOneTokenToTLA(" |-> " );
+                            addOneTokenToTLA(TLAConstants.RECORD_ARROW);
                             addLeftParen(decl.val.getOrigin());
                             addExprToTLA(AddSubscriptsToExpr(
                                            decl.val,
@@ -2704,7 +2715,65 @@ public class PcalTLAGen
         Vector nextS = new Vector();
         StringBuffer sb = new StringBuffer();
         int max, col;
-
+        
+        if (! (PcalParams.NoDoneDisjunct || ParseAlgorithm.omitStutteringWhenDone))
+        { 
+//          tlacode.addElement(sb.toString());
+          sb.append("(* Allow infinite stuttering to prevent deadlock on termination. *)");
+          addOneLineOfTLA(sb.toString());
+          
+          sb = new StringBuffer("Terminating == ");
+          if (mp) {
+              /************************************************************
+              * Bug fix by LL on 6 Sep 2007.  Added parentheses to        *
+              * change                                                    *
+              *                                                           *
+              * (*)    \A self \in ProcSet: ... /\ UNCHANGED vars         *
+              *                                                           *
+              * to                                                        *
+              *                                                           *
+              * (**)   (\A self \in ProcSet: ...)  /\ UNCHANGED vars      *
+              *                                                           *
+              * thus moving the UNCHANGED vars outside the quantifier.    *
+              * Since self does not appear in UNCHANGED vars, the two     *
+              * expressions are equivalent except when ProcSet is the     *
+              * empty set, in which case (*) equals TRUE and (**) equals  *
+              * UNCHANGED vars.                                           *
+              ************************************************************/
+              /************************************************************
+              * Changed by MK on 19 Jun 2019 into a conjunct list         *
+              * after modifying GenNext to generate an explicit           *
+              * Terminating action before Next instead of the old         *
+              * implicit disjunct-to-prevent-deadlock-on-termination.     *
+              * This change also entailed to copy this if-block from the  *
+              * end of GenNext here modifying the original one to         *
+              * generate a call to Terminating.                           *
+              *                                                           *
+              * The rational for this change results from the recently    *
+              * introduced TLC profiler. The profiler reports the number  *
+              * of distinct successor states per action.                  *
+              * A terminating PlusCal algorithm has the implicit          *
+              * disjunct-to-prevent-deadlock-on-termination sub-action of *
+              * the Next next-state action.  Since the sub-action has no  *
+              * identifier, the profiler has to report Next as generating *
+              * no successor states (which is bogus).  With this change,  *
+              * the profiler will report the Terminating sub-action to    *
+              * generate no (distinct) successor states instead, which    *
+              * is perfectly correct and easy to understand.              *
+              ************************************************************/
+              sb.append("/\\ \\A self \\in ProcSet: pc[self] = \"Done\"");
+              addOneLineOfTLA(sb.toString());
+              sb = new StringBuffer(NSpaces("Terminating == ".length()));
+              sb.append("/\\ UNCHANGED vars");
+          } else {
+              sb.append("pc = \"Done\" /\\ UNCHANGED vars");
+//              tlacode.addElement(sb.toString());
+          }
+          addOneLineOfTLA(sb.toString());
+          addOneLineOfTLA("");
+        } ;
+        sb = new StringBuffer();
+        		
         // Steps with no parameter
         max = wrapColumn - ("Next == \\/ ".length());
         for (int i = 0; i < nextStep.size(); i++)
@@ -2827,33 +2896,9 @@ public class PcalTLAGen
                 sb = new StringBuffer(NSpaces(col) + " \\/ ");
             }
         if (! (PcalParams.NoDoneDisjunct || ParseAlgorithm.omitStutteringWhenDone))
-         { sb.append("(* Disjunct to prevent deadlock on termination *)");
-           addOneLineOfTLA(sb.toString());
-//           tlacode.addElement(sb.toString());
-           sb = new StringBuffer(NSpaces(col + 4));
-           if (mp)
-               /************************************************************
-               * Bug fix by LL on 6 Sep 2007.  Added parentheses to        *
-               * change                                                    *
-               *                                                           *
-               * (*)    \A self \in ProcSet: ... /\ UNCHANGED vars         *
-               *                                                           *
-               * to                                                        *
-               *                                                           *
-               * (**)   (\A self \in ProcSet: ...)  /\ UNCHANGED vars      *
-               *                                                           *
-               * thus moving the UNCHANGED vars outside the quantifier.    *
-               * Since self does not appear in UNCHANGED vars, the two     *
-               * expressions are equivalent except when ProcSet is the     *
-               * empty set, in which case (*) equals TRUE and (**) equals  *
-               * UNCHANGED vars.                                           *
-               ************************************************************/
-               sb.append("((\\A self \\in ProcSet: pc[self] = \"Done\") /\\ " + "UNCHANGED vars)");
-           else
-               sb.append("(pc = \"Done\" /\\ UNCHANGED vars)");
-               addOneLineOfTLA(sb.toString());
-//               tlacode.addElement(sb.toString());
-         } ;
+        { 
+          addOneLineOfTLA(sb.append("Terminating").toString());
+        }
          addOneLineOfTLA("");
 //        tlacode.addElement("");
     }

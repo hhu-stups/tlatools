@@ -19,29 +19,30 @@ import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.tool.Action;
 import tlc2.tool.BuiltInOPs;
-import tlc2.tool.ContextEnumerator;
 import tlc2.tool.EvalControl;
-import tlc2.tool.Spec;
+import tlc2.tool.IContextEnumerator;
+import tlc2.tool.ITool;
+import tlc2.tool.ModelChecker;
+import tlc2.tool.Specs;
 import tlc2.tool.TLCState;
-import tlc2.tool.Tool;
 import tlc2.tool.ToolGlobals;
 import tlc2.util.Context;
 import tlc2.util.Vect;
-import tlc2.value.BoolValue;
-import tlc2.value.FcnLambdaValue;
-import tlc2.value.Value;
+import tlc2.value.IBoolValue;
+import tlc2.value.IFcnLambdaValue;
+import tlc2.value.IValue;
 import util.Assert;
 import util.ToolIO;
 
 public class Liveness implements ToolGlobals, ASTConstants {
 
-	private static LiveExprNode astToLive(Tool tool, ExprNode expr, Context con, int level) {
+	private static LiveExprNode astToLive(ITool tool, ExprNode expr, Context con, int level) {
 		if (level == 0) {
-			Value val = tool.eval(expr, con, TLCState.Empty);
-			if (!(val instanceof BoolValue)) {
+			IValue val = tool.eval(expr, con, TLCState.Empty);
+			if (!(val instanceof IBoolValue)) {
 				Assert.fail(EC.TLC_EXPECTED_VALUE, new String[] { "boolean", expr.toString() });
 			}
-			return (((BoolValue) val).val) ? LNBool.TRUE : LNBool.FALSE;
+			return ((IBoolValue) val).getVal() ? LNBool.TRUE : LNBool.FALSE;
 		} else if (level == 1) {
 			return new LNStateAST(expr, con);
 		} else {
@@ -58,7 +59,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 	 * the predicate body with []p. For the moment, we require that arguments to
 	 * predicates be computable from its context.
 	 */
-	private static LiveExprNode astToLive(Tool tool, ExprNode expr, Context con) {
+	private static LiveExprNode astToLive(ITool tool, ExprNode expr, Context con) {
 		switch (expr.getKind()) {
 		case OpApplKind: {
 			OpApplNode expr1 = (OpApplNode) expr;
@@ -80,7 +81,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 			return astToLive(tool, expr1.getBody(), con1);
 		}
 		default: {
-			int level = Spec.getLevel(expr, con);
+			int level = Specs.getLevel(expr, con);
 			if (level > 2) {
 				Assert.fail(EC.TLC_LIVE_CANNOT_HANDLE_FORMULA, expr.toString());
 			}
@@ -89,7 +90,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		}
 	}
 
-	private static LiveExprNode astToLiveAppl(Tool tool, OpApplNode expr, Context con) {
+	private static LiveExprNode astToLiveAppl(ITool tool, OpApplNode expr, Context con) {
 		ExprOrOpArgNode[] args = expr.getArgs();
 		int alen = args.length;
 		SymbolNode opNode = expr.getOperator();
@@ -109,7 +110,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 						FormalParamNode[] formals = opDef.getParams();
 						Context con1 = con;
 						for (int i = 0; i < alen; i++) {
-							Value argVal = tool.eval(args[i], con, TLCState.Empty);
+							IValue argVal = tool.eval(args[i], con, TLCState.Empty);
 							con1 = con1.cons(formals[i], argVal);
 						}
 						LiveExprNode res = astToLive(tool, opDef.getBody(), con1);
@@ -121,12 +122,12 @@ public class Liveness implements ToolGlobals, ASTConstants {
 					} catch (Exception e) { /* SKIP */
 					}
 				}
-			} else if (val instanceof BoolValue) {
-				return (((BoolValue) val).val) ? LNBool.TRUE : LNBool.FALSE;
+			} else if (val instanceof IBoolValue) {
+				return ((IBoolValue) val).getVal() ? LNBool.TRUE : LNBool.FALSE;
 			}
 
 			if (opcode == 0) {
-				int level = Spec.getLevel(expr, con);
+				int level = Specs.getLevel(expr, con);
 				if (level > 2) {
 					Assert.fail(EC.TLC_LIVE_CANNOT_HANDLE_FORMULA, expr.toString());
 				}
@@ -139,7 +140,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		{
 			ExprNode body = (ExprNode) args[0];
 			try {
-				ContextEnumerator Enum = tool.contexts(expr, con, TLCState.Empty, TLCState.Empty, EvalControl.Clear);
+				IContextEnumerator Enum = tool.contexts(expr, con, TLCState.Empty, TLCState.Empty, EvalControl.Clear);
 				Context con1;
 				LNDisj res = new LNDisj(0);
 				while ((con1 = Enum.nextElement()) != null) {
@@ -152,8 +153,9 @@ public class Liveness implements ToolGlobals, ASTConstants {
 				}
 				return astToLive(tool, expr, con, level);
 			} catch (Exception e) {
+				// Catching Exception here seem dangerous
 				// Assert.printStack(e);
-				int level = Spec.getLevel(expr, con);
+				int level = Specs.getLevel(expr, con);
 				if (level > 2) {
 					Assert.fail(EC.TLC_LIVE_CANNOT_HANDLE_FORMULA, expr.toString());
 					;
@@ -165,7 +167,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		{
 			ExprNode body = (ExprNode) args[0];
 			try {
-				ContextEnumerator Enum = tool.contexts(expr, con, TLCState.Empty, TLCState.Empty, EvalControl.Clear);
+				IContextEnumerator Enum = tool.contexts(expr, con, TLCState.Empty, TLCState.Empty, EvalControl.Clear);
 				Context con1;
 				LNConj res = new LNConj(0);
 				while ((con1 = Enum.nextElement()) != null) {
@@ -178,11 +180,15 @@ public class Liveness implements ToolGlobals, ASTConstants {
 				}
 				return astToLive(tool, expr, con, level);
 			} catch (Exception e) {
+				// Catching Exception here seem dangerous
 				// Assert.printStack(e);
-				int level = Spec.getLevel(expr, con);
+				int level = Specs.getLevel(expr, con);
 				if (level > 2) {
-					Assert.fail(EC.TLC_LIVE_CANNOT_HANDLE_FORMULA, expr.toString());
-					;
+					if (e instanceof Assert.TLCRuntimeException) {
+						Assert.fail(EC.TLC_LIVE_CANNOT_HANDLE_FORMULA, new String[] {expr.toString(), e.getMessage()});
+					} else {
+						Assert.fail(EC.TLC_LIVE_CANNOT_HANDLE_FORMULA, expr.toString());
+					}
 				}
 				return astToLive(tool, expr, con, level);
 			}
@@ -216,20 +222,21 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		case OPCODE_fa: // FcnApply
 		{
 			try {
-				Value fval = tool.eval(args[0], con, TLCState.Empty);
-				if (fval instanceof FcnLambdaValue) {
-					FcnLambdaValue fcn = (FcnLambdaValue) fval;
-					if (fcn.fcnRcd == null) {
+				IValue fval = tool.eval(args[0], con, TLCState.Empty);
+				if (fval instanceof IFcnLambdaValue) {
+					IFcnLambdaValue fcn = (IFcnLambdaValue) fval;
+					if (!fcn.hasRcd()) {
 						// this could be a bug, since con1 is created but not
 						// used
 						// SZ Jul 13, 2009: removed to kill the warning
 						// SZ Feb 20, 2009: variable never read locally
 						// Context con1 =
 						tool.getFcnContext(fcn, args, con, TLCState.Empty, TLCState.Empty, EvalControl.Clear);
-						return astToLive(tool, (ExprNode) fcn.body, con);
+						return astToLive(tool, (ExprNode) fcn.getBody(), con);
 					}
 				}
 			} catch (Exception e) { /* SKIP */
+				// Swallowing Exception here seem dangerous
 			}
 			int level = expr.getLevel();
 			if (level > 2) {
@@ -292,8 +299,9 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		}
 		case OPCODE_leadto: {
 			// F ~> G equals [](F => <>G), however TLC does not have an
-			// implementation for logical implication. Thus, the rule of material
-			// implication is used to transform it into a disjunct.
+			// implementation for logical implication. Thus, the rule of
+			// material implication ("->") is used to transform it into a
+			// disjunct.
 			LiveExprNode lnLeft = astToLive(tool, (ExprNode) args[0], con);
 			LiveExprNode lnRight = astToLive(tool, (ExprNode) args[1], con);
 			// expand a ~> b into [](-a \/ <>b) 
@@ -308,6 +316,12 @@ public class Liveness implements ToolGlobals, ASTConstants {
 			LiveExprNode lnArg = astToLive(tool, (ExprNode) args[0], con);
 			return new LNEven(lnArg);
 		}
+		case OPCODE_aa: { // AngleAct <A>_e
+			assert Specs.getLevel(expr, con) == 2;
+			final ExprNode body = (ExprNode) args[0]; // the A in <<A>>_e
+			final ExprNode subs = (ExprNode) args[1]; // the e in <<A>>_e
+			return new LNAction(body, con, subs, false);
+		}
 
 		// The following case added by LL on 13 Nov 2009 to handle subexpression
 		// names.
@@ -315,11 +329,23 @@ public class Liveness implements ToolGlobals, ASTConstants {
 			return astToLive(tool, (ExprNode) args[0], con);
 		}
 		default: {
-			// We handle all the other built-in operators here.
-			int level = Spec.getLevel(expr, con);
+			// We handle all the other built-in operators here. Surprisingly, even OPCODE_aa
+			// (AngleAct <A>_e) is handled here and not as the dedicated case statement below
+			// such that e gets passed as subscript to LNAction:
+			//
+			//		case OPCODE_aa: { // AngleAct <A>_e
+			//			assert Spec.getLevel(expr, con) == 2;
+			//			final ExprNode body = (ExprNode) args[0]; // the A in <<A>>_e
+			//			final ExprNode subscript = (ExprNode) args[1]; // the e in <<A>>_e
+			//			return new LNAction(body, con, subscript, false);
+			//		}
+			//
+			// The default handling here results in LNAction#subscript to be null skipping
+			// the subscript related branch in LNAction#eval(Tool, TLCState, TLCState). This
+			// poses no problem though because Tool#evalAppl eventually checks if e' = e.
+			int level = Specs.getLevel(expr, con);
 			if (level > 2) {
 				Assert.fail(EC.TLC_LIVE_CANNOT_HANDLE_FORMULA, expr.toString());
-				;
 			}
 			return astToLive(tool, expr, con, level);
 		}
@@ -327,154 +353,10 @@ public class Liveness implements ToolGlobals, ASTConstants {
 	}
 
 	/**
-	 * Given a starting TBGraphNode, constructTableau constructs the tableau for
-	 * it. Read MP for details. It returns a list of all the nodes in the
-	 * tableau graph.
-	 */
-	private static TBGraph constructTableau(LiveExprNode tf, int idx) {
-		TBGraph allnodes = new TBGraph(tf);
-		TBPar initTerms = new TBPar(1);
-		initTerms.addElement(tf);
-		TBParVec pars = particleClosure(initTerms);
-
-		for (int i = 0; i < pars.size(); i++) {
-			TBGraphNode gn = new TBGraphNode(pars.parAt(i));
-			allnodes.addElement(gn);
-		}
-		allnodes.setInitCnt(allnodes.size());
-		// We now repeatedly compute the outlinks of each node:
-		for (int i = 0; i < allnodes.size(); i++) {
-			TBGraphNode gnSrc = (TBGraphNode) allnodes.elementAt(i);
-			TBPar imps = gnSrc.getPar().impliedSuccessors();
-			TBParVec succs = particleClosure(imps);
-			for (int j = 0; j < succs.size(); j++) {
-				TBPar par = succs.parAt(j);
-				TBGraphNode gnDst = findOrCreateNode(allnodes, par);
-				gnSrc.nexts.addElement(gnDst);
-			}
-		}
-		// Assign each node in the tableau an index.
-		for (int i = 0; i < allnodes.size(); i++) {
-			allnodes.getNode(i).index = idx++;
-		}
-		return allnodes;
-	}
-
-	/**
-	 * The method findOrCreateNode, given a list of particles, either finds the
-	 * particle in that list, or creates a new one and puts it in the list. If
-	 * it does create a node, then it also sticks that node into allnodes.
-	 */
-	private static TBGraphNode findOrCreateNode(Vect allnodes, TBPar par) {
-		for (int i = 0; i < allnodes.size(); i++) {
-			TBGraphNode gn = (TBGraphNode) allnodes.elementAt(i);
-			if (par.equals(gn.getPar())) {
-				return gn;
-			}
-		}
-		TBGraphNode gn = new TBGraphNode(par);
-		allnodes.addElement(gn);
-		return gn;
-	}
-
-	/**
-	 * The method particleClosure, given a list of terms (initially just a
-	 * single term), returns a list of all particles containing those terms.
-	 * It's a recursive tree search.
-	 */
-	private static TBParVec particleClosure(TBPar terms) {
-		TBPar positive_closure = terms.positiveClosure();
-		Vect alphas = positive_closure.alphaTriples();
-		Vect betas = positive_closure.betaTriples();
-		return particleClosure(terms, alphas, betas);
-	}
-
-	private static TBParVec particleClosure(TBPar terms, Vect alphas, Vect betas) {
-		// if terms is not locally consistent, then terminate.
-		if (!terms.isLocallyConsistent()) {
-			return new TBParVec(0);
-		}
-		// if terms is not alpha-closed, then close it.
-		// first, try alpha expansion
-		TBPar terms1 = terms;
-		for (int i = 0; i < terms1.size(); i++) {
-			LiveExprNode ln = terms1.exprAt(i);
-			LiveExprNode k1 = null, k2 = null;
-			if (ln instanceof LNAll) {
-				k1 = ((LNAll) ln).getBody();
-				k2 = new LNNext(ln);
-			} else if (ln instanceof LNConj) {
-				k1 = ((LNConj) ln).getBody(0);
-				k2 = ((LNConj) ln).getBody(1);
-			}
-			if (k1 != null) {
-				if (terms1.member(k1)) {
-					if (!terms1.member(k2)) {
-						terms1 = terms1.append(k2);
-					}
-				} else if (terms1.member(k2)) {
-					terms1 = terms1.append(k1);
-				} else {
-					terms1 = terms1.append(k1, k2);
-				}
-			}
-		}
-		// second, try alpha^-1 expansion
-		boolean done;
-		do {
-			done = true;
-			for (int i = 0; i < alphas.size(); i++) {
-				TBTriple alpha = (TBTriple) alphas.elementAt(i);
-				if (terms1.member(alpha.getB()) && terms1.member(alpha.getC()) && !terms1.member(alpha.getA())) {
-					terms1.addElement(alpha.getA());
-					done = false;
-				}
-			}
-		} while (!done);
-		// finally, recurse only when locally consistent
-		if ((terms1.size() > terms.size()) && (!terms1.isLocallyConsistent())) {
-			return new TBParVec(0);
-		}
-		return particleClosureBeta(terms1, alphas, betas);
-	}
-
-	private static TBParVec particleClosureBeta(TBPar terms, Vect alphas, Vect betas) {
-		// try a beta expansion
-		for (int i = 0; i < terms.size(); i++) {
-			LiveExprNode ln = terms.exprAt(i);
-			LiveExprNode k1 = null, k2 = null;
-			if (ln instanceof LNEven) {
-				k1 = ((LNEven) ln).getBody();
-				k2 = new LNNext(ln);
-			} else if (ln instanceof LNDisj) {
-				k1 = ((LNDisj) ln).getBody(0);
-				k2 = ((LNDisj) ln).getBody(1);
-			}
-			if ((k1 != null) && !terms.member(k1) && !terms.member(k2)) {
-				TBParVec ps1 = particleClosure(terms.append(k1), alphas, betas);
-				TBParVec ps2 = particleClosure(terms.append(k2), alphas, betas);
-				return ps1.union(ps2);
-			}
-		}
-		// try a beta^-1 expansion
-		for (int i = 0; i < betas.size(); i++) {
-			TBTriple beta = (TBTriple) betas.elementAt(i);
-			if ((terms.member(beta.getB()) || terms.member(beta.getC())) && !terms.member(beta.getA())) {
-				return particleClosure(terms.append(beta.getA()), alphas, betas);
-			}
-		}
-		// if there are not any more expansions to do, return the terms
-		// we've got as the only particle in a list of particles.
-		TBParVec res = new TBParVec(1);
-		res.addElement(terms);
-		return res;
-	}
-
-	/**
 	 * Parse the temporals and impliedTemporals given in the config file. It
 	 * returns null if there is nothing to check.
 	 */
-	private static LiveExprNode parseLiveness(Tool tool) {
+	private static LiveExprNode parseLiveness(ITool tool) {
 		Action[] fairs = tool.getTemporals();
 		LNConj lnc = new LNConj(fairs.length);
 		for (int i = 0; i < fairs.length; i++) {
@@ -512,15 +394,43 @@ public class Liveness implements ToolGlobals, ASTConstants {
 	 * manner in which things should ultimately be checked. This method returns
 	 * a handle, which can subsequently be passed to the other liveness things.
 	 *
-	 * Theory: we're looking for counterexamples to: spec /\ livespec => []inv
-	 * /\ livecheck i.e. (spec /\ livespec /\ <>-inv) \/ (spec /\ livespec /\
-	 * -livecheck) The first half of this disjunction (inv) is already checked
-	 * by the model checker on the fly. We're converting the second half into
-	 * normal form. We actually omit spec in what we produce. It will be left
-	 * implicit. So, the only job is to turn livespec /\ -livecheck: live1 /\
-	 * live2 ... /\ (-check1 \/ -check2 ...) into normal form.
+	 * Theory: we're looking for counterexamples to:
+	 * 
+	 * <pre>
+	 * spec /\ livespec => []inv /\ livecheck
+	 * </pre>
+	 * 
+	 * i.e.
+	 * 
+	 * <pre>
+	 * \/ (spec /\ livespec /\ <>-inv)
+	 * \/ (spec /\ livespec /\ -livecheck)
+	 * </pre>
+	 * 
+	 * <p>
+	 * The first half of this disjunction (inv) is already checked by the model
+	 * checker on the fly (@see
+	 * {@link ModelChecker#doNext(TLCState, tlc2.util.ObjLongTable)}).
+	 * <p>
+	 * We're converting the second half into <i>normal form</i>. We actually
+	 * omit spec in what we produce. It will be left implicit. So, the only job
+	 * is to turn:
+	 * 
+	 * <pre>
+	 * livespec /\ -livecheck
+	 * </pre>
+	 * 
+	 * into:
+	 * 
+	 * <pre>
+	 * live1 /\ live2 ... /\ (-check1 \/ -check2 ...)
+	 * </pre>
+	 * 
+	 * into <i>normal form</i>. livespec corresponds to the spec's
+	 * <i>fairness</i> formulae where check1, check2, ... are the actual
+	 * <i>liveness properties</i> to be checked.
 	 */
-	public static OrderOfSolution[] processLiveness(Tool tool) {
+	public static OrderOfSolution[] processLiveness(final ITool tool) {
 		LiveExprNode lexpr = parseLiveness(tool);
 
 		if (lexpr == null) {
@@ -538,20 +448,20 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		if ((lexpr instanceof LNBool) && !((LNBool) lexpr).b) {
 			return new OrderOfSolution[0]; // must be unsatisfiable
 		}
-		LNDisj dnf = (lexpr instanceof LNDisj) ? (LNDisj) lexpr : (new LNDisj(lexpr));
+		final LNDisj dnf = (lexpr instanceof LNDisj) ? (LNDisj) lexpr : (new LNDisj(lexpr));
 
 		// Now we will turn DNF into a format that can be tested by the
 		// tableau method. The first step is to collect everything into
 		// pems+lexps: listof-(listof-<>[],[]<> /\ tf)
-		OSExprPem[] pems = new OSExprPem[dnf.getCount()];
-		LiveExprNode[] tfs = new LiveExprNode[dnf.getCount()];
+		final OSExprPem[] pems = new OSExprPem[dnf.getCount()];
+		final LiveExprNode[] tfs = new LiveExprNode[dnf.getCount()];
 		for (int i = 0; i < dnf.getCount(); i++) {
 			// Flatten junctions, because DNF may contain singleton junctions
-			LiveExprNode ln = dnf.getBody(i).flattenSingleJunctions();
-			OSExprPem pem = new OSExprPem();
+			final LiveExprNode ln = dnf.getBody(i).flattenSingleJunctions();
+			final OSExprPem pem = new OSExprPem();
 			pems[i] = pem;
 			if (ln instanceof LNConj) {
-				LNConj lnc2 = (LNConj) ln;
+				final LNConj lnc2 = (LNConj) ln;
 				for (int j = 0; j < lnc2.getCount(); j++) {
 					classifyExpr(lnc2.getBody(j), pem);
 				}
@@ -562,7 +472,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 			if (pem.tfs.size() == 1) {
 				tfs[i] = (LiveExprNode) pem.tfs.elementAt(0);
 			} else if (pem.tfs.size() > 1) {
-				LNConj lnc2 = new LNConj(pem.tfs.size());
+				final LNConj lnc2 = new LNConj(pem.tfs.size());
 				for (int j = 0; j < pem.tfs.size(); j++) {
 					lnc2.addConj((LiveExprNode) pem.tfs.elementAt(j));
 				}
@@ -579,13 +489,13 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		// haven't done any real rearrangement of them, apart from munging
 		// up \/ and /\ above them. tfbin contains the different tf's.
 		// pembin is a vect of vect-of-pems collecting each tf's pems.
-		TBPar tfbin = new TBPar(dnf.getCount());
-		Vect pembin = new Vect(dnf.getCount());
+		final TBPar tfbin = new TBPar(dnf.getCount());
+		final Vect<Vect<OSExprPem>> pembin = new Vect<>(dnf.getCount());
 		for (int i = 0; i < dnf.getCount(); i++) {
 			int found = -1;
-			LiveExprNode tf = tfs[i];
+			final LiveExprNode tf = tfs[i];
 			for (int j = 0; j < tfbin.size() && found == -1; j++) {
-				LiveExprNode tf0 = tfbin.exprAt(j);
+				final LiveExprNode tf0 = tfbin.exprAt(j);
 				if ((tf == null && tf0 == null) || (tf != null && tf0 != null && tf.equals(tf0))) {
 					found = j;
 				}
@@ -593,23 +503,23 @@ public class Liveness implements ToolGlobals, ASTConstants {
 			if (found == -1) {
 				found = tfbin.size();
 				tfbin.addElement(tf);
-				pembin.addElement(new Vect());
+				pembin.addElement(new Vect<OSExprPem>());
 			}
-			((Vect) pembin.elementAt(found)).addElement(pems[i]);
+			((Vect<OSExprPem>) pembin.elementAt(found)).addElement(pems[i]);
 		}
 
 		// We then create an OrderOfSolution for each tf in tfbin.
-		OrderOfSolution[] oss = new OrderOfSolution[tfbin.size()];
+		final OrderOfSolution[] oss = new OrderOfSolution[tfbin.size()];
 		for (int i = 0; i < tfbin.size(); i++) {
-			LiveExprNode tf = tfbin.exprAt(i);
+			final LiveExprNode tf = tfbin.exprAt(i);
 
 			if (tf == null) {
-				oss[i] = new OrderOfSolution(new LNEven[0], tool);
+				oss[i] = new OrderOfSolution(new LNEven[0]);
 			} else {
-				LiveExprNode tf1 = tf.makeBinary();
-				TBPar promises = new TBPar(10);
+				final LiveExprNode tf1 = tf.makeBinary();
+				final TBPar promises = new TBPar(10);
 				tf1.extractPromises(promises);
-				oss[i] = new OrderOfSolution(constructTableau(tf1, 0), new LNEven[promises.size()], tool);
+				oss[i] = new OrderOfSolution(new TBGraph(tf1), new LNEven[promises.size()]);
 				for (int j = 0; j < promises.size(); j++) {
 					oss[i].getPromises()[j] = (LNEven) promises.exprAt(j);
 				}
@@ -617,16 +527,14 @@ public class Liveness implements ToolGlobals, ASTConstants {
 
 			// We lump all the pems into a single checkState and checkAct,
 			// and oss[i].pems will simply be integer lookups into them.
-			Vect stateBin = new Vect();
-			Vect actionBin = new Vect();
-			Vect tfPems = (Vect) pembin.elementAt(i);
+			final Vect<LiveExprNode> stateBin = new Vect<>();
+			final Vect<LiveExprNode> actionBin = new Vect<>();
+			final Vect<OSExprPem> tfPems = (Vect<OSExprPem>) pembin.elementAt(i);
 			oss[i].setPems(new PossibleErrorModel[tfPems.size()]);
 			for (int j = 0; j < tfPems.size(); j++) {
-				OSExprPem pem = (OSExprPem) tfPems.elementAt(j);
-				oss[i].getPems()[j] = new PossibleErrorModel();
-				oss[i].getPems()[j].AEAction = addToBin(pem.AEAction, actionBin);
-				oss[i].getPems()[j].AEState = addToBin(pem.AEState, stateBin);
-				oss[i].getPems()[j].EAAction = addToBin(pem.EAAction, actionBin);
+				final OSExprPem pem = (OSExprPem) tfPems.elementAt(j);
+				oss[i].getPems()[j] = new PossibleErrorModel(addToBin(pem.AEAction, actionBin),
+						addToBin(pem.AEState, stateBin), addToBin(pem.EAAction, actionBin));
 			}
 			// Finally, store the bins with the order of solution.
 			oss[i].setCheckState(new LiveExprNode[stateBin.size()]);
@@ -649,7 +557,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 	 * Given a list of checks, ensures that the checks are in the bin. It
 	 * returns an array of index of the checks in the bin.
 	 */
-	private static int addToBin(LiveExprNode check, Vect bin) {
+	private static int addToBin(LiveExprNode check, Vect<LiveExprNode> bin) {
 		if (check == null) {
 			return -1;
 		}
@@ -667,7 +575,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		return idx;
 	}
 
-	private static int[] addToBin(Vect checks, Vect bin) {
+	private static int[] addToBin(Vect<LiveExprNode> checks, Vect<LiveExprNode> bin) {
 		int[] index = new int[checks.size()];
 		for (int i = 0; i < checks.size(); i++) {
 			LiveExprNode check = (LiveExprNode) checks.elementAt(i);
@@ -682,7 +590,14 @@ public class Liveness implements ToolGlobals, ASTConstants {
 	 * tests. This method classifies an expression into <>[]act, []<>act,
 	 * []<>state, temporal formulas (without actions), or erroneous things.
 	 */
+	// TODO Explore the idea to syntactically rewrite an LNActions A into a
+	// ordinary predicate and the next state operator ()A in the tableau.
 	private static void classifyExpr(LiveExprNode ln, OSExprPem pem) {
+		// TLC is clever enough to optimize the case where some temporal formula
+		// can be handled WITHOUT a tableau. In this case, the state graph IS
+		// the behavior graph and thus the overall verification time is reduced.
+		// Additionally, the tableau generation does not support formulas 
+		// containing (nested) LNActions.
 		if (ln instanceof LNEven) {
 			LiveExprNode ln1 = ((LNEven) ln).getBody();
 			if (ln1 instanceof LNAll) {
@@ -710,6 +625,9 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		if (ln.containAction()) {
 			Assert.fail(EC.TLC_LIVE_WRONG_FORMULA_FORMAT);
 		}
+		// If we get here (because of a temporal formula), at tableau is
+		// consequently going to be created. This part corresponds to the
+		// ideas in the MP book.
 		pem.tfs.addElement(ln);
 	}
 
@@ -726,16 +644,16 @@ public class Liveness implements ToolGlobals, ASTConstants {
 	 * PossibleErrorModel and OrderOfSolution.
 	 */
 	private static class OSExprPem {
-		Vect EAAction; // <>[]action's
-		Vect AEState; // []<>state's
-		Vect AEAction; // []<>action's
-		Vect tfs; // other temp formulae with no actions
+		Vect<LiveExprNode> EAAction; // <>[]action's
+		Vect<LiveExprNode> AEState; // []<>state's
+		Vect<LiveExprNode> AEAction; // []<>action's
+		Vect<LiveExprNode> tfs; // other temp formulae with no actions
 
 		public OSExprPem() {
-			this.EAAction = new Vect();
-			this.AEState = new Vect();
-			this.AEAction = new Vect();
-			this.tfs = new Vect();
+			this.EAAction = new Vect<>();
+			this.AEState = new Vect<>();
+			this.AEAction = new Vect<>();
+			this.tfs = new Vect<>();
 		}
 	}
 

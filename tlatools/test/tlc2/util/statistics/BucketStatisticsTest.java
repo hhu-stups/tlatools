@@ -18,7 +18,7 @@
  * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
  * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
  * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
- * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINbucketStatistic IN THE SOFTWARE.
  *
  * Contributors:
  *   Markus Alexander Kuppe - initial API and implementation
@@ -26,163 +26,194 @@
 
 package tlc2.util.statistics;
 
-import tlc2.util.statistics.BucketStatistics;
-import junit.framework.TestCase;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
-public class BucketStatisticsTest extends TestCase {
-	
+import java.lang.reflect.InvocationTargetException;
+import java.util.Arrays;
+import java.util.Collection;
+
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+
+@RunWith(Parameterized.class)
+public class BucketStatisticsTest {
+
+	@SuppressWarnings("rawtypes")
+	@Parameterized.Parameters
+	public static Collection<Class> bucketStatistics() {
+		return Arrays.asList(
+				new Class[] { ConcurrentBucketStatistics.class, BucketStatistics.class });
+	}
+
+	private final IBucketStatistics bucketStatistic;
+
+	@SuppressWarnings({ "rawtypes", "unchecked" })
+	public BucketStatisticsTest(Class bucketStatistic) throws InstantiationException, IllegalAccessException,
+			IllegalArgumentException, InvocationTargetException, NoSuchMethodException, SecurityException {
+		this.bucketStatistic = (IBucketStatistics) bucketStatistic.getConstructor(String.class)
+				.newInstance("BucketStatisticsTest");
+	}
+
+	@Test
 	public void testInvalidArgument() {
 		try {
-			final IBucketStatistics gs = new BucketStatistics();
-			gs.addSample(-1);
+			bucketStatistic.addSample(-1);
 		} catch (IllegalArgumentException e) {
 			return;
 		}
 		fail();
 	}
-	
+
+	@Test
 	public void testMean() {
-		final IBucketStatistics gs = new BucketStatistics();
-		assertEquals(-1.0d, gs.getMean());
+		assertTrue(Double.compare(-1.0d, bucketStatistic.getMean()) == 0);
 
-		gs.addSample(0);
-		assertEquals(0.0d, gs.getMean());
-		
-		gs.addSample(1);
-		gs.addSample(2);
-		assertEquals(1.0d, gs.getMean());
+		bucketStatistic.addSample(0);
+		assertTrue(Double.compare(0.0d, bucketStatistic.getMean()) == 0);
 
-		gs.addSample(2);
-		gs.addSample(2);
-		assertEquals(1.4d, gs.getMean());
+		bucketStatistic.addSample(1);
+		bucketStatistic.addSample(2);
+		assertTrue(Double.compare(1.0d, bucketStatistic.getMean()) == 0);
+
+		bucketStatistic.addSample(2);
+		bucketStatistic.addSample(2);
+		assertTrue(Double.compare(1.4d, bucketStatistic.getMean()) == 0);
 	}
 
+	@Test
 	public void testMedian() {
-		final IBucketStatistics gs = new BucketStatistics();
-		assertEquals(-1, gs.getMedian());
+		assertEquals(-1, bucketStatistic.getMedian());
 
-		gs.addSample(0);
-		assertEquals(0, gs.getMedian());
-		
-		gs.addSample(1);
-		gs.addSample(2);
-		assertEquals(1, gs.getMedian());
+		bucketStatistic.addSample(0);
+		assertEquals(0, bucketStatistic.getMedian());
 
-		gs.addSample(2);
-		gs.addSample(2);
-		assertEquals(2, gs.getMedian());
+		bucketStatistic.addSample(1);
+		bucketStatistic.addSample(2);
+		assertEquals(1, bucketStatistic.getMedian());
+
+		bucketStatistic.addSample(2);
+		bucketStatistic.addSample(2);
+		assertEquals(2, bucketStatistic.getMedian());
 	}
 
+	@Test
 	public void testMin() {
-		final IBucketStatistics gs = new BucketStatistics();
-		assertEquals(-1, gs.getMin());
+		assertEquals(-1, bucketStatistic.getMin());
 
-		gs.addSample(0);
-		gs.addSample(0);
-		gs.addSample(0);
-		gs.addSample(1);
-		gs.addSample(1);
-		gs.addSample(2);
-		gs.addSample(2);
-		gs.addSample(2);
-		assertEquals(0, gs.getMin());
+		bucketStatistic.addSample(0);
+		bucketStatistic.addSample(0);
+		bucketStatistic.addSample(0);
+		bucketStatistic.addSample(1);
+		bucketStatistic.addSample(1);
+		bucketStatistic.addSample(2);
+		bucketStatistic.addSample(2);
+		bucketStatistic.addSample(2);
+		assertEquals(0, bucketStatistic.getMin());
 	}
-	
+
+	@Test
+	public void testMin2() {
+		assertEquals(-1, bucketStatistic.getMin());
+
+		bucketStatistic.addSample(1);
+		bucketStatistic.addSample(1);
+		bucketStatistic.addSample(2);
+		bucketStatistic.addSample(2);
+		bucketStatistic.addSample(2);
+		assertEquals(1, bucketStatistic.getMin());
+	}
+
+	@Test
 	public void testMax() {
-		final IBucketStatistics gs = new BucketStatistics();
-		assertEquals(-1, gs.getMax());
+		assertEquals(-1, bucketStatistic.getMax());
 
-		gs.addSample(0);
-		gs.addSample(0);
-		gs.addSample(0);
-		gs.addSample(1);
-		gs.addSample(1);
-		gs.addSample(2);
-		gs.addSample(2);
-		gs.addSample(2);
-		gs.addSample(2);
-		gs.addSample(3);
-		assertEquals(3, gs.getMax());
+		bucketStatistic.addSample(0);
+		bucketStatistic.addSample(0);
+		bucketStatistic.addSample(0);
+		bucketStatistic.addSample(1);
+		bucketStatistic.addSample(1);
+		bucketStatistic.addSample(2);
+		bucketStatistic.addSample(2);
+		bucketStatistic.addSample(2);
+		bucketStatistic.addSample(2);
+		bucketStatistic.addSample(3);
+		assertEquals(3, bucketStatistic.getMax());
 	}
 
+	@Test
 	public void testStandardDeviation() {
-		final IBucketStatistics gs = new BucketStatistics();
-		assertEquals(-1.0, gs.getStdDev());
+		assertEquals(-1.0, bucketStatistic.getStdDev(), 0);
 
-		gs.addSample(0);
-		gs.addSample(0);
-		gs.addSample(0);
-		gs.addSample(1);
-		gs.addSample(1);
-		gs.addSample(2);
-		gs.addSample(2);
-		gs.addSample(2);
-		gs.addSample(2);
-		gs.addSample(3);
-		assertEquals(1.005d, (Math.round(gs.getStdDev() * 10000d) / 10000d));
+		bucketStatistic.addSample(0);
+		bucketStatistic.addSample(0);
+		bucketStatistic.addSample(0);
+		bucketStatistic.addSample(1);
+		bucketStatistic.addSample(1);
+		bucketStatistic.addSample(2);
+		bucketStatistic.addSample(2);
+		bucketStatistic.addSample(2);
+		bucketStatistic.addSample(2);
+		bucketStatistic.addSample(3);
+		assertTrue(Double.compare(1.005d, (Math.round(bucketStatistic.getStdDev() * 10000d) / 10000d)) == 0);
 	}
 
+	@Test
 	public void testGetPercentile() {
-		final IBucketStatistics gs = new BucketStatistics();
-		assertEquals(-1.0, gs.getPercentile(1));
-		
+		assertEquals(-1.0, bucketStatistic.getPercentile(1), 0);
+
 		try {
-			gs.addSample(1); // <- first element
-			gs.getPercentile(1.1);
-			gs.getPercentile(-0.1);
+			bucketStatistic.addSample(1); // <- first element
+			bucketStatistic.getPercentile(1.1);
+			bucketStatistic.getPercentile(-0.1);
 		} catch (Exception e) {
 			fail(e.getMessage());
 		}
-		
-		gs.addSample(1);
-		gs.addSample(1);
-		gs.addSample(2); // <- 0.5 percentile
-		gs.addSample(2);
-		gs.addSample(2);
-		gs.addSample(3);
-		assertEquals(2.0d, gs.getPercentile(0.5d));
-		assertEquals(2.0d, gs.getPercentile(0.75d));
-		assertEquals(3.0d, gs.getPercentile(0.999d));
+
+		bucketStatistic.addSample(1);
+		bucketStatistic.addSample(1);
+		bucketStatistic.addSample(2); // <- 0.5 percentile
+		bucketStatistic.addSample(2);
+		bucketStatistic.addSample(2);
+		bucketStatistic.addSample(3);
+		assertTrue(Double.compare(2.0d, bucketStatistic.getPercentile(0.5d)) == 0);
+		assertTrue(Double.compare(2.0d, bucketStatistic.getPercentile(0.5d)) == 0);
+		assertTrue(Double.compare(2.0d, bucketStatistic.getPercentile(0.75d)) == 0);
+		assertTrue(Double.compare(3.0d, bucketStatistic.getPercentile(0.999d)) == 0);
 	}
+
 	// NaN test
+	@Test
 	public void testGetPercentileNaN() {
 		try {
-			final IBucketStatistics gs = new BucketStatistics();
-			gs.getPercentile(Double.NaN);
+			bucketStatistic.getPercentile(Double.NaN);
 		} catch (IllegalArgumentException e) {
 			return;
 		}
 		fail("Parameter not a number");
 	}
-	
+
+	@Test
 	public void testToString() {
 		try {
-			//just invoke to check for exceptions
-			final IBucketStatistics gs = new BucketStatistics();
-			gs.toString();
-			
-			gs.addSample(0);
-			gs.addSample(0);
-			gs.addSample(0);
-			gs.addSample(1);
-			gs.addSample(1);
-			gs.addSample(2);
-			gs.addSample(2);
-			gs.addSample(2);
-			gs.addSample(2);
-			gs.addSample(3);
-			gs.toString();
+			// just invoke to check for exceptions
+			bucketStatistic.toString();
+
+			bucketStatistic.addSample(0);
+			bucketStatistic.addSample(0);
+			bucketStatistic.addSample(0);
+			bucketStatistic.addSample(1);
+			bucketStatistic.addSample(1);
+			bucketStatistic.addSample(2);
+			bucketStatistic.addSample(2);
+			bucketStatistic.addSample(2);
+			bucketStatistic.addSample(2);
+			bucketStatistic.addSample(3);
+			bucketStatistic.toString();
 		} catch (Exception e) {
 			fail(e.getMessage());
 		}
-	}
-	
-	public void testMaximum() {
-		final IBucketStatistics gs = new BucketStatistics("test title", 8);
-		gs.addSample(16);
-		gs.addSample(16);
-		gs.addSample(16);
-		assertEquals(8, gs.getMedian());
-		assertEquals(3, gs.getObservations());
 	}
 }

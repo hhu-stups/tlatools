@@ -23,6 +23,7 @@ public class StatePoolReader extends Thread {
   }
 
   public StatePoolReader(int bufSize, File file) {
+	  super("TLCStatePoolReader");
     this.buf = new TLCState[bufSize];
     this.poolFile = file;
     this.isFull = false;
@@ -55,7 +56,7 @@ public class StatePoolReader extends Thread {
   public final synchronized TLCState[] doWork(TLCState[] deqBuf, File file)
   throws IOException, ClassNotFoundException {
     if (this.isFull) {
-      Assert.check(this.poolFile == null, EC.SYSTEM_FILE_NULL);
+      assert this.poolFile == null : EC.SYSTEM_FILE_NULL;
       TLCState[] res = this.buf;
       this.buf = deqBuf;
       this.poolFile = file;
@@ -93,7 +94,7 @@ public class StatePoolReader extends Thread {
   public final synchronized TLCState[] getCache(TLCState[] deqBuf, File file)
   throws IOException, ClassNotFoundException {
     if (this.isFull) {
-      Assert.check(this.poolFile == null, EC.SYSTEM_FILE_NULL);
+      assert this.poolFile == null : EC.SYSTEM_FILE_NULL;
       TLCState[] res = this.buf;
       this.buf = deqBuf;
       this.poolFile = file;

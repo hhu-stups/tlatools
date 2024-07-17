@@ -49,9 +49,10 @@
 *    holds the label (the absence of a label represented by                *
 *    a lbl field equal to the empty string "").  The only difference       *
 *    from the simple grammar is that a <Call> followed by an unlabeled     *
-*    <Return> is converted into a single AST.CallReturn object.  This      *
-*    pass does not produce any AST.If or AST.Either objects, and any       *
-*    AST.While object it produces has an empty labDo field.                *
+*    <Return> or <Goto> is converted into a single AST.CallReturn or       *
+*    AST.CallGoto object, respectively.  This pass does not produce any    *
+*    AST.If or AST.Either objects, and any AST.While object it produces    *
+*    has an empty labDo field.                                             *
 *                                                                          *
 *  - It calls the procedure AddLabelsToStmtSeq to check for missing        *
 *    labels and either add them or report an error if it finds one,        *
@@ -107,11 +108,11 @@ package pcal;
 
 import java.util.Hashtable;
 import java.util.Vector;
+
 import pcal.exception.ParseAlgorithmException;
 import pcal.exception.TLAExprException;
 import pcal.exception.TokenizerException;
 import pcal.exception.UnrecoverableException;
-import tla2sany.parser.ParseError;
 import tla2tex.Debug;
 
 
@@ -292,6 +293,12 @@ public class ParseAlgorithm
       * Performs the initialization method of the AST to create default  *
       * objects for each subclass.                                       *
       *******************************************************************/
+    
+    /*
+     * Following added by LL on 17 Aug 2015 to fix bug apparently caused by
+     * incomplete initialization 
+     */
+    LATsize = 0 ;
    }
 
    
@@ -307,7 +314,8 @@ public class ParseAlgorithm
      * should be set to the position of the PcalParams.BeginAlg string by  *
      * whatever method finds that string and calls GetAlgorithm.           *
      **********************************************************************/
-     { Init(charR) ;
+     { try {
+	   Init(charR) ;
        if (fairAlgorithm) {
     	   String nextToken = GetAlgToken() ;
     	   if (!nextToken.equals(PcalParams.BeginFairAlg2)) {
@@ -538,6 +546,14 @@ public class ParseAlgorithm
                              GetLastLocationEnd())) ;
            return uniproc ;
          }
+       } catch (final RuntimeException e) {
+			// Catch generic/unhandled errors (ArrayIndexOutOfbounds/NullPointers/...) that
+			// the nested code might throw at us. Not converting them into a
+			// ParseAlgorithmException means the Toolbox silently fails to translate an
+			// algorithm (see Github issue at https://github.com/tlaplus/tlaplus/issues/313)
+	    	ParsingError("Unknown error at or before");
+    	    return null;
+       }
      }
 
    /**
@@ -947,6 +963,8 @@ public class ParseAlgorithm
          }
        else
          { result.unlabDo = GetCStmt() ; } ;
+       if (result.unlabDo.size() == 0)
+         { ParsingError("Missing body of while statement at"); }
        result.labDo = new Vector() ;
          /******************************************************************
          * For historical reasons, some methods expect a labDo field to    *
@@ -1071,7 +1089,7 @@ public class ParseAlgorithm
        if (nextTok.equals("print"))  { return GetPrintS() ; } ;
        if (nextTok.equals("assert")) { return GetAssert() ; } ;
        if (nextTok.equals("skip"))   { return GetSkip() ; }   ;
-       if (nextTok.equals("call"))   { return GetCallOrCallReturn() ; }   ;
+       if (nextTok.equals("call"))   { return GetCallOrCallReturnOrCallGoto() ; }   ;
        if (nextTok.equals("return")) { return GetReturn() ; }   ;
        if (nextTok.equals("goto"))   { return GetGoto() ; }   ;
        if (nextTok.equals("while"))  { return GetWhile() ; } ;
@@ -1378,9 +1396,13 @@ public class ParseAlgorithm
          { result.Do = new Vector() ;
            result.Do.addElement(InnerGetWith(depth+1, begLoc)) ;
          };
-       result.setOrigin(new Region(begLoc, 
-           ((AST) result.Do.elementAt(result.Do.size()-1)).getOrigin().getEnd())) ;
-       return result ;
+		try {
+		       result.setOrigin(new Region(begLoc, 
+		               ((AST) result.Do.elementAt(result.Do.size()-1)).getOrigin().getEnd())) ;
+		} catch (ArrayIndexOutOfBoundsException e) {
+			throw new ParseAlgorithmException("Missing body of with statement", result);
+		}
+	       return result ;
      } 
 
    public static AST.Assign GetAssign() throws ParseAlgorithmException
@@ -1575,7 +1597,7 @@ public class ParseAlgorithm
        return result ;
      }
 
-   public static AST GetCallOrCallReturn() throws ParseAlgorithmException 
+   public static AST GetCallOrCallReturnOrCallGoto() throws ParseAlgorithmException 
      /**********************************************************************
      * Note: should not complain if it finds a return that is not inside   *
      * a procedure because it could be in a macro that is called only      *
@@ -1593,6 +1615,23 @@ public class ParseAlgorithm
            result.from = currentProcedure ;
            result.args = theCall.args ;
            result.setOrigin(new Region(theCall.getOrigin().getBegin(), end)) ;
+           return result ;
+         }
+       else if (PeekAtAlgToken(1).equals("goto"))
+         { MustGobbleThis("goto") ;
+           AST.CallGoto result = new AST.CallGoto();
+           result.col   = theCall.col ;
+           result.line  = theCall.line ;
+           result.to    = theCall.to ;
+           result.after = GetAlgToken() ;
+           result.args  = theCall.args ;
+           PCalLocation end = new PCalLocation(lastTokLine-1, lastTokCol-1+result.to.length());
+           result.setOrigin(new Region(theCall.getOrigin().getBegin(), end)) ;
+           gotoUsed = true ;
+           if (result.to.equals("Done") || result.to.equals("\"Done\"")) {
+               gotoDoneUsed = true;
+           }
+           GobbleThis(";") ;
            return result ;
          }
        else 
@@ -2010,15 +2049,16 @@ public class ParseAlgorithm
                * set assignedVbls to the set of variables being assigned   *
                * by this statement.  Should set nextStepNeedsLabel to      *
                * true and set assignedVbls to a non-empty set iff this is  *
-               * a call, return, or callReturn.                            *
+               * a call, return, callReturn, or callGoto.                  *
                ************************************************************/
                nextStepNeedsLabel = false ;
                Vector assignedVbls = new Vector() ;
 
                /************************************************************
-               * Set isCallOrReturn true iff this is a call, return, or    *
-               * callReturn.  Will set setsPrcdVbls true iff this is a     *
-               * return or callReturn or a call of currentProcedure.       *
+               * Set isCallOrReturn true iff this is a call, return,       *
+               * callReturn, or callGoto.  Will set setsPrcdVbls true iff  *
+               * this is a return or callReturn or a call of               *
+               * currentProcedure.                                         *
                ************************************************************/
                boolean isCallOrReturn = false ;
                boolean setsPrcdVbls   = false ;
@@ -2027,6 +2067,12 @@ public class ParseAlgorithm
                      /******************************************************
                      * Sets obj to an alias of stmt of the right type.     *
                      ******************************************************/
+                   isCallOrReturn = true ;
+                   if (obj.to.equals(currentProcedure))
+                     { setsPrcdVbls = true ; } ;
+                 }
+               else if (stmt.getClass().equals(AST.CallGotoObj.getClass()))
+                 { AST.CallGoto obj = (AST.CallGoto) stmt ;
                    isCallOrReturn = true ;
                    if (obj.to.equals(currentProcedure))
                      { setsPrcdVbls = true ; } ;
@@ -2483,8 +2529,10 @@ public class ParseAlgorithm
                    } ;
                  result = 1 ;
                }
-             else if (node.getClass().equals(
-                           AST.GotoObj.getClass())  
+             else if (   node.getClass().equals(
+                           AST.GotoObj.getClass())
+                      || node.getClass().equals(
+                           AST.CallGotoObj.getClass())
                      )
                { result = 1 ;
                }
@@ -3151,6 +3199,25 @@ public class ParseAlgorithm
             return result;
           } ;
 
+        if (stmt.getClass().equals( AST.CallGotoObj.getClass()))
+          { AST.CallGoto tstmt = (AST.CallGoto) stmt ;
+            AST.CallGoto result = new AST.CallGoto() ;
+            result.col  = tstmt.col ;
+            result.line = tstmt.line ;
+            result.macroCol  = tstmt.macroCol ;
+            result.macroLine = tstmt.macroLine ;
+            result.setOrigin(tstmt.getOrigin()) ;
+            if (macroLine > 0)
+              { result.macroLine = macroLine ;
+                result.macroCol  = macroCol ;
+              } ; 
+            result.to    = tstmt.to ;
+            result.after = tstmt.after ;
+            result.args  = 
+               TLAExpr.SeqSubstituteForAll(tstmt.args, args, params) ;
+            return result;
+          } ;
+
         if (stmt.getClass().equals( AST.GotoObj.getClass()))
           { AST.Goto tstmt = (AST.Goto) stmt ;
             AST.Goto result = new AST.Goto() ;
@@ -3424,20 +3491,17 @@ public class ParseAlgorithm
                             + tok + "\"") ; } ;
      }
 
-   public static void MustGobbleThis(String str) throws ParseAlgorithmException
-     { 
-       String tok;
-    try
-    {
-        tok = GetAlgToken();
-    } catch (ParseAlgorithmException e)
-    {
-        throw new ParseAlgorithmException(e.getMessage());
-    }
-       if (! tok.equals(str) )
-         { PcalDebug.ReportBug("Expected \"" + str + "\" but found \""
-                                 + tok + "\"") ; } ;
-     }
+	public static void MustGobbleThis(final String str) throws ParseAlgorithmException {
+		final String tok;
+		try {
+			tok = GetAlgToken();
+		} catch (ParseAlgorithmException e) {
+			throw new ParseAlgorithmException(e.getMessage());
+		}
+		if (!tok.equals(str)) {
+			ParsingError("Expected \"" + str + "\" but found \"" + tok + "\"");
+		}
+	}
 
    public static boolean GobbleEqualOrIf() throws ParseAlgorithmException
      /**********************************************************************

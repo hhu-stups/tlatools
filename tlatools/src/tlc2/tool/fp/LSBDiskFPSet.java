@@ -9,6 +9,7 @@ import java.rmi.RemoteException;
 import java.util.Arrays;
 
 import tlc2.output.EC;
+import tlc2.util.BufferedRandomAccessFile;
 import util.Assert;
 
 @SuppressWarnings("serial")
@@ -36,7 +37,7 @@ public class LSBDiskFPSet extends HeapBasedDiskFPSet {
 		@Override
 		protected void prepareTable() {
 			// Verify tblCnt is still within positive Integer.MAX_VALUE bounds
-			int cnt = (int) tblCnt.get();
+			int cnt = (int) getTblCnt();
 			Assert.check(cnt > 0, EC.GENERAL);
 			
 			// Why not sort this.tbl in-place rather than doubling memory
@@ -76,7 +77,7 @@ public class LSBDiskFPSet extends HeapBasedDiskFPSet {
 		 * @see tlc2.tool.fp.DiskFPSet.Flusher#mergeNewEntries(java.io.RandomAccessFile, java.io.RandomAccessFile)
 		 */
 		@Override
-		protected void mergeNewEntries(RandomAccessFile inRAF, RandomAccessFile outRAF) throws IOException {
+		protected void mergeNewEntries(BufferedRandomAccessFile[] inRAFs, RandomAccessFile outRAF) throws IOException {
 			final int buffLen = buff.length;
 
 			// Precompute the maximum value of the new file
@@ -97,7 +98,7 @@ public class LSBDiskFPSet extends HeapBasedDiskFPSet {
 			boolean eof = false;
 			if (fileCnt > 0) {
 				try {
-					value = inRAF.readLong();
+					value = inRAFs[0].readLong();
 				} catch (EOFException e) {
 					eof = true;
 				}
@@ -110,7 +111,7 @@ public class LSBDiskFPSet extends HeapBasedDiskFPSet {
 				if (value < buff[i]) {
 					writeFP(outRAF, value);
 					try {
-						value = inRAF.readLong();
+						value = inRAFs[0].readLong();
 					} catch (EOFException e) {
 						eof = true;
 					}
@@ -133,7 +134,7 @@ public class LSBDiskFPSet extends HeapBasedDiskFPSet {
 				do {
 					writeFP(outRAF, value);
 					try {
-						value = inRAF.readLong();
+						value = inRAFs[0].readLong();
 					} catch (EOFException e) {
 						eof = true;
 					}

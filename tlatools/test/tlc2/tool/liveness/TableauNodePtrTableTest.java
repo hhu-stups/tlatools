@@ -26,12 +26,17 @@
 
 package tlc2.tool.liveness;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
 import java.util.Arrays;
 
-import junit.framework.TestCase;
+import org.junit.Test;
 
-public class TableauNodePtrTableTest extends TestCase {
+public class TableauNodePtrTableTest {
 
+	@Test
 	public void testSetDone() {
 		final TableauNodePtrTable tbl = new TableauNodePtrTable(0); // init with 0 so that grow is tested
 		
@@ -56,6 +61,7 @@ public class TableauNodePtrTableTest extends TestCase {
 	}
 	
 	// Test various methods which apparently all yield pretty much the same result
+	@Test
 	public void testRedundantMethodYieldSameResult() {
 		final TableauNodePtrTable tbl = new TableauNodePtrTable(0); // init with 0 so that grow is tested
 		

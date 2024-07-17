@@ -1,10 +1,17 @@
 // Copyright (c) 2011 Microsoft Corporation.  All rights reserved.
 package tlc2.tool.fp;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+
+import org.junit.Test;
 
 import tlc2.util.LongVec;
 
@@ -32,6 +39,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * Tests if {@link DiskFPSet#diskLookup(long)} returns true for zero fp
 	 * @throws IOException 
 	 */
+	@Test
 	public void testWithoutZeroFP() throws IOException {
 		final DiskFPSet fpSet = (DiskFPSet) getFPSet(new FPSetConfiguration());
 		assertFalse("Succeeded to look up 0 fp", fpSet.contains(0l));
@@ -41,6 +49,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * Tests if {@link DiskFPSet#diskLookup(long)} returns true for min fp
 	 * @throws IOException 
 	 */
+	@Test
 	public void testWithoutMinFP() throws IOException {
 		final DiskFPSet fpSet = (DiskFPSet) getFPSet(new FPSetConfiguration());
 		assertFalse("Succeeded to look up 0 fp", fpSet.contains(Long.MIN_VALUE));
@@ -50,6 +59,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * Tests if {@link DiskFPSet#diskLookup(long)} returns true for max fp
 	 * @throws IOException 
 	 */
+	@Test
 	public void testWithoutMaxFP() throws IOException {
 		final DiskFPSet fpSet = (DiskFPSet) getFPSet(new FPSetConfiguration());
 		assertFalse("Succeeded to look up 0 fp", fpSet.contains(Long.MAX_VALUE));
@@ -59,12 +69,13 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * Tests if {@link DiskFPSet#diskLookup(long)} accepts a 0 fp
 	 * @throws IOException 
 	 */
+	@Test
 	public void testZeroFP() throws IOException {
 		// skip known failures which aren't likely to be fixed anytime soon
-		// @see https://bugzilla.tlaplus.net/show_bug.cgi?id=213
+		// @see Bug #213 in general/bugzilla/index.html
 		if(!runKnownFailures) {
 			System.out
-					.println("Skipping test failing due to https://bugzilla.tlaplus.net/show_bug.cgi?id=213");
+					.println("Skipping test failing due to Bug #213 in general/bugzilla/index.html");
 			return;
 		}
 
@@ -77,12 +88,13 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * Tests if {@link DiskFPSet#diskLookup(long)} accepts a min fp
 	 * @throws IOException 
 	 */
+	@Test
 	public void testMinFP() throws IOException {
 		// skip known failures which aren't likely to be fixed anytime soon
-		// @see https://bugzilla.tlaplus.net/show_bug.cgi?id=213
+		// @see Bug #213 in general/bugzilla/index.html
 		if(!runKnownFailures) {
 			System.out
-					.println("Skipping test failing due to https://bugzilla.tlaplus.net/show_bug.cgi?id=213");
+					.println("Skipping test failing due to Bug #213 in general/bugzilla/index.html");
 			return;
 		}
 		
@@ -96,6 +108,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * Tests if {@link DiskFPSet#diskLookup(long)} accepts a min - 1  fp
 	 * @throws IOException 
 	 */
+	@Test
 	public void testMinMin1FP() throws IOException {
 		final DiskFPSet fpSet = (DiskFPSet) getFPSet(new FPSetConfiguration());
 		// zeroing the msb in DiskFPSet turns Long.Min_Value into 0
@@ -108,6 +121,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * Tests if {@link DiskFPSet#diskLookup(long)} accepts a -1 fp
 	 * @throws IOException 
 	 */
+	@Test
 	public void testNeg1FP() throws IOException {
 		final DiskFPSet fpSet = (DiskFPSet) getFPSet(new FPSetConfiguration());
 		assertFalse(fpSet.put(-1l));
@@ -118,6 +132,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * Tests if {@link DiskFPSet#diskLookup(long)} accepts a +1 fp
 	 * @throws IOException 
 	 */
+	@Test
 	public void testPos1FP() throws IOException {
 		final DiskFPSet fpSet = (DiskFPSet) getFPSet(new FPSetConfiguration());
 		assertFalse(fpSet.put(1l));
@@ -128,6 +143,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * Tests if {@link DiskFPSet#diskLookup(long)} accepts a max fp
 	 * @throws IOException 
 	 */
+	@Test
 	public void testMaxFP() throws IOException {
 		final DiskFPSet fpSet = (DiskFPSet) getFPSet(new FPSetConfiguration());
 		assertFalse(fpSet.put(Long.MAX_VALUE));
@@ -141,6 +157,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * 
 	 * @throws IOException
 	 */
+	@Test
 	public void testValues() throws IOException {
 		final DiskFPSet fpSet = (DiskFPSet) getFPSet(new FPSetConfiguration());
 
@@ -267,6 +284,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * 
 	 * @throws IOException 
 	 */
+	@Test
 	@SuppressWarnings("deprecation")
 	public void testDiskLookupWithFpOnLoPage() throws IOException {
 		int freeMemory = 1000; // causes 16 in memory entries
@@ -290,12 +308,13 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * 
 	 * @throws IOException 
 	 */
+	@Test
 	public void testMemLookupWithZeros() throws IOException {
 		// skip known failures which aren't likely to be fixed anytime soon
-		// @see https://bugzilla.tlaplus.net/show_bug.cgi?id=213
+		// @see Bug #213 in general/bugzilla/index.html
 		if(!runKnownFailures) {
 			System.out
-					.println("Skipping test failing due to https://bugzilla.tlaplus.net/show_bug.cgi?id=213");
+					.println("Skipping test failing due to Bug #213 in general/bugzilla/index.html");
 			return;
 		}
 		
@@ -310,12 +329,13 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * 
 	 * @throws IOException 
 	 */
+	@Test
 	public void testMemLookupWithMin() throws IOException {
 		// skip known failures which aren't likely to be fixed anytime soon
-		// @see https://bugzilla.tlaplus.net/show_bug.cgi?id=213
+		// @see Bug #213 in general/bugzilla/index.html
 		if(!runKnownFailures) {
 			System.out
-					.println("Skipping test failing due to https://bugzilla.tlaplus.net/show_bug.cgi?id=213");
+					.println("Skipping test failing due to Bug #213 in general/bugzilla/index.html");
 			return;
 		}
 		
@@ -330,6 +350,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * 
 	 * @throws IOException 
 	 */
+	@Test
 	public void testMemLookupWithMax() throws IOException {
 		final DiskFPSet fpSet = (DiskFPSet) getFPSet(new FPSetConfiguration(.75d));
 		assertFalse(fpSet.memInsert(Long.MAX_VALUE));
@@ -342,6 +363,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * 
 	 * @throws IOException 
 	 */
+	@Test
 	public void testDiskLookupWithZeros() throws IOException {
 		final long fp = 0L;
 
@@ -376,6 +398,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * 
 	 * @throws IOException 
 	 */
+	@Test
 	public void testDiskLookupWithMin() throws IOException {
 		final DiskFPSet fpSet = (DiskFPSet) getFPSet(new FPSetConfiguration());
 		assertFalse(fpSet.memInsert(Long.MIN_VALUE & 0x7FFFFFFFFFFFFFFFL));
@@ -391,6 +414,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * 
 	 * @throws IOException 
 	 */
+	@Test
 	public void testDiskLookupWithMax() throws IOException {
 		final DiskFPSet fpSet = (DiskFPSet) getFPSet(new FPSetConfiguration());
 		assertFalse(fpSet.memInsert(Long.MAX_VALUE));
@@ -405,6 +429,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * 
 	 * @throws IOException 
 	 */
+	@Test
 	public void testDiskLookupWithMaxOnPage() throws IOException {
 		testDiskLookupOnPage(Long.MAX_VALUE);
 	}
@@ -414,12 +439,13 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * 
 	 * @throws IOException 
 	 */
+	@Test
 	public void testDiskLookupWithZerosOnPage() throws IOException {
 		// skip known failures which aren't likely to be fixed anytime soon
-		// @see https://bugzilla.tlaplus.net/show_bug.cgi?id=213
+		// @see Bug #213 in general/bugzilla/index.html
 		if(!runKnownFailures) {
 			System.out
-					.println("Skipping test failing due to https://bugzilla.tlaplus.net/show_bug.cgi?id=213");
+					.println("Skipping test failing due to Bug #213 in general/bugzilla/index.html");
 			return;
 		}
 		testDiskLookupOnPage(0l);
@@ -430,12 +456,13 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * 
 	 * @throws IOException 
 	 */
+	@Test
 	public void testDiskLookupWithLongMinValueOnPage() throws IOException {
 		// skip known failures which aren't likely to be fixed anytime soon
-		// @see https://bugzilla.tlaplus.net/show_bug.cgi?id=213
+		// @see Bug #213 in general/bugzilla/index.html
 		if(!runKnownFailures) {
 			System.out
-					.println("Skipping test failing due to https://bugzilla.tlaplus.net/show_bug.cgi?id=213");
+					.println("Skipping test failing due to Bug #213 in general/bugzilla/index.html");
 			return;
 		}
 		
@@ -466,6 +493,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * Test that both implementations - put(long) & putBlock(LongVec) - yield
 	 * the same results.
 	 */
+	@Test
 	public void testComparePutAndPutBlock() throws IOException {
 		final FPSet putFpSet = (FPSet) getFPSetInitialized();
 		final FPSet putBlockFpSet = (FPSet) getFPSetInitialized();
@@ -483,6 +511,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 	 * Test that both implementations - contains(long) & containsBlock(LongVec) - yield
 	 * the same results.
 	 */
+	@Test
 	public void testCompareContainsAndContainsBlock() throws IOException {
 		final FPSet containsFpSet = (FPSet) getFPSetInitialized();
 		final FPSet containsBlockFpSet = (FPSet) getFPSetInitialized();
@@ -496,6 +525,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 		assertEquals(containsFpSet.contains(fp), containsBlockRes);
 	}
 
+	@Test
 	public void testContainsBlock() throws IOException {
 		final FPSet fpSet = (FPSet) getFPSetInitialized();
 		
@@ -512,6 +542,7 @@ public class ShortDiskFPSetTest extends AbstractFPSetTest {
 		assertFalse(fpSet.containsBlock(fpv).get(0));
 	}
 	
+	@Test
 	public void testPutBlock() throws IOException {
 		final FPSet fpSet = (FPSet) getFPSetInitialized();
 		

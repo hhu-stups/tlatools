@@ -4,6 +4,7 @@ package util;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.Map;
 
 import tlc2.tool.Defns;
 import tlc2.tool.TLCState;
@@ -260,6 +261,10 @@ public final class UniqueString implements Serializable
         return internTbl.put(str);
     }
 
+	public static UniqueString of(String str) {
+		return uniqueStringOf(str);
+	}
+
     /**
      * If there exists a UniqueString object obj such that obj.getTok()
      * equals tok, then uidToUniqueString(i) returns obj; otherwise,    
@@ -279,7 +284,7 @@ public final class UniqueString implements Serializable
      * @return
      * @throws IOException
      */
-    public final void write(BufferedDataOutputStream dos) throws IOException
+    public final void write(IDataOutputStream dos) throws IOException
     {
         dos.writeInt(this.tok);
         dos.writeInt(this. getVarLoc()); 
@@ -296,13 +301,22 @@ public final class UniqueString implements Serializable
      * 
      * The method does not change member/class variables
      */
-    public static UniqueString read(BufferedDataInputStream dis) throws IOException
+    public static UniqueString read(IDataInputStream dis) throws IOException
     {
         int tok1 = dis.readInt();
         int loc1 = dis.readInt();
         int slen = dis.readInt();
         String str = dis.readString(slen);
         return new UniqueString(str, tok1, loc1);
+    }
+    
+    public static UniqueString read(IDataInputStream dis, final Map<String, UniqueString> tbl) throws IOException
+    {
+        dis.readInt(); // skip, because invalid for the given internTbl
+        dis.readInt(); // skip, because invalid for the given internTbl
+        final int slen = dis.readInt();
+        final String str = dis.readString(slen);
+        return tbl.get(str);
     }
 
 
@@ -314,5 +328,4 @@ public final class UniqueString implements Serializable
     {
         internTbl.setSource(source);
     }
-
 }

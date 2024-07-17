@@ -2,6 +2,7 @@ package tlc2.tool.queue;
 
 import java.io.IOException;
 
+import tlc2.tool.StateVec;
 import tlc2.tool.TLCState;
 import tlc2.tool.Worker;
 
@@ -21,9 +22,16 @@ public interface IStateQueue {
 
 	/* Enqueues a list of states. Wake up any waiting thread. */
 	public abstract void sEnqueue(final TLCState states[]);
-
+	public abstract void sEnqueue(final StateVec stateVec);
+	
 	/* Return the first element in the queue. Wait if empty. */
 	public abstract TLCState sDequeue();
+	
+	/**
+	 * Returns the first element in the queue. Wait if empty. Does not remove the
+	 * element. Can be null and blocks other consumers (sEnqueue and sDequeue).
+	 */
+	public abstract TLCState sPeek();
 
 	/**
 	 * Return (up to) the first count elements in the queue. Wait if empty.
@@ -62,7 +70,7 @@ public interface IStateQueue {
 	 * free when workers behave correctly except for the single case when a
 	 * remote worker dies unexpectedly.
 	 * 
-	 * @see http://bugzilla.tlaplus.net/show_bug.cgi?id=175
+	 * @see Bug #175 in general/bugzilla/index.html
 	 */
 	public abstract void resumeAllStuck();
 
@@ -77,4 +85,10 @@ public interface IStateQueue {
 	public abstract void recover() throws IOException;
 
 	public abstract boolean isEmpty();
+
+	/**
+	 * TESTING ONLY!
+	 * Delete disk files if any.
+	 */
+	abstract void delete() throws IOException;
 }

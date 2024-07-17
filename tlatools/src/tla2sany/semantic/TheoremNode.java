@@ -15,12 +15,16 @@ package tla2sany.semantic;
 
 import java.util.Hashtable;
 
-import tla2sany.st.TreeNode;
-import tla2sany.utilities.Strings;
-import util.UniqueString;
-
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+
+import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
+import tla2sany.st.TreeNode;
+import tla2sany.utilities.Strings;
+import tla2sany.xml.SymbolContext;
+import util.UniqueString;
 
 /**
  * This class represents a theorem
@@ -70,6 +74,10 @@ public class TheoremNode extends LevelNode {
     this.def = opd;
     this.proof = pf;
     if (opd != null) opd.thmOrAssump = this;
+
+    // make sure that definition and statemtent agree
+    if (def != null)
+      assert(def.getBody() == theoremExprOrAssumeProve);
   }
 
   /* Returns the statement of the theorem  */
@@ -107,7 +115,8 @@ public class TheoremNode extends LevelNode {
   /* (non-Javadoc)
  * @see tla2sany.semantic.LevelNode#levelCheck(int)
  */
-public final boolean levelCheck(int iter) {
+  @Override
+  public final boolean levelCheck(int iter) {
     if (levelChecked >= iter) {return true ;} ;
     levelChecked = iter;
     LevelNode sub[] ;
@@ -313,6 +322,7 @@ public final boolean levelCheck(int iter) {
    * toString, levelDataToString, and walkGraph methods to implement
    * ExploreNode interface
    */
+  @Override
   public final String levelDataToString() {
     return "Level: "               + this.getLevel()               + "\n" +
            "LevelParameters: "     + this.getLevelParams()         + "\n" +
@@ -321,6 +331,7 @@ public final boolean levelCheck(int iter) {
            "ArgLevelParams: "      + this.getArgLevelParams()      + "\n";
   }
 
+  @Override
   public final String toString(int depth) {
     if (depth <= 0) return "";
     String res =
@@ -353,6 +364,7 @@ public final boolean levelCheck(int iter) {
    * The children are the statement and the proof (if there is one).
    */
 
+  @Override
   public SemanticNode[] getChildren() {
     if (this.proof == null) {
     return new SemanticNode[] {this.theoremExprOrAssumeProve};
@@ -361,29 +373,89 @@ public final boolean levelCheck(int iter) {
                                this.proof};
   }
 
-  public final void walkGraph(Hashtable semNodesTable) {
-    Integer uid = new Integer(myUID);
+  @Override
+  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
     semNodesTable.put(uid, this);
+    visitor.preVisit(this);
     if (theoremExprOrAssumeProve != null)
-      {theoremExprOrAssumeProve.walkGraph(semNodesTable);} ;
-    if (proof != null) {proof.walkGraph(semNodesTable);} ;
+      {theoremExprOrAssumeProve.walkGraph(semNodesTable, visitor);} ;
+    if (proof != null) {proof.walkGraph(semNodesTable, visitor);} ;
+    visitor.postVisit(this);
   }
 
+  /* MR: this does not do anything
   public Element export(Document doc, tla2sany.xml.SymbolContext context) {
-    if (getDef() == null)
-      // we export the definition of the theorem
-      return super.export(doc,context);
-    else
-      // we export its name only, named theorem will be exported through the ThmOrAss..
-      return getDef().export(doc,context);
+    Element e = super.export(doc, context);
+    return e;
+  }
+  */
+
+  /* MR: This is the same as SymbolNode.exportDefinition. Exports the actual theorem content, not only a reference.
+   */
+  public Element exportDefinition(Document doc, SymbolContext context) {
+    //makes sure that the we are creating an entry in the database
+    if (!context.isTop_level_entry())
+      throw new IllegalArgumentException("Exporting theorem ref "+getNodeRef()+" twice!");
+    context.resetTop_level_entry();
+
+    try {
+      Element e = getLevelElement(doc, context);
+      // level
+      try {
+        Element l = appendText(doc,"level",Integer.toString(getLevel()));
+        e.insertBefore(l,e.getFirstChild());
+      } catch (RuntimeException ee) {
+        // not sure it is legal for a LevelNode not to have level, debug it!
+      }
+      //location
+      try {
+        Element loc = getLocationElement(doc);
+        e.insertBefore(loc,e.getFirstChild());
+      } catch (RuntimeException ee) {
+        // do nothing if no location
+      }
+      return e;
+    } catch (RuntimeException ee) {
+      System.err.println("failed for node.toString(): " + toString() + "\n with error ");
+      ee.printStackTrace();
+      throw ee;
+    }
+  }
+
+  protected String getNodeRef() {
+    return "TheoremNodeRef";
   }
 
   protected Element getLevelElement(Document doc, tla2sany.xml.SymbolContext context) {
     Element e = doc.createElement("TheoremNode");
-    e.appendChild(getTheorem().export(doc,context));
+
+    //the theorem name is now contained in the definition, if it exists
+    Node n = doc.createElement("body");
+    if (def != null) {
+      //if there is a definition, export it too
+      Node d = doc.createElement("definition");
+      d.appendChild(def.export(doc, context));
+      e.appendChild(d);
+      assert( def.getBody() == getTheorem() ); //make sure theorem and definition body agree before export
+    }
+
+    n.appendChild(getTheorem().export(doc,context));
+    e.appendChild( n );
+
     if (getProof() != null)  e.appendChild(getProof().export(doc,context));
     if (isSuffices()) e.appendChild(doc.createElement("suffices"));
+    return e;
+  }
+
+  /* overrides LevelNode.export and exports a UID reference instad of the full version*/
+  @Override
+  public Element export(Document doc, SymbolContext context) {
+    // first add symbol to context
+    context.put(this, doc);
+    Element e = doc.createElement(getNodeRef());
+    e.appendChild(appendText(doc,"UID",Integer.toString(myUID)));
     return e;
   }
 }

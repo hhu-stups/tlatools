@@ -1,31 +1,41 @@
 package tlc2.tool.queue;
 
-import tla2sany.semantic.SemanticNode;
+import java.util.HashSet;
+import java.util.Set;
+
+import tla2sany.semantic.OpDeclNode;
 import tla2sany.semantic.SymbolNode;
 import tlc2.tool.StateVec;
 import tlc2.tool.TLCState;
-import tlc2.value.Value;
+import tlc2.value.IValue;
 import util.UniqueString;
 
 @SuppressWarnings("serial")
 public class DummyTLCState extends TLCState {
 
+	private final long fp;
+
 	public DummyTLCState() {
 		uid = 0;
 		TLCState.Empty = this;
+		this.fp = 0L;
 	}
 	
+	public DummyTLCState(long fp) {
+		this.fp = fp;
+	}
+
 	/* (non-Javadoc)
 	 * @see tlc2.tool.TLCState#bind(util.UniqueString, tlc2.value.Value, tla2sany.semantic.SemanticNode)
 	 */
-	public TLCState bind(UniqueString name, Value value, SemanticNode expr) {
+	public TLCState bind(UniqueString name, IValue value) {
 		return null;
 	}
 
 	/* (non-Javadoc)
 	 * @see tlc2.tool.TLCState#bind(tla2sany.semantic.SymbolNode, tlc2.value.Value, tla2sany.semantic.SemanticNode)
 	 */
-	public TLCState bind(SymbolNode id, Value value, SemanticNode expr) {
+	public TLCState bind(SymbolNode id, IValue value) {
 		return null;
 	}
 
@@ -39,7 +49,7 @@ public class DummyTLCState extends TLCState {
 	/* (non-Javadoc)
 	 * @see tlc2.tool.TLCState#lookup(util.UniqueString)
 	 */
-	public Value lookup(UniqueString var) {
+	public IValue lookup(UniqueString var) {
 		return null;
 	}
 
@@ -82,7 +92,7 @@ public class DummyTLCState extends TLCState {
 	 * @see tlc2.tool.TLCState#fingerPrint()
 	 */
 	public long fingerPrint() {
-		return 0;
+		return this.fp;
 	}
 
 	/* (non-Javadoc)
@@ -90,6 +100,13 @@ public class DummyTLCState extends TLCState {
 	 */
 	public boolean allAssigned() {
 		return false;
+	}
+
+	/* (non-Javadoc)
+	 * @see tlc2.tool.TLCState#getUnassigned()
+	 */
+	public final Set<OpDeclNode> getUnassigned() {
+		return new HashSet<OpDeclNode>();
 	}
 
 	/* (non-Javadoc)
@@ -103,7 +120,7 @@ public class DummyTLCState extends TLCState {
 	 * @see tlc2.tool.TLCState#toString()
 	 */
 	public String toString() {
-		return "Dummy#" + uid;
+		return "Dummy#" + uid + ":" + fp;
 	}
 
 	/* (non-Javadoc)

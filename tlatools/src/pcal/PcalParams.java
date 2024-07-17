@@ -18,8 +18,13 @@ public final class PcalParams
     /**
      * Parameters to be updated on each new release.
      */
-    public static final String modDate = "2 Apr 2013";
-    public static final String version = "1.8";
+    public static final String modDate = "31 December 2020";
+	// Can't increment 1.9 to 1.10 because VersionToNumber(str) calculates a lower
+	// numerical value for 1.10 than it does for 1.9. This breaks the FairSeq?Test
+    // tests. Until we switch from 1.xx to 2.0, increment versionWeight along with
+    // version.
+    public static final int versionWeight = 1902;
+    public static final String version = "1.11";
     /**
      * SZ Mar 9, 2009:
      * Added re-initialization method. Since PcalParams class
@@ -50,7 +55,7 @@ public final class PcalParams
         NoDoneDisjunct = false;
         optionsInFile = false;
         versionOption = null;
-        inputVersionNumber = VersionToNumber(PcalParams.version);
+        inputVersionNumber = PcalParams.versionWeight;
         PcalTLAGen.wrapColumn = 78;
         PcalTLAGen.ssWrapColumn = 45;
         tlaPcalMapping = null ;
@@ -91,6 +96,11 @@ public final class PcalParams
     * The file name if the -spec option is chosen.                         *
     ***********************************************************************/
 
+    public static boolean tlcTranslation() {
+    	return PcalParams.SpecOption || PcalParams.MyspecOption || PcalParams.Spec2Option
+                || PcalParams.Myspec2Option;
+    }
+    
     public static boolean WriteASTFlag = false ;
     /***********************************************************************
     * True if the -writeAST option is chosen.                              *
@@ -151,11 +161,11 @@ public final class PcalParams
       * Default initial value changed to "defaultInitValue"                *
       * by LL on 22 Aug 2007                                               *
       *********************************************************************/
-      { Vector line = new Vector() ;
+      { Vector<TLAToken> line = new Vector<TLAToken>() ;
 //        line.addElement(new TLAToken("{", 0, 0)) ;
 //        line.addElement(new TLAToken("}", 0, 0)) ;
         line.addElement(new TLAToken("defaultInitValue", 0, 0));
-        Vector vec = new Vector() ;
+        Vector<Vector<TLAToken>> vec = new Vector<Vector<TLAToken>>() ;
         vec.addElement(line) ;
         TLAExpr exp = new TLAExpr(vec) ;
         exp.normalize() ;
@@ -178,18 +188,18 @@ public final class PcalParams
     * algorithm in a .tla input file.  The translation is put immediately  *
     * after any line containing                                            *
     *                                                                      *
-    *    BeginXLation1 [one or more spaces] BeginXlation2                  *
+    *    BeginXLation1 [one space] BeginXlation2 [one space] BeginXlation3 *
     *                                                                      *
     * It is followed by a line containing                                  *
     *                                                                      *
-    *    EndXLation1 [one or more spaces] EndXlation2.                     *
+    *    EndXLation1 [one space] EndXlation2 [one space] EndXlation3       *
     ***********************************************************************/
     public static final String BeginXlation1 = "BEGIN" ;
     public static final String BeginXlation2 = "TRANSLATION" ;
 
     public static final String EndXlation1 = "END" ;
     public static final String EndXlation2 = "TRANSLATION" ;
-
+    
   /*************************************************************************
   * The string identifying the end of the automatically generated part of  *
   * the .cfg file and the beginning of the user-added part.                *
@@ -242,7 +252,7 @@ public final class PcalParams
      // way because of the way the code evolved, and no intelligent
      // design has stepped in to fix it.
   public static String versionOption = null;
-  public static int inputVersionNumber = VersionToNumber(PcalParams.version);
+  public static int inputVersionNumber = PcalParams.versionWeight;
      // The input file's version number * 1000
 //  public static boolean readOnly = false; 
      // True iff this is a .pcal input file and the .tla file should 
@@ -305,7 +315,7 @@ public final class PcalParams
           PcalDebug.reportError("Illegal version " + ver + " specified."); 
           return false;
       }
-      if (vnum > VersionToNumber(PcalParams.version)) {
+      if (vnum > PcalParams.versionWeight) {
           PcalDebug.reportError("Specified version " + ver + 
                   " later than current version " + PcalParams.version);
           return false;

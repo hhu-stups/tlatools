@@ -26,16 +26,23 @@
 
 package tlc2.tool.liveness;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
 import java.io.IOException;
+
+import org.junit.Test;
 
 import tlc2.util.BitVector;
 import tlc2.util.LongVec;
-import tlc2.util.statistics.BucketStatistics;
+import tlc2.util.statistics.FixedSizedBucketStatistics;
 import tlc2.util.statistics.IBucketStatistics;
 
 public class TableauDiskGraphTest extends DiskGraphTest {
 
-	private static final IBucketStatistics GRAPH_STATS = new BucketStatistics("Test Dummy", 16);
+	private static final IBucketStatistics GRAPH_STATS = new FixedSizedBucketStatistics("Test Dummy", 16);
 	private static final int NUMBER_OF_SOLUTIONS = 1;
 	private static final int NUMBER_OF_ACTIONS = 0;
 	private static final BitVector NO_ACTIONS = null;
@@ -70,6 +77,7 @@ public class TableauDiskGraphTest extends DiskGraphTest {
 	 *	                +------+                           
 	 *
 	 */
+	@Test
 	public void testGetShortestPath() throws IOException {
 		final AbstractDiskGraph dg = getDiskGraph();
 
@@ -157,6 +165,7 @@ public class TableauDiskGraphTest extends DiskGraphTest {
  	 *
 	 * (Drawn with http://asciiflow.com/)
 	 */
+	@Test
 	public void testUnifyingNodeInPath() throws IOException {
 		final AbstractDiskGraph dg = getDiskGraph();
 
@@ -243,6 +252,7 @@ public class TableauDiskGraphTest extends DiskGraphTest {
 	 *	                      |         |                       
 	 *	                      +---------+                        
 	 */
+	@Test
 	public void testUnifyingNodeShortestPath() throws IOException {
 		final AbstractDiskGraph dg = getDiskGraph();
 
@@ -332,8 +342,9 @@ public class TableauDiskGraphTest extends DiskGraphTest {
 	 * 
 	 * The specialty here is that there are *two* init nodes and one them has *no* successors.
 	 * 
-	 * @see https://bugzilla.tlaplus.net/show_bug.cgi?id=293
+	 * @see Bug #293 in general/bugzilla/index.html
 	 */
+	@Test
 	public void testPathWithTwoInitNodesWithTableau() throws IOException {
 		final AbstractDiskGraph dg = getDiskGraph();
 
@@ -382,6 +393,7 @@ public class TableauDiskGraphTest extends DiskGraphTest {
 	 * Test that getPath returns the correct init state if the graph contains
 	 * multiple initial states with the same fingerprint but different tableau idxs.
 	 */
+	@Test
 	public void testGetPathWithTwoInits() throws IOException {
 		final AbstractDiskGraph dg = getDiskGraph();
 		
@@ -414,6 +426,7 @@ public class TableauDiskGraphTest extends DiskGraphTest {
 	/*
 	 * Test how an initial node transitions through the done state
 	 */
+	@Test
 	public void testNodeSetDone() throws IOException {
 		final TableauDiskGraph dg = (TableauDiskGraph) getDiskGraph();
 		final long fingerprint = 1L;
@@ -436,6 +449,7 @@ public class TableauDiskGraphTest extends DiskGraphTest {
 	 * Tests a path where both states have an identical fingerprint and only
 	 * differ in the tableau idx.
 	 */
+	@Test
 	public void testGetPathWithTwoNodesWithSameFingerprint() throws IOException {
 		final AbstractDiskGraph dg = getDiskGraph();
 
@@ -465,6 +479,7 @@ public class TableauDiskGraphTest extends DiskGraphTest {
 	/*
 	 * Test that it is possible to "update" a GraphNode's outgoing transitions.
 	 */
+	@Test
 	public void testLookupExistingNodeWithTidx() throws IOException {
 		final TableauDiskGraph dg = (TableauDiskGraph) getDiskGraph();
 		

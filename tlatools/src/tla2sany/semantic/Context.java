@@ -8,17 +8,16 @@
 
 package tla2sany.semantic;
 
+import java.util.Collection;
 import java.util.Enumeration;
 import java.util.Hashtable;
 
 import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.st.Location;
 import tla2sany.utilities.Strings;
 import tla2sany.utilities.Vector;
 import util.UniqueString;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
 
 // A context contains def/declNodes only.
 // Implements a simple context for symbol decls and defs. Also
@@ -90,23 +89,23 @@ public class Context implements ExploreNode {
 
   public class InitialSymbolEnumeration {
 
-    Enumeration e = initialContext.content();
+    Enumeration<Pair> e = initialContext.content();
 
     public boolean hasMoreElements() { return e.hasMoreElements(); }
 
     public SymbolNode nextElement() {
-      return (SymbolNode)(((Pair)(e.nextElement())).getSymbol());
+      return e.nextElement().getSymbol();
     }
   }
 
   public class ContextSymbolEnumeration {
 
-    Enumeration e = Context.this.content();
+    Enumeration<Pair> e = Context.this.content();
 
     public boolean hasMoreElements() { return e.hasMoreElements(); }
 
     public SymbolNode nextElement() {
-      return ((Pair)(e.nextElement())).getSymbol();
+      return e.nextElement().getSymbol();
     }
 
    /* public Element export(Document doc) {
@@ -132,7 +131,7 @@ public class Context implements ExploreNode {
                                       // belongs to is null for global contex shared by all modules.
 
   private Errors         errors;      // Object in which to register errors
-  private Hashtable      table;       // Mapping from symbol name to Pair's that include SymbolNode's
+  private Hashtable<Object, Pair>      table;       // Mapping from symbol name to Pair's that include SymbolNode's
   private Pair           lastPair;    // Pair added last to the this.table
 
   /**
@@ -140,7 +139,7 @@ public class Context implements ExploreNode {
    * SymbolTable this Context is part of (or null).
    */
   public Context(ExternalModuleTable mt, Errors errs) {
-    table = new Hashtable();
+    table = new Hashtable<>();
     this.exMT = mt;
     this.errors = errs;
     this.lastPair = null;
@@ -163,6 +162,16 @@ public class Context implements ExploreNode {
   public static Context getGlobalContext() {
     return initialContext;
   }
+  
+	public static boolean isBuiltIn(final ExploreNode exploreNode) {
+		final Collection<Pair> pairs = initialContext.table.values();
+		for (Pair p : pairs) {
+			if (exploreNode == p.info) {
+				return true;
+			}
+		}
+		return false;
+	}
 
   public Errors getErrors() { return errors; }
 
@@ -216,7 +225,7 @@ public class Context implements ExploreNode {
    * Returns Enumeration of the elements of the Hashtable "Table",
    * which are pair of the form (Pair link, SymbolNode sn)
    */
-  public Enumeration content() {
+  public Enumeration<Pair> content() {
     return table.elements();
   }
 
@@ -232,11 +241,11 @@ public class Context implements ExploreNode {
    * Returns a Vector of those SymbolNodes in this Context that are
    * instances of class "template" (or one of its subclasses)
    */
-  public Vector getByClass( Class template ) {
-    Vector result = new Vector();
-    Enumeration list = table.elements();
+  public Vector<SymbolNode> getByClass( Class<?> template ) {
+    Vector<SymbolNode> result = new Vector<>();
+    Enumeration<Pair> list = table.elements();
     while (list.hasMoreElements()) {
-      Pair elt = (Pair)list.nextElement();
+      Pair elt = list.nextElement();
       if (template.isInstance(elt.info)) {
         result.addElement( elt.info );
       }
@@ -249,12 +258,12 @@ public class Context implements ExploreNode {
    * instances of class OpDefNode and that are NOT of kind BuiltInKind
    * or ModuleInstanceKind
    */
-  public Vector getOpDefs() {
+  public Vector<OpDefNode> getOpDefs() {
       // SZ Apr 21, 2009: not used instance
       // Class template = OpDefNode.class;
     Pair nextPair = lastPair;
 
-    Vector result = new Vector();
+    Vector<OpDefNode> result = new Vector<>();
     while (nextPair != null) {
       if ( nextPair.info instanceof OpDefNode &&     // true for superclasses too.
            ((OpDefNode)nextPair.info).getKind() != ASTConstants.ModuleInstanceKind &&
@@ -270,12 +279,12 @@ public class Context implements ExploreNode {
   * instances of class ThmOrAssumpDefNode or ModuleInstanceKind            *
   * Code copied from getOpDefs().                                          *
   *************************************************************************/
-  public Vector getThmOrAssDefs() {
+  public Vector<ThmOrAssumpDefNode> getThmOrAssDefs() {
       // SZ Apr 21, 2009: not used instance
       // Class template = ThmOrAssumpDefNode.class;
     Pair nextPair = lastPair;
 
-    Vector result = new Vector();
+    Vector<ThmOrAssumpDefNode> result = new Vector<>();
     while (nextPair != null) {
       if ( nextPair.info instanceof ThmOrAssumpDefNode)
         { result.addElement( (ThmOrAssumpDefNode)(nextPair.info) );} ;
@@ -287,13 +296,13 @@ public class Context implements ExploreNode {
   /**
    * Returns vector of OpDeclNodes that represent CONSTANT declarations
    */
-  public Vector getConstantDecls() {
-    Class templateClass = OpDeclNode.class;
-    Enumeration list = table.elements();
+  public Vector<SemanticNode> getConstantDecls() {
+    Class<? extends SemanticNode> templateClass = OpDeclNode.class;
+    Enumeration<Pair> list = table.elements();
 
-    Vector result = new Vector();
+    Vector<SemanticNode> result = new Vector<>();
     while (list.hasMoreElements()) {
-      Pair elt = (Pair)list.nextElement();
+      Pair elt = list.nextElement();
       if (templateClass.isInstance(elt.info) &&     // true for superclasses too.
          ((OpDeclNode)elt.info).getKind() == ASTConstants.ConstantDeclKind  )
         result.addElement( (SemanticNode)(elt.info) );
@@ -303,13 +312,13 @@ public class Context implements ExploreNode {
   }
 
   /* Returns vector of OpDeclNodes that represent CONSTANT declarations  */
-  public Vector getVariableDecls() {
-    Class templateClass = OpDeclNode.class;
-    Enumeration list = table.elements();
+  public Vector<SemanticNode> getVariableDecls() {
+    Class<? extends SemanticNode> templateClass = OpDeclNode.class;
+    Enumeration<Pair> list = table.elements();
 
-    Vector result = new Vector();
+    Vector<SemanticNode> result = new Vector<>();
     while (list.hasMoreElements()) {
-      Pair elt = (Pair)list.nextElement();
+      Pair elt = list.nextElement();
       if (templateClass.isInstance(elt.info) &&     // true for superclasses too.
            ((OpDeclNode)elt.info).getKind() == ASTConstants.VariableDeclKind  )
         result.addElement( (SemanticNode)(elt.info) );
@@ -321,13 +330,13 @@ public class Context implements ExploreNode {
    * Returns a Vector of those SymbolNodes in this Context that are
    * instances of class ModuleNode
    */
-  public Vector getModDefs() {
-    Class template = ModuleNode.class;
-    Enumeration list = table.elements();
+  public Vector<SemanticNode> getModDefs() {
+    Class<? extends SemanticNode> template = ModuleNode.class;
+    Enumeration<Pair> list = table.elements();
 
-    Vector result = new Vector();
+    Vector<SemanticNode> result = new Vector<>();
     while (list.hasMoreElements()) {
-      Pair elt = (Pair)list.nextElement();
+      Pair elt = list.nextElement();
       if (template.isInstance(elt.info))    // true for superclasses too.
         result.addElement( (SemanticNode)(elt.info) );
     }
@@ -351,72 +360,72 @@ public class Context implements ExploreNode {
    * The original implementation added the elements of Context ct to
    * this context in the inverse order as they appear in ct.  It was
    * changed on 12 Mar 2013 by LL to add them in the same order.
+   * 
+   * Note that the return value is never used in our code base. (2020.03.06)
    */
-  public boolean mergeExtendContext(Context ct) {
-    boolean erc = true;
+	public boolean mergeExtendContext(final Context ct) {
+		if (ct.lastPair == null) {
+			// If the context represents an inner module that defines no EXTENDS, ct.lastPair will be null
+			return true;
+		}
+		
+		boolean erc = true;
+		// check locality, and multiplicity
+		// the .reversePairList was added to the following statement
+		// by LL on 12 Mar 2013
+		Pair p = ct.lastPair.reversePairList();
+		while (p != null) {
+			// Walk back along the list of pairs added to Context "ct"
+			SymbolNode sn = p.info;
 
-    // check locality, and multiplicity
-    // the .reversePairList was added to the following statement
-    // by LL on 12 Mar 2013
-    Pair p = ct.lastPair.reversePairList();
-    while (p != null) {
-      // Walk back along the list of pairs added to Context "ct"
-      SymbolNode sn = p.info;
+			// Ignore local symbols in Context "ct"
+			if (!sn.isLocal()) {
+				Object sName;
+				if (sn instanceof ModuleNode) {
+					sName = new SymbolTable.ModuleName(sn.getName());
+				} else {
+					sName = sn.getName();
+				}
 
-      // Ignore local symbols in Context "ct"
-      if (!sn.isLocal()) {
-	Object sName;
-	if (sn instanceof ModuleNode) {
-	  sName = new SymbolTable.ModuleName(sn.getName());
-	}
-	else {
-	  sName = sn.getName();
-	}
-
-        if (!table.containsKey(sName)) {
-	  // If this context DOES NOT contain this name, add it:
-	  table.put(sName, new Pair(sn));
-        }
-	else {
-	  // If this Context DOES contain this name
-          SymbolNode symbol = ((Pair)table.get(sName)).info;
-          if (symbol != sn) {
-	    // if the two SymbolNodes with the same name are distinct nodes,
-	    // We issue a warning or do nothing if they are instances of the same Java
-        // class--i.e. FormalParamNode, OpDeclNode, OpDefNode, or ModuleNode--doing
-        // nothing if they are both definitions coming from the same module.
-	    // otherwise, it is considered to be an error.
-        // Option of doing nothing if from same module added by LL on 31 Oct 2012 to
-        // fix problem caused by the same module being both EXTENDed and imported with
-        // a LOCAL INSTANCE.  Previously, it always added the warning.
-	    if (symbol.getClass() == sn.getClass()) {
-	        if (! symbol.sameOriginallyDefinedInModule(sn)) {
-              errors.addWarning( sn.getTreeNode().getLocation(),
-                                 "Warning: the " + kindOfNode(symbol) +  " of '" +
-                                 sName.toString() +
-                                 "' conflicts with \nits " + kindOfNode(symbol) + " at " +
-                                 symbol.getTreeNode().getLocation() + ".");
-	        }
-         }
-	    else {
-              errors.addError( sn.getTreeNode().getLocation(),
-                               "The " + kindOfNode(symbol) +  " of '" +
-                               sName.toString() +
-                               "' conflicts with \nits " + kindOfNode(symbol) + " at " +
-                               symbol.getTreeNode().getLocation() + ".");
+				if (!table.containsKey(sName)) {
+					// If this context DOES NOT contain this name, add it:
+					table.put(sName, new Pair(sn));
+				} else {
+					// If this Context DOES contain this name
+					SymbolNode symbol = ((Pair) table.get(sName)).info;
+					if (symbol != sn) {
+						// if the two SymbolNodes with the same name are distinct nodes,
+						// We issue a warning or do nothing if they are instances of the same Java
+						// class--i.e. FormalParamNode, OpDeclNode, OpDefNode, or ModuleNode--doing
+						// nothing if they are both definitions coming from the same module.
+						// otherwise, it is considered to be an error.
+						// Option of doing nothing if from same module added by LL on 31 Oct 2012 to
+						// fix problem caused by the same module being both EXTENDed and imported with
+						// a LOCAL INSTANCE. Previously, it always added the warning.
+						if (symbol.getClass() == sn.getClass()) {
+							if (!symbol.sameOriginallyDefinedInModule(sn)) {
+								errors.addWarning(sn.getTreeNode().getLocation(),
+										"Warning: the " + kindOfNode(symbol) + " of '" + sName.toString()
+												+ "' conflicts with \nits " + kindOfNode(symbol) + " at "
+												+ symbol.getTreeNode().getLocation() + ".");
+							}
+						} else {
+							errors.addError(sn.getTreeNode().getLocation(),
+									"The " + kindOfNode(symbol) + " of '" + sName.toString() + "' conflicts with \nits "
+											+ kindOfNode(symbol) + " at " + symbol.getTreeNode().getLocation() + ".");
 
 //                               "Incompatible multiple definitions of symbol '" +
 //                               sName.toString() +
 //                               "'; \nthe conflicting declaration is at " +
 //                               symbol.getTreeNode().getLocation()+ ".");
-              erc = false;
-            } //end else
-          } // end if
-        } // end else
-      }
-      p  = p.link;
-    }
-    return erc;
+							erc = false;
+						} // end else
+					} // end if
+				} // end else
+			}
+			p = p.link;
+		}
+		return erc;
   }
 
   private static String kindOfNode(SymbolNode symbol) {
@@ -471,8 +480,8 @@ public class Context implements ExploreNode {
   * comment in the walkGraph method of this file for a bit more            *
   * information.                                                           *
   *************************************************************************/
-  public Vector getContextEntryStringVector(int depth, boolean b) {
-    Vector ctxtEntries = new Vector(100);  // vector of Strings
+  public Vector<String> getContextEntryStringVector(int depth, boolean b) {
+    Vector<String> ctxtEntries = new Vector<>(100);  // vector of Strings
     Context naturalsContext =
                exMT.getContext(UniqueString.uniqueStringOf("Naturals"));
 
@@ -496,7 +505,7 @@ public class Context implements ExploreNode {
     }
 
     // Reverse the order of elements in the vector so they print properly
-    Object obj;
+    String obj;
     int n = ctxtEntries.size();
     for (int i = 0; i < n/2; i++) {
       obj = ctxtEntries.elementAt(i);
@@ -506,11 +515,12 @@ public class Context implements ExploreNode {
     return ctxtEntries;
   }
 
-  public void walkGraph(Hashtable semNodesTable) {
+  public void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+	  visitor.preVisit(this);
     UniqueString key;
-    Enumeration  Enum = table.keys();
+    Enumeration<?>  e = table.keys();
 
-    while (Enum.hasMoreElements()) {
+    while (e.hasMoreElements()) {
       /*********************************************************************
       * Bug fix attempted by LL on 19 Apr 2007.                            *
       *                                                                    *
@@ -524,7 +534,7 @@ public class Context implements ExploreNode {
       * getContextEntryStringVector later on.  I decided to stop wasting   *
       * time on this.                                                      *
       *********************************************************************/
-      Object next = Enum.nextElement();
+      Object next = e.nextElement();
       if (next instanceof SymbolTable.ModuleName) {
          key = ((SymbolTable.ModuleName) next).name ;
          System.out.println("Bug in debugging caused by inner module " +
@@ -533,8 +543,9 @@ public class Context implements ExploreNode {
         }
       else {
         key = (UniqueString) next;
-        ((Pair)table.get(key)).info.walkGraph(semNodesTable);
+        ((Pair)table.get(key)).info.walkGraph(semNodesTable, visitor);
        } ;
+       visitor.postVisit(this);
     }
 
   }

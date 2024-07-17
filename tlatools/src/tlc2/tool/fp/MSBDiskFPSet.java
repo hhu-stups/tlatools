@@ -10,6 +10,7 @@ import java.util.Arrays;
 import java.util.NoSuchElementException;
 
 import tlc2.output.EC;
+import tlc2.util.BufferedRandomAccessFile;
 import util.Assert;
 
 @SuppressWarnings("serial")
@@ -37,7 +38,8 @@ public class MSBDiskFPSet extends HeapBasedDiskFPSet {
 		// index. However, we cannot use the 32st bit, because it is used to
 		// indicate if a fp has been flushed to disk. Hence we use the first n
 		// bits starting from the second most significant bit.
-		this.moveBy = (31 - fpSetConfig.getPrefixBits()) - (logMaxMemCnt - LogMaxLoad);
+		Assert.check(fpSetConfig.getFpBits() > 0, EC.GENERAL);
+		this.moveBy = (32 - fpSetConfig.getFpBits()) - (logMaxMemCnt - LogMaxLoad);
 		this.mask = (capacity - 1) << moveBy;
 		
 		this.flusher = new MSBFlusher();
@@ -61,6 +63,9 @@ public class MSBDiskFPSet extends HeapBasedDiskFPSet {
 	protected long index(long fp, long aMask) {
 		// calculate hash value (just n most significant bits of fp) which is
 		// used as an index address
+		// 1) Right shift by 32 bits and cast to int (upper 32 bits are zeroed)
+		// 2) Zero the lower n bits according to mask
+		// 3) Right shift by moveBy (the bits which have previously been zeroed because of mask.
 		return ((int) (fp >>> 32) & aMask) >> moveBy;
 	}
 	
@@ -96,8 +101,8 @@ public class MSBDiskFPSet extends HeapBasedDiskFPSet {
 		/* (non-Javadoc)
 		 * @see tlc2.tool.fp.DiskFPSet#mergeNewEntries(long[], int, java.io.RandomAccessFile, java.io.RandomAccessFile)
 		 */
-		protected void mergeNewEntries(RandomAccessFile inRAF, RandomAccessFile outRAF) throws IOException {
-			final long buffLen = tblCnt.get();
+		protected void mergeNewEntries(BufferedRandomAccessFile[] inRAFs, RandomAccessFile outRAF) throws IOException {
+			final long buffLen = getTblCnt();
 			final TLCIterator itr = new TLCIterator(tbl);
 
 			// Precompute the maximum value of the new file.
@@ -105,13 +110,9 @@ public class MSBDiskFPSet extends HeapBasedDiskFPSet {
 			// the last element of the disk file. In that case
 			// the new maxVal is the larger element of the two
 			// in-memory and on-disk elements.
-			// The largest on-disk element is passed to the
-			// iterator as a lower bound.
-			long maxVal;
+			long maxVal = itr.getLast();
 			if (index != null) {
-				maxVal = itr.getLast(index[index.length - 1]);
-			} else {
-				maxVal = itr.getLast();
+				maxVal = Math.max(maxVal, index[index.length - 1]);
 			}
 	
 			int indexLen = calculateIndexLen(buffLen);
@@ -125,7 +126,7 @@ public class MSBDiskFPSet extends HeapBasedDiskFPSet {
 			boolean eof = false;
 			if (fileCnt > 0) {
 				try {
-					value = inRAF.readLong();
+					value = inRAFs[0].readLong();
 				} catch (EOFException e) {
 					eof = true;
 				}
@@ -140,7 +141,7 @@ public class MSBDiskFPSet extends HeapBasedDiskFPSet {
 				if ((value < fp || eol) && !eof) {
 					writeFP(outRAF, value);
 					try {
-						value = inRAF.readLong();
+						value = inRAFs[0].readLong();
 					} catch (EOFException e) {
 						eof = true;
 					}
@@ -176,7 +177,10 @@ public class MSBDiskFPSet extends HeapBasedDiskFPSet {
 	}
 
 	/**
-	 *
+	 * A TLCIterator wraps the buff given to it from its outer MSBDiskFPSet and
+	 * provides convenience methods to traverse the elements in buff, namely:
+	 * Check if there is a next element and get it as well as obtaining the
+	 * largest element.
 	 */
 	public static class TLCIterator {
 		/**
@@ -286,75 +290,15 @@ public class MSBDiskFPSet extends HeapBasedDiskFPSet {
 		}
 
 		/**
-		 * @param lowBound
-		 *            Stop searching for the last element if no element is
-		 *            larger than lowBound
-		 * @return The last element in the iteration that is larger than lowBound
+		 * @return The last (largest) element in the iteration (aka the
+		 *         underlying buff of buckets).
 		 * @exception NoSuchElementException
 		 *                if iteration is empty.
-		 *                <p>
+		 * 
 		 *                Pre-condition: Each bucket is sorted in ascending
-		 *                order. on-disk fingerprints don't adhere to the
-		 *                ascending order though!
-		 */
-		public long getLast(final long lowBound) {
-			int len = buff.length;
-
-			// Walk from the end of buff to the beginning. Each bucket that is
-			// found and non-null (null if no fingerprint for such an index has
-			// been added to the DiskFPSet) is checked for a valid fingerprint.
-			// A fp is valid iff it is larger zero. A zero fingerprint slot
-			// indicates an unoccupied slot, while a negative one corresponds to
-			// a fp that has already been flushed to disk.
-			while (len > 0) {
-				long[] bucket = buff[--len];
-
-				// Find last element > 0 in bucket (negative elements have already
-				// been flushed to disk, zero indicates an unoccupied slot).
-				if (bucket != null) {
-					for (int i = bucket.length - 1; i >= 0; i--) {
-						final long fp = bucket[i];
-						// unused slot
-						if (fp == 0) {
-							continue;
-						}
-						// in-memory fingerprint
-						if (fp > 0) {
-							if (fp < lowBound) {
-								// smaller lowBound
-								return lowBound;
-							} else {
-								// larger or equal lowBound
-								return fp;
-							}
-						}
-						// Cannot take on-disk fingerprints (negative ones) into
-						// account. They don't adhere to the precondition that
-						// the bucket is sorted. The bucket is logically sorted
-						// only for in-memory fingerprints.
-					}
-				}
-			}
-			// At this point we have scanned the complete buff, but haven't
-			// found a single fingerprint that hasn't been flushed to disk
-			// already.
-			throw new NoSuchElementException();
-		}
-
-		/**
-		 * @return The last element in the iteration.
-	     * @exception NoSuchElementException if iteration is empty.
-	     * 
-	     * Pre-condition: Each bucket is sorted in ascending order!
+		 *                order!
 		 */
 		public long getLast() {
-			/*
-			 * Tempting to delegate to getLast(Long.MAX_VALUE). However,
-			 * getLast() could not throw a NoSuchElementException when the
-			 * value returned is Long.MAX_VALUE. It could be a valid value, but
-			 * it might as well be the cutOff.
-			 */
-			
 			int len = buff.length;
 
 			// Walk from the end of buff to the beginning. Each bucket that is

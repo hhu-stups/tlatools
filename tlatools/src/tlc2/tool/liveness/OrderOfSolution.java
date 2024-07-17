@@ -7,8 +7,8 @@ package tlc2.tool.liveness;
 
 import java.io.PrintStream;
 
+import tlc2.tool.ITool;
 import tlc2.tool.TLCState;
-import tlc2.tool.Tool;
 import tlc2.util.BitVector;
 
 /*
@@ -48,20 +48,29 @@ public class OrderOfSolution {
 	 * in the temporal formulas.
 	 */
 	private final TBGraph tableau; // tableau graph
+	
+	/**
+	 * A promise &#966; that a property expressed by a formula will eventually hold.
+	 * 
+	 * @see Page 409ff of Manna & Pnueli
+	 * "Temporal Verification of Reactive Systems: Safety"
+	 * <p>
+	 * @see https://books.google.de/books?id=lfIGCAAAQBAJ&lpg=PR5&ots=_YBX09o5tM
+	 *      &dq=manna%20pnueli%20temporal%20verification%20of%20reactive%
+	 *      20systems%20safety%20doi&pg=PA409
+	 */
 	private final LNEven[] promises; // promises in the tableau
 	private LiveExprNode[] checkState; // state subformula
 	private LiveExprNode[] checkAction; // action subformula
 	private PossibleErrorModel[] pems;
-	private final Tool tool;
 
-	public OrderOfSolution(final LNEven[] livenessEventually, Tool aTool) {
-		this(null, livenessEventually, aTool);
+	public OrderOfSolution(final LNEven[] livenessEventually) {
+		this(null, livenessEventually);
 	}
 
-	public OrderOfSolution(final TBGraph aTableau, final LNEven[] livenessEventually, Tool aTool) {
+	public OrderOfSolution(final TBGraph aTableau, final LNEven[] livenessEventually) {
 		tableau = aTableau;
 		promises = livenessEventually;
-		this.tool = aTool;
 	}
 
 	public final void printPromises(PrintStream ps) {
@@ -124,7 +133,7 @@ public class OrderOfSolution {
 		return checkState;
 	}
 	
-	public boolean[] checkState(final TLCState state) {
+	public boolean[] checkState(ITool tool, final TLCState state) {
 		final boolean[] result = new boolean[checkState.length];
 		for (int i = 0; i < checkState.length; i++) {
 			result[i] = checkState[i].eval(tool, state, null);
@@ -137,7 +146,7 @@ public class OrderOfSolution {
 	}
 
 	// legacy LiveCheck1
-	public boolean[] checkAction(final TLCState state0, final TLCState state1) {
+	public boolean[] checkAction(ITool tool, final TLCState state0, final TLCState state1) {
 		final boolean[] result = new boolean[checkAction.length];
 		for (int i = 0; i < checkAction.length; i++) {
 			result[i] = checkAction[i].eval(tool, state0, state1);
@@ -145,7 +154,7 @@ public class OrderOfSolution {
 		return result;
 	}
 	
-	public BitVector checkAction(final TLCState state0, final TLCState state1, final BitVector result, final int offset) {
+	public BitVector checkAction(ITool tool, final TLCState state0, final TLCState state1, final BitVector result, final int offset) {
 		for (int i = 0; i < checkAction.length; i++) {
 			if (checkAction[i].eval(tool, state0, state1)) {
 				result.set(offset + i);

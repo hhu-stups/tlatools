@@ -1,6 +1,12 @@
 package tlc2.tool.queue;
 
+import static org.junit.Assert.assertTrue;
+
 import java.io.File;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
 
 import tlc2.tool.TLCState;
 
@@ -11,9 +17,8 @@ public class DiskStateQueueTest extends StateQueueTest {
 	/* (non-Javadoc)
 	 * @see tlc2.tool.queue.StateQueueTest#setUp()
 	 */
-	protected void setUp() throws Exception {
-		super.setUp();
-
+	@Before
+	public void setUp() throws Exception {
 		// create a temp folder in java.io.tmpdir and have it deleted on VM exit
 		final String diskdir = System.getProperty("java.io.tmpdir") + File.separator + "MultiDiskStateQueueTest_"
 				+ System.currentTimeMillis();
@@ -27,6 +32,7 @@ public class DiskStateQueueTest extends StateQueueTest {
 	/* (non-Javadoc)
 	 * @see junit.framework.TestCase#tearDown()
 	 */
+	@After
 	public void tearDown() {
 		// delete all nested files
 		final File[] listFiles = file.listFiles();
@@ -39,6 +45,7 @@ public class DiskStateQueueTest extends StateQueueTest {
 	
 	// add Integer.MAX_VALUE states and check growth of MultiStateQueue. 
 	// Reuse the same state to speed up instantiation and space requirements
+	@Test
 	public void testGrowBeyondIntMaxValue() {
 		final TLCState state = new DummyTLCState();
 

@@ -16,6 +16,8 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
 import java.math.BigInteger;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.zip.GZIPInputStream;
@@ -36,6 +38,19 @@ public class FileUtil
     public static final char separatorChar = File.separatorChar;
     public static final String separator = File.separator;
     public static final String pathSeparator = File.pathSeparator;
+
+    /**
+     * Parses the directory path from a filename. If the filename
+     * is already a basename, returns the empty string.
+     */
+    public static String parseDirname(String filename) {
+        int lastSep = filename.lastIndexOf(separatorChar);
+        if (lastSep == -1) {
+            // No parent directory.
+            return "";
+        }
+        return filename.substring(0, lastSep + 1);
+    }
 
     /**
      * Deletes the file or directory. Returns true iff the deletion
@@ -180,21 +195,24 @@ public class FileUtil
         }
     }
 
-    public static void copyFile(String fromName, String toName) throws IOException
-    {
-        // REFACTOR
-        FileInputStream fis = new FileInputStream(fromName);
-        FileOutputStream fos = new FileOutputStream(toName);
-        byte[] buf = new byte[8192];
-        int n;
-        while ((n = fis.read(buf)) != -1)
-        {
-            fos.write(buf, 0, n);
-        }
-        fis.close();
-        fos.close();
+    public static void copyFile(final String fromName, final String toName) throws IOException {
+    	copyFile(new File(fromName), new File(toName));
+    }
+    
+    
+    public static void copyFile(final File source, final File destination) throws IOException {
+    	Files.copy(source.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING);
     }
 
+	/**
+	 * Atomically replaces the file targetName with the file sourceName.
+	 * @param sourceName
+	 * @param targetName
+	 * @throws IOException
+	 */
+	public static void replaceFile(String sourceName, String targetName) throws IOException {
+		Files.move(new File(sourceName).toPath(), new File(targetName).toPath(), StandardCopyOption.REPLACE_EXISTING);
+	}
 
     /**
      * The MetaDir is fromChkpt if it is not null. Otherwise, create a
@@ -204,6 +222,11 @@ public class FileUtil
      *
      */
     public static String makeMetaDir(String specDir, String fromChkpt)
+    {
+    	return makeMetaDir(new Date(), specDir, fromChkpt);
+    }
+    
+    public static String makeMetaDir(Date date, String specDir, String fromChkpt)
     {
         if (fromChkpt != null)
         {
@@ -216,15 +239,20 @@ public class FileUtil
             metadir = specDir + TLCGlobals.metaRoot + FileUtil.separator;
         }
 
-        SimpleDateFormat sdf = new SimpleDateFormat("yy-MM-dd-HH-mm-ss");
-        metadir += sdf.format(new Date());
+        SimpleDateFormat sdf;
+        if (Boolean.getBoolean(FileUtil.class.getName() + ".milliseconds")) {
+        	sdf = new SimpleDateFormat("yy-MM-dd-HH-mm-ss.SSS");
+        } else {
+        	sdf = new SimpleDateFormat("yy-MM-dd-HH-mm-ss");
+        }
+        metadir += sdf.format(date);
         File filedir = new File(metadir);
 
         // ensure the non-existence
-        Assert.check(!filedir.exists(), EC.SYSTEM_METADIR_EXISTS, metadir);
+        Assert.check(!filedir.exists(), EC.SYSTEM_METADIR_EXISTS, filedir.getAbsolutePath());
 
         // ensure the dirs are created
-        Assert.check(filedir.mkdirs(), EC.SYSTEM_METADIR_CREATION_ERROR, metadir);
+        Assert.check(filedir.mkdirs(), EC.SYSTEM_METADIR_CREATION_ERROR, filedir.getAbsolutePath());
 
         return metadir;
     }
@@ -251,16 +279,16 @@ public class FileUtil
         // or name=/frob/bar/somemod
 
         // Make sure the file name ends with ".tla".
-        if (name.toLowerCase().endsWith(".tla"))
+        if (name.toLowerCase().endsWith(TLAConstants.Files.TLA_EXTENSION))
         {
-            name = name.substring(0, name.length() - 4);
+            name = name.substring(0, (name.length() - TLAConstants.Files.TLA_EXTENSION.length()));
         }
 
         // now name=/frob/bar/somemod
 
         // filename is a path ending with .tla
         // sourceFilename=/frob/bar/somemod
-        sourceFileName = name + ".tla";
+        sourceFileName = name + TLAConstants.Files.TLA_EXTENSION;
 
         // module name is =somemod
         sourceModuleName = name.substring(name.lastIndexOf(FileUtil.separator) + 1);
@@ -333,27 +361,18 @@ public class FileUtil
      * retrieves a new buffered file output stream
      * @param name
      * @return
+     * @throws FileNotFoundException 
      */
-    public static OutputStream newBFOS(String name)
+    public static OutputStream newBFOS(String name) throws FileNotFoundException
     {
-        File file = new File(name);
-
-        // LL removed file.exists() test on 10 Nov 2012 because
-        // it causes an error when TLC called with -dump option
-        // for a file that doesn't already exist.  Also changed
-        // the error message to something more helpful.
-        if (file != null /* && file.exists() */)
+        try
         {
-            try
-            {
-                FileOutputStream fos = new FileOutputStream(file);
-                return fos;
-            } catch (FileNotFoundException e)
-            {
-                ToolIO.out.println("Error: Unable to write to file " + name);
-            }
+            return new FileOutputStream(new File(name));
+        } catch (FileNotFoundException e)
+        {
+            ToolIO.out.println("Error: Unable to write to file " + name);
+            throw e;
         }
-        return null;
     }
 
     public static BufferedDataInputStream newBdFIS(boolean useGZIP, File file) throws IOException

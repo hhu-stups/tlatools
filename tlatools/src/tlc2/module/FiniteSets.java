@@ -7,27 +7,30 @@ package tlc2.module;
 
 import tlc2.output.EC;
 import tlc2.tool.EvalException;
-import tlc2.value.BoolValue;
-import tlc2.value.Enumerable;
-import tlc2.value.IntValue;
-import tlc2.value.Value;
+import tlc2.value.IBoolValue;
 import tlc2.value.ValueConstants;
+import tlc2.value.Values;
+import tlc2.value.impl.BoolValue;
+import tlc2.value.impl.Enumerable;
+import tlc2.value.impl.IntValue;
+import tlc2.value.impl.Value;
 
 public class FiniteSets implements ValueConstants
 {
+	public static final long serialVersionUID = 20160822L;
 
-    public static BoolValue IsFiniteSet(Value val)
+    public static IBoolValue IsFiniteSet(Value val)
     {
-        return val.isFinite() ? ValTrue : ValFalse;
+        return val.isFinite() ? BoolValue.ValTrue : BoolValue.ValFalse;
     }
 
     public static IntValue Cardinality(Value val)
     {
         if (val instanceof Enumerable)
         {
-            return IntValue.gen(((Enumerable) val).size());
+            return IntValue.gen(val.size());
         }
-        throw new EvalException(EC.TLC_MODULE_COMPUTING_CARDINALITY, Value.ppr(val.toString()));
+        throw new EvalException(EC.TLC_MODULE_COMPUTING_CARDINALITY, Values.ppr(val.toString()));
     }
 
     // SZ 16.07.2009: commented the following code out, since it is not a part of FiniteSets
@@ -48,7 +51,7 @@ public class FiniteSets implements ValueConstants
     }
 
     public static Value listToSet(Value list) {
-      TupleValue tv = TupleValue.convert(list);
+      TupleValue tv = list.toTuple()
       if (tv == null) {
         throw new EvalException("listToSet");
       }
@@ -60,7 +63,7 @@ public class FiniteSets implements ValueConstants
     }
     
     public static Value appendSetToList(Value list, Value set) {
-      TupleValue tv = TupleValue.convert(list);
+      TupleValue tv = list.toTuple();
       if (tv == null || IsFiniteSet(set) == ValFalse) {
         throw new EvalException("appendSetToList");
       }
@@ -80,7 +83,7 @@ public class FiniteSets implements ValueConstants
     }
     
     public static Value deleteSetFromList(Value set, Value list) {
-      TupleValue tv = TupleValue.convert(list);
+      TupleValue tv = list.toTuple();
       if (tv == null) {
         throw new EvalException("deleteSetFromList");
       }
@@ -98,7 +101,7 @@ public class FiniteSets implements ValueConstants
     }
     
     public static Value keepSetFromList(Value set, Value list) {
-      TupleValue tv = TupleValue.convert(list);
+      TupleValue tv = list.toTuple()
       if (tv == null) {
         throw new EvalException("keepSetFromList");
       }

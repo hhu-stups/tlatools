@@ -7,14 +7,16 @@ package tlc2.module;
 
 import tlc2.output.EC;
 import tlc2.tool.EvalException;
-import tlc2.value.ModelValue;
-import tlc2.value.StringValue;
-import tlc2.value.UserObj;
-import tlc2.value.UserValue;
-import tlc2.value.Value;
+import tlc2.value.Values;
+import tlc2.value.impl.ModelValue;
+import tlc2.value.impl.StringValue;
+import tlc2.value.impl.UserObj;
+import tlc2.value.impl.UserValue;
+import tlc2.value.impl.Value;
 
 public class Strings extends UserObj
 {
+	public static final long serialVersionUID = 20160822L;
 
     private static Value SetString = new UserValue(new Strings());
 
@@ -23,6 +25,7 @@ public class Strings extends UserObj
         return SetString;
     }
 
+    @Override
     public final int compareTo(Value val)
     {
         if ((val instanceof UserValue) && (((UserValue) val).userObj instanceof Strings))
@@ -31,24 +34,27 @@ public class Strings extends UserObj
         }
         if (val instanceof ModelValue)
             return 1;
-        throw new EvalException(EC.TLC_MODULE_COMPARE_VALUE, new String[] { "STRING", Value.ppr(val.toString()) });
+        throw new EvalException(EC.TLC_MODULE_COMPARE_VALUE, new String[] { "STRING", Values.ppr(val.toString()) });
     }
 
+    @Override
     public final boolean member(Value val)
     {
         if (val instanceof StringValue)
             return true;
         if (val instanceof ModelValue)
             return ((ModelValue) val).modelValueMember(this);
-        throw new EvalException(EC.TLC_MODULE_CHECK_MEMBER_OF, new String[] { Value.ppr(val.toString()), "STRING" });
+        throw new EvalException(EC.TLC_MODULE_CHECK_MEMBER_OF, new String[] { Values.ppr(val.toString()), "STRING" });
     }
 
+    @Override
     public final boolean isFinite()
     {
         return false;
     }
 
-    public final StringBuffer toString(StringBuffer sb, int offset)
+    @Override
+    public final StringBuffer toString(StringBuffer sb, int offset, boolean swallow)
     {
         return sb.append("STRING");
     }

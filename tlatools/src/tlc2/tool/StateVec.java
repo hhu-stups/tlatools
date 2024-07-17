@@ -5,12 +5,13 @@
 
 package tlc2.tool;
 
-import tla2sany.semantic.SemanticNode;
+import java.util.LinkedList;
+
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
-import tlc2.value.Value;
+import tlc2.value.impl.RecordValue;
+import tlc2.value.impl.Value;
 import util.Assert;
-import util.UniqueString;
 
 /*
  * This class represents a TLA+ state vector.
@@ -18,7 +19,7 @@ import util.UniqueString;
  * updates are used for improved performance and reduced
  * allocation.
  */
-public final class StateVec {
+public final class StateVec implements IStateFunctor, INextStateFunctor {
   private TLCState v[];
   private int size;
 
@@ -49,6 +50,10 @@ public final class StateVec {
 
   public final int size() { return this.size; }
 
+  public boolean isEmpty() {
+	return this.size == 0;
+  }
+
   public final void grow(int add) {
     int oldLen = this.v.length;
     if (oldLen >= TLCGlobals.setBound) {
@@ -64,32 +69,35 @@ public final class StateVec {
 
   public final TLCState elementAt(int i) { return this.v[i]; }
 
+  public boolean isLastElement(final TLCState state) {
+	  if (isEmpty()) {
+		  return false;
+	  }
+	  return this.elementAt(size() - 1) == state;
+  }
+  
+  public TLCState first() {
+	return elementAt(0);
+  }
+
   public final void clear() {
     this.size = 0;
   }
   
-  // Add the binding to all the variables
-  public final StateVec bind(UniqueString var, Value val, SemanticNode ast) {
-    for (int i = 0; i < this.size; i++) {
-      TLCState s = this.v[i];
-      if (s.containsKey(var)) return null;
-      v[i] = s.bind(var, val, ast);
-    }
-    return this;
-  }
-
-  // Bind a value in one of the states.
-  public final StateVec bindAt(int i, UniqueString var, Value val, SemanticNode ast) {
-    v[i] = v[i].bind(var, val, ast);
-    return this;
-  }
-
+  /* (non-Javadoc)
+   * @see tlc2.tool.IStateFunction#addElement(tlc2.tool.TLCState)
+   */
   public final StateVec addElement(TLCState state) {
     if (this.size >= this.v.length) { grow(1); }
     this.v[this.size++] = state;
     return this;
   }
   
+  @Override
+  public final StateVec addElement(TLCState predecessor, Action action, TLCState state) {
+	  return addElement(state);
+  }
+ 
   public final StateVec addElements(StateVec s1) {
     StateVec s0 = this;
 
@@ -117,6 +125,14 @@ public final class StateVec {
   public final void removeElement(int index) {
     this.v[index] = this.v[this.size-1];
     this.size--;
+  }
+  
+  public void removeAt(final int index) {
+	  replaceAt(index, null);
+  }
+  
+  public void replaceAt(final int index, final TLCState state) {
+	  this.v[index] = state;
   }
   
   public final StateVec copy() {
@@ -158,4 +174,33 @@ public final class StateVec {
     return sb.toString();
   }
 
+  public final boolean contains(TLCState state) {
+	for (int i = 0; i < size; i++) {
+		if (this.v[i].fingerPrint() == state.fingerPrint()) {
+			return true;
+		}
+	}
+	return false;
+  }
+  
+  public final Value[] toRecords(final TLCState append) {
+	final Value[] values = new Value[size + 1];
+	for (int i = 0; i < values.length; i++) {
+		values[i] = new RecordValue(v[i]);
+	}
+	values[values.length] = new RecordValue(append);
+    return values;
+  }
+  
+  public final Value[] toRecords(final TLCState from, final TLCState append) {
+    final LinkedList<RecordValue> res = new LinkedList<>();
+    res.add(new RecordValue(append));
+	for (int i = size - 1; i >= 0; i--) {
+		res.push(new RecordValue(v[i]));
+		if (from.fingerPrint() == v[i].fingerPrint()) {
+			break;			
+		}
+	}
+    return res.toArray(new Value[res.size()]);
+  }
 }

@@ -2,8 +2,13 @@
 // Portions Copyright (c) 2003 Microsoft Corporation.  All rights reserved.
 package tlc2;
 
-import tla2sany.semantic.FrontEnd;
-import tlc2.tool.ModelChecker;
+import java.net.URL;
+import java.util.Enumeration;
+import java.util.jar.Attributes;
+import java.util.jar.Manifest;
+
+import tlc2.tool.AbstractChecker;
+import tlc2.tool.Simulator;
 
 /**
  * Globals
@@ -15,12 +20,14 @@ import tlc2.tool.ModelChecker;
 public class TLCGlobals
 {
 
-    // The current version of TLC
-    public static String versionOfTLC = "Version 2.06 of 9 May 2015";
+	public static final int DEFAULT_CHECKPOINT_DURATION = (30 * 60 * 1000) + 42;
 
+	// The current version of TLC
+    public static String versionOfTLC = "Version 2.18 of 20 March 2023";
+    
     // The bound for set enumeration, used for pretty printing
     public static int enumBound = 2000;
-
+    
     // The bound for the cardinality of a set
     public static int setBound = 1000000;
 
@@ -33,7 +40,26 @@ public class TLCGlobals
 	 */
     public static double livenessThreshold = 0.1d;
 
-    public synchronized static void setNumWorkers(int n)
+    public static double livenessGraphSizeThreshold = 0.1d;
+
+	/**
+	 * Ratio of runtime dedicated to safety checking (80%) and liveness checking
+	 * (20%). Some aspects of liveness are also checked during state insertion
+	 * (see ILiveCheck#addNextState) and thus part of safety checking..
+	 */
+	public static double livenessRatio = 0.2d;
+	
+	public static String lnCheck = "default";
+	
+	public static boolean doLiveness() {
+		return !(lnCheck.equals("final") || lnCheck.equals("seqfinal"));
+	}
+
+	public static boolean doSequentialLiveness() {
+		return lnCheck.startsWith("seq");
+	}
+
+	public synchronized static void setNumWorkers(int n)
     {
         numWorkers = n;
     }
@@ -62,12 +88,22 @@ public class TLCGlobals
     	incNumWorkers(-1);
     }
 
-    // The main model checker object
-    public static ModelChecker mainChecker = null;
+    // The main model checker object (null if simulator non-null)
+    public static AbstractChecker mainChecker = null;
+    
+    // The main simulator object (null if mainChecker non-null)
+    public static Simulator simulator = null;
 
+    // Char to indent nested coverage information.
+	public static final char coverageIndent = '|';
+    
     // Enable collecting coverage information
     public static int coverageInterval = -1;
 
+    public static final boolean isCoverageEnabled() {
+    	return coverageInterval >= 0;
+    }
+    
     // Depth for depth-first iterative deepening
     public static int DFIDMax = -1;
 
@@ -85,7 +121,7 @@ public class TLCGlobals
 
     // The time interval to checkpoint. (in milliseconds)
 	public static long chkptDuration = Integer.getInteger(
-			TLCGlobals.class.getName() + ".chkpt", 30 * 60 * 1000);
+			TLCGlobals.class.getName() + ".chkpt", DEFAULT_CHECKPOINT_DURATION);
     
 	// MAK 08.2012: centralized checkpoint code and added disabling and
 	// externally forced checkpoints
@@ -94,7 +130,12 @@ public class TLCGlobals
     	forceChkpt = true;
     }
     private static long lastChkpt = System.currentTimeMillis();
-    
+
+	public static boolean chkptExplicitlyEnabled() {
+		// Assumption is that a user will always select a different value.
+		return chkptDuration > 0 && chkptDuration != DEFAULT_CHECKPOINT_DURATION;
+	}
+
 	/**
 	 * IMPORTANT NOTE: The method is unsynchronized. It is the caller's
 	 * responsibility to ensure that only a single thread calls this method.
@@ -130,10 +171,7 @@ public class TLCGlobals
     public static boolean useView = false;
 
     // The flag to control if gzip is applied to Value input/output stream.
-    public static boolean useGZIP = true;
-
-    // The tool id number for TLC2.
-    public static int ToolId = FrontEnd.getToolId();
+    public static boolean useGZIP = false;
 
     // debugging field
     public static boolean debug = false;
@@ -147,4 +185,29 @@ public class TLCGlobals
 		}
 		return true;
 	}
+	
+	public static String getRevision() {
+		try {
+			final Enumeration<URL> resources = TLCGlobals.class.getClassLoader().getResources("META-INF/MANIFEST.MF");
+			while (resources.hasMoreElements()) {
+				final Manifest manifest = new Manifest(resources.nextElement().openStream());
+				final Attributes attributes = manifest.getMainAttributes();
+				if("TLA+ Tools".equals(attributes.getValue("Implementation-Title"))) {
+					if(attributes.getValue("X-Git-ShortRevision") != null) {
+						return attributes.getValue("X-Git-ShortRevision");
+					} else {
+						return null;
+					}
+				}
+			}
+		} catch (Exception ignore) {
+		}
+		return null;
+	}
+	
+	public static String getRevisionOrDev() {
+		return TLCGlobals.getRevision() == null ? "development" : TLCGlobals.getRevision();
+	}
+
+	public static boolean expand = true;
 }

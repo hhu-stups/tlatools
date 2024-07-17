@@ -26,10 +26,16 @@
 
 package tlc2.tool.liveness;
 
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import java.util.ArrayList;
 import java.util.List;
 
+import org.junit.Test;
+
 import tlc2.output.EC;
-import tlc2.tool.TLCStateInfo;
+import tlc2.output.EC.ExitStatus;
 
 /**
  * see http://tlaplus.codeplex.com/workitem/8
@@ -37,78 +43,73 @@ import tlc2.tool.TLCStateInfo;
 public class CodePlexBug08AgentRingTest extends ModelCheckerTestCase {
 
 	public CodePlexBug08AgentRingTest() {
-		super("AgentRingMC", "CodePlexBug08");
+		super("AgentRingMC", "CodePlexBug08", ExitStatus.VIOLATION_LIVENESS);
 	}
 	
+	@Test
 	public void testSpec() {
 		// ModelChecker has finished and generated the expected amount of states
 		assertTrue(recorder.recorded(EC.TLC_FINISHED));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "361", "120"));
+		assertFalse(recorder.recorded(EC.GENERAL));
 		
 		// Assert it has found the temporal violation and also a counter example
 		assertTrue(recorder.recorded(EC.TLC_TEMPORAL_PROPERTY_VIOLATED));
 		assertTrue(recorder.recorded(EC.TLC_COUNTER_EXAMPLE));
+
+		assertNodeAndPtrSizes(8496L, 2880L);
 		
 		// Assert the error trace
 		assertTrue(recorder.recorded(EC.TLC_STATE_PRINT2));
-		List<Object> records = recorder.getRecords(EC.TLC_STATE_PRINT2);
-
-		int i = 0; // State's position in records
-		Object[] objs = (Object[]) records.get(i++);
-		TLCStateInfo stateInfo = (TLCStateInfo) objs[0];
-		assertEquals("/\\ Agent = [Loc |-> 0, LastLoad |-> 0, ReadyToMove |-> TRUE, Task |-> 0]\n"
+		final List<String> expectedTrace = new ArrayList<String>(4);
+		expectedTrace.add("/\\ Agent = [Loc |-> 0, LastLoad |-> 0, ReadyToMove |-> TRUE, Task |-> 0]\n"
 				   + "/\\ CanCreate = TRUE\n"
-				   + "/\\ Nodes = (0 :> [Load |-> 0] @@ 1 :> [Load |-> 0])", 
-				   stateInfo.toString().trim()); // trimmed to remove any newlines or whitespace
-		assertEquals(i, objs[1]);
-		
-		objs = (Object[]) records.get(i++);
-		stateInfo = (TLCStateInfo) objs[0];
-		assertEquals("/\\ Agent = [Loc |-> 1, LastLoad |-> 0, ReadyToMove |-> FALSE, Task |-> 0]\n"
+				   + "/\\ Nodes = (0 :> [Load |-> 0] @@ 1 :> [Load |-> 0])");
+		expectedTrace.add("/\\ Agent = [Loc |-> 0, LastLoad |-> 0, ReadyToMove |-> TRUE, Task |-> 0]\n"
 				   + "/\\ CanCreate = TRUE\n"
-				   + "/\\ Nodes = (0 :> [Load |-> 0] @@ 1 :> [Load |-> 0])", 
-				   stateInfo.toString().trim());
-		assertEquals(i, objs[1]);
-
-		objs = (Object[]) records.get(i++);
-		stateInfo = (TLCStateInfo) objs[0];
-		assertEquals("/\\ Agent = [Loc |-> 1, LastLoad |-> 0, ReadyToMove |-> FALSE, Task |-> 0]\n"
+				   + "/\\ Nodes = (0 :> [Load |-> 2] @@ 1 :> [Load |-> 0])");
+		expectedTrace.add("/\\ Agent = [Loc |-> 1, LastLoad |-> 0, ReadyToMove |-> FALSE, Task |-> 0]\n"
 				   + "/\\ CanCreate = TRUE\n"
-				   + "/\\ Nodes = (0 :> [Load |-> 2] @@ 1 :> [Load |-> 0])", 
-				   stateInfo.toString().trim());
-		assertEquals(i, objs[1]);
-
-		objs = (Object[]) records.get(i++);
-		stateInfo = (TLCStateInfo) objs[0];
-		assertEquals("/\\ Agent = [Loc |-> 1, LastLoad |-> 0, ReadyToMove |-> FALSE, Task |-> 0]\n"
+				   + "/\\ Nodes = (0 :> [Load |-> 2] @@ 1 :> [Load |-> 0])");
+		expectedTrace.add("/\\ Agent = [Loc |-> 1, LastLoad |-> 0, ReadyToMove |-> FALSE, Task |-> 0]\n"
 				   + "/\\ CanCreate = TRUE\n"
-				   + "/\\ Nodes = (0 :> [Load |-> 2] @@ 1 :> [Load |-> 2])", 
-				   stateInfo.toString().trim());
-		assertEquals(i, objs[1]);
-
+				   + "/\\ Nodes = (0 :> [Load |-> 2] @@ 1 :> [Load |-> 2])");
 		// The two states below violate the liveness property [](~CanCreate /\
 		// (\A i,j \in NodeRange : Nodes[i].Load = Nodes[j].Load) =>
 		// [](Agent.Task = 0)). State 5 has CanCreate = FALSE and Task=0 and
 		// state six changes Task back to 1.
-		
-		// state 5
-		objs = (Object[]) records.get(i++);
-		stateInfo = (TLCStateInfo) objs[0];
-		assertEquals("/\\ Agent = [Loc |-> 1, LastLoad |-> 0, ReadyToMove |-> FALSE, Task |-> 0]\n"
+		expectedTrace.add("/\\ Agent = [Loc |-> 1, LastLoad |-> 0, ReadyToMove |-> FALSE, Task |-> 0]\n"
 				   + "/\\ CanCreate = FALSE\n"
-				   + "/\\ Nodes = (0 :> [Load |-> 2] @@ 1 :> [Load |-> 2])", 
-				   stateInfo.toString().trim());
-		assertEquals(i, objs[1]);
+				   + "/\\ Nodes = (0 :> [Load |-> 2] @@ 1 :> [Load |-> 2])");
+		expectedTrace.add("/\\ Agent = [Loc |-> 1, LastLoad |-> 1, ReadyToMove |-> TRUE, Task |-> 1]\n"
+				   + "/\\ CanCreate = FALSE\n"
+				   + "/\\ Nodes = (0 :> [Load |-> 2] @@ 1 :> [Load |-> 1])");
 
-		// state 6
-		objs = (Object[]) records.get(i++);
-		stateInfo = (TLCStateInfo) objs[0];
-		assertEquals("/\\ Agent = [Loc |-> 1, LastLoad |-> 1, ReadyToMove |-> TRUE, Task |-> 1]\n"
+		expectedTrace.add("/\\ Agent = [Loc |-> 0, LastLoad |-> 1, ReadyToMove |-> FALSE, Task |-> 1]\n"
 				   + "/\\ CanCreate = FALSE\n"
-				   + "/\\ Nodes = (0 :> [Load |-> 2] @@ 1 :> [Load |-> 1])", 
-				   stateInfo.toString().trim());
-		assertEquals(i, objs[1]);
-		
-		// ...more states to follow
+				   + "/\\ Nodes = (0 :> [Load |-> 2] @@ 1 :> [Load |-> 1])");
+		expectedTrace.add("/\\ Agent = [Loc |-> 0, LastLoad |-> 2, ReadyToMove |-> TRUE, Task |-> 1]\n"
+				   + "/\\ CanCreate = FALSE\n"
+				   + "/\\ Nodes = (0 :> [Load |-> 2] @@ 1 :> [Load |-> 1])");
+		expectedTrace.add("/\\ Agent = [Loc |-> 1, LastLoad |-> 2, ReadyToMove |-> FALSE, Task |-> 1]\n"
+				   + "/\\ CanCreate = FALSE\n"
+				   + "/\\ Nodes = (0 :> [Load |-> 2] @@ 1 :> [Load |-> 1])");
+		expectedTrace.add("/\\ Agent = [Loc |-> 1, LastLoad |-> 2, ReadyToMove |-> TRUE, Task |-> 0]\n"
+				   + "/\\ CanCreate = FALSE\n"
+				   + "/\\ Nodes = (0 :> [Load |-> 2] @@ 1 :> [Load |-> 2])");
+		expectedTrace.add("/\\ Agent = [Loc |-> 0, LastLoad |-> 2, ReadyToMove |-> FALSE, Task |-> 0]\n"
+				   + "/\\ CanCreate = FALSE\n"
+				   + "/\\ Nodes = (0 :> [Load |-> 2] @@ 1 :> [Load |-> 2])");
+		expectedTrace.add("/\\ Agent = [Loc |-> 0, LastLoad |-> 2, ReadyToMove |-> TRUE, Task |-> 0]\n"
+				   + "/\\ CanCreate = FALSE\n"
+				   + "/\\ Nodes = (0 :> [Load |-> 2] @@ 1 :> [Load |-> 2])");
+		expectedTrace.add("/\\ Agent = [Loc |-> 1, LastLoad |-> 2, ReadyToMove |-> FALSE, Task |-> 0]\n"
+				   + "/\\ CanCreate = FALSE\n"
+				   + "/\\ Nodes = (0 :> [Load |-> 2] @@ 1 :> [Load |-> 2])");
+		assertTraceWith(recorder.getRecords(EC.TLC_STATE_PRINT2), expectedTrace);
+
+		assertBackToState(10);
+
+	assertZeroUncovered();
 	}
 }

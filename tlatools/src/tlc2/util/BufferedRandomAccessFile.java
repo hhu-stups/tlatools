@@ -37,8 +37,9 @@ public final class BufferedRandomAccessFile extends java.io.RandomAccessFile {
     private long maxHi;     // this.lo + this.buff.length
     private boolean hitEOF; // buffer contains last file block?
     private long diskPos;   // disk position
+	private long mark;
     
-    private static Object mu = new Object(); // protects the following fields
+    private static final Object mu = new Object(); // protects the following fields
     private static byte[][] availBuffs = new byte[100][];
     private static int numAvailBuffs = 0;
 
@@ -175,7 +176,7 @@ public final class BufferedRandomAccessFile extends java.io.RandomAccessFile {
     }
     
     /* Flush any dirty bytes in the buffer to disk. */
-    private void flushBuffer() throws IOException {
+    private boolean flushBuffer() throws IOException {
         if (this.dirty) {
             // Assert.check(this.curr > this.lo);
             if (this.diskPos != this.lo) super.seek(this.lo);
@@ -183,7 +184,9 @@ public final class BufferedRandomAccessFile extends java.io.RandomAccessFile {
             super.write(this.buff, 0, len); 
             this.diskPos = this.curr;
             this.dirty = false;
+            return true;
         }
+        return false;
     }
     
     /* Read at most "this.buff.length" bytes into "this.buff",
@@ -248,7 +251,7 @@ public final class BufferedRandomAccessFile extends java.io.RandomAccessFile {
 			// seeking inside current buffer -- no read required
 			if (pos < this.curr) {
 				// if seeking backwards, we must flush to maintain V4
-				this.flushBuffer();
+				pageReadNeeded = this.flushBuffer();
 			} else {
 				pageReadNeeded = false;
 			}
@@ -282,9 +285,13 @@ public final class BufferedRandomAccessFile extends java.io.RandomAccessFile {
             if (this.curr == this.hi) return -1;
         }
         // Assert.check(this.curr < this.hi);
-        byte res = this.buff[(int)(this.curr - this.lo)];
-        this.curr++;
-        return ((int)res) & 0xFF; // convert byte -> int
+        try {
+        	byte res = this.buff[(int)(this.curr - this.lo)];
+        	this.curr++;
+        	return ((int)res) & 0xFF; // convert byte -> int
+        } catch (ArrayIndexOutOfBoundsException e) {
+        	throw new IOException("Read past end of file (increase with setLength)?", e);
+        }
     }
     
     /* overrides RandomAccessFile.read(byte[]) */
@@ -316,6 +323,13 @@ public final class BufferedRandomAccessFile extends java.io.RandomAccessFile {
       byte[] b = new byte[size];
       // Assert.check(this.read(b) == size);
       return new BigInteger(b);
+    }
+    
+    public final int readShortNat() throws IOException {
+        int res = this.readByte();
+        if (res >= 0) return res;
+        res = (res << 16) | (this.readByte() & 0xff);
+        return -res;
     }
 
   public final int readNat() throws IOException {
@@ -351,9 +365,13 @@ public final class BufferedRandomAccessFile extends java.io.RandomAccessFile {
             }
         }
         // Assert.check(this.curr < this.hi);
-        this.buff[(int)(this.curr - this.lo)] = (byte)b;
-        this.curr++;
-        this.dirty = true;
+        try {
+        	this.buff[(int)(this.curr - this.lo)] = (byte)b;
+        	this.curr++;
+        	this.dirty = true;
+        } catch (ArrayIndexOutOfBoundsException e) {
+        	throw new IOException("Wrote past end of file (increase with setLength)?", e);
+        }
     }
     
     /* overrides RandomAccessFile.write(byte[]) */
@@ -376,6 +394,16 @@ public final class BufferedRandomAccessFile extends java.io.RandomAccessFile {
       byte[] b = bi.toByteArray();
       // Assert.check(b.length <= size);
       this.write(b, 0, size);
+    }
+    
+    /* Precondition: x is a non-negative short. */
+    public final void writeShortNat(int x) throws IOException {
+      if (x <= 0x7f) {
+        this.writeByte((short)x);
+      }
+      else {
+        this.writeShort(-x);
+      }
     }
 
   /* Precondition: x is a non-negative int. */
@@ -434,6 +462,21 @@ public final class BufferedRandomAccessFile extends java.io.RandomAccessFile {
     	setLength(0);
     	this.init();
     }
+    
+    public long getMark() {
+    	return this.mark;
+    }
+    
+    public long mark() {
+    	final long oldMark = this.mark; 
+    	this.mark = getFilePointer();
+    	return oldMark;
+    }
+    
+    public void seekAndMark(long pos) throws IOException {
+    	this.mark = pos;
+    	this.seek(pos);
+    }
 
   public static void main(String[] args) throws IOException {
     String name = "xxx";
@@ -449,6 +492,7 @@ public final class BufferedRandomAccessFile extends java.io.RandomAccessFile {
     System.err.println("len = " + braf.length() + ", pos = " + braf.getFilePointer());
     braf.writeLong(x); braf.writeLong(x); braf.writeLong(x);
     System.err.println("len = " + braf.length() + ", pos = " + braf.getFilePointer());
+    braf.close();
   }
   
 }

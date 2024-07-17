@@ -27,14 +27,17 @@ import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Iterator;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
+import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.st.TreeNode;
 import tla2sany.utilities.Strings;
 import tla2sany.utilities.Vector;
+import tla2sany.xml.SymbolContext;
 import util.UniqueString;
 import util.WrongInvocationException;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
 
 /***************************************************************************
 * This node represents the definition of Foo in                            *
@@ -84,8 +87,8 @@ public class ThmOrAssumpDefNode extends SymbolNode
   * the body that are not within the scope of an inner label or LET        *
   * definition.                                                            *
   *************************************************************************/
-  private Hashtable labels = null ;
-  public Hashtable  getLabelsHT() {
+  private Hashtable<UniqueString, LabelNode> labels = null ;
+  public Hashtable<UniqueString, LabelNode>  getLabelsHT() {
       /***********************************************************************
       * Return the labels field.  Used to "clone" an OpDefNode for module    *
       * instantiation.                                                       *
@@ -291,7 +294,7 @@ public class ThmOrAssumpDefNode extends SymbolNode
   * There doesn't seem to be any easy way to write these methods only      *
   * once.                                                                  *
   *************************************************************************/
-  public void setLabels(Hashtable ht) {labels = ht; }
+  public void setLabels(Hashtable<UniqueString, LabelNode> ht) {labels = ht; }
     /***********************************************************************
     * Sets the set of labels.                                              *
     ***********************************************************************/
@@ -311,8 +314,8 @@ public class ThmOrAssumpDefNode extends SymbolNode
     * as odn, then odn is added to the set and true is return; else the    *
     * set is unchanged and false is returned.                              *
     ***********************************************************************/
-    if (labels == null) {labels = new Hashtable(); } ;
-    if (labels.containsKey(odn)) {return false ;} ;
+    if (labels == null) {labels = new Hashtable<>(); } ;
+    if (labels.containsKey(odn.getName())) {return false ;} ;
     labels.put(odn.getName(), odn) ;
     return true;
    }
@@ -323,12 +326,12 @@ public class ThmOrAssumpDefNode extends SymbolNode
     * `labels'.                                                            *
     ***********************************************************************/
     if (labels == null) {return new LabelNode[0];} ;
-    Vector v = new Vector() ;
-    Enumeration e = labels.elements() ;
+    Vector<LabelNode> v = new Vector<>() ;
+    Enumeration<LabelNode> e = labels.elements() ;
     while (e.hasMoreElements()) { v.addElement(e.nextElement()); } ;
     LabelNode[] retVal = new LabelNode[v.size()] ;
     for (int i = 0 ; i < v.size() ; i++)
-      {retVal[i] = (LabelNode) v.elementAt(i); } ;
+      {retVal[i] = v.elementAt(i); } ;
     return retVal ;
    }
 
@@ -416,6 +419,7 @@ public class ThmOrAssumpDefNode extends SymbolNode
     * parameter of the definition of op appears within the k-th argument   *
     * of opArg.                                                            *
     ***********************************************************************/
+  @Override
   public final boolean levelCheck(int itr) {
       if (this.levelChecked >= itr) { return this.levelCorrect; }
       this.levelChecked = itr ;
@@ -572,17 +576,22 @@ public class ThmOrAssumpDefNode extends SymbolNode
   /**
    *  The body is the node's only child.
    */
+  @Override
   public SemanticNode[] getChildren() {
     return new SemanticNode[] {this.body};
   }
 
-  public final void walkGraph(Hashtable semNodesTable) {
-    Integer uid = new Integer(myUID);
+  @Override
+  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
-    semNodesTable.put(new Integer(myUID), this);
-    if(this.body != null) {this.body.walkGraph(semNodesTable) ;} ;
+    semNodesTable.put(uid, this);
+    visitor.preVisit(this);
+    if(this.body != null) {this.body.walkGraph(semNodesTable, visitor) ;} ;
+    visitor.postVisit(this);
    }
 
+  @Override
   public final String toString(int depth) {
     if (depth <= 0) return "";
     String ret =
@@ -616,9 +625,9 @@ public class ThmOrAssumpDefNode extends SymbolNode
     ***********************************************************************/
     if (labels != null) {
        ret += "\n  Labels: " ;
-       Enumeration list = labels.keys() ;
+       Enumeration<UniqueString> list = labels.keys() ;
        while (list.hasMoreElements()) {
-          ret += ((UniqueString) list.nextElement()).toString() + "  " ;
+          ret += list.nextElement().toString() + "  " ;
          } ;
       }
     else {ret += "\n  Labels: null";};
@@ -627,21 +636,41 @@ public class ThmOrAssumpDefNode extends SymbolNode
    }
 
   /**
-   * most of the information in this class is a duplication of the information
-   * in the TheoremNode.
    *
-   * We care to export only the name of the theorem (CHECK what hppens when instantiated).
    */
   protected String getNodeRef() {
-    if (theorem)
-      return "TheoremNodeRef";
-    else
-      return "AssumeNodeRef";
+    if (theorem) {
+      assert(thmOrAssump instanceof TheoremNode);
+      return "TheoremDefRef";
+    }
+    else {
+      assert(thmOrAssump instanceof  AssumeNode);
+      return "AssumeDefRef";
+    }
   }
 
   protected Element getSymbolElement(Document doc, tla2sany.xml.SymbolContext context) {
-    // since this element doesnt seem to contain any additional information
-    // over theorems or assumptions, we just refer to them
-    return thmOrAssump.getLevelElement(doc,context);
+    assert(this.body != null); //A theorem or assumption definition without a body does not make sense.
+    Element e = null;
+    if (theorem) {
+      e = doc.createElement("TheoremDefNode");
+    }
+    else {
+      e = doc.createElement("AssumeDef");
+    }
+
+    e.appendChild(appendText(doc, "uniquename", getName().toString() ));
+    e.appendChild(body.export(doc, context));
+    return e;
+  }
+
+  /* overrides LevelNode.export and exports a UID reference instad of the full version*/
+  @Override
+  public Element export(Document doc, SymbolContext context) {
+    // first add symbol to context
+    context.put(this, doc);
+    Element e = doc.createElement(getNodeRef());
+    e.appendChild(appendText(doc,"UID",Integer.toString(myUID)));
+    return e;
   }
 }

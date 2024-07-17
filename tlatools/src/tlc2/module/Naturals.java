@@ -7,21 +7,29 @@ package tlc2.module;
 
 import tlc2.output.EC;
 import tlc2.tool.EvalException;
-import tlc2.tool.TLARegistry;
-import tlc2.value.BoolValue;
-import tlc2.value.IntValue;
-import tlc2.value.IntervalValue;
-import tlc2.value.ModelValue;
-import tlc2.value.UserObj;
-import tlc2.value.UserValue;
-import tlc2.value.Value;
+import tlc2.tool.impl.TLARegistry;
+import tlc2.value.IBoolValue;
 import tlc2.value.ValueConstants;
+import tlc2.value.Values;
+import tlc2.value.impl.BoolValue;
+import tlc2.value.impl.IntValue;
+import tlc2.value.impl.IntervalValue;
+import tlc2.value.impl.ModelValue;
+import tlc2.value.impl.UserObj;
+import tlc2.value.impl.UserValue;
+import tlc2.value.impl.Value;
 
 public class Naturals extends UserObj implements ValueConstants
 {
-
+	public static final long serialVersionUID = 20160822L;
+	
     static
     {
+		// The following entries in TLARegistry each define a mapping from a TLA+ infix
+		// operator to a Java method, e.g. the TLA+ infix operator "+" is mapped to and
+		// thus implemented by the Java method tlc2.module.Naturals.Plus(IntValue,
+   		// IntValue) below.
+    	//TODO Why does tlc2.module.Integers define identical mappings?
         TLARegistry.put("Plus", "+");
         TLARegistry.put("Minus", "-");
         TLARegistry.put("Times", "*");
@@ -84,70 +92,70 @@ public class Naturals extends UserObj implements ValueConstants
         return IntValue.gen((int) res);
     }
 
-    public static BoolValue LT(Value x, Value y)
+    public static IBoolValue LT(Value x, Value y)
     {
         if (!(x instanceof IntValue))
         {
             throw new EvalException(EC.TLC_MODULE_ARGUMENT_ERROR_AN, new String[] { "first", "<", "integer",
-                    Value.ppr(x.toString()) });
+                    Values.ppr(x.toString()) });
         }
         if (!(y instanceof IntValue))
         {
             throw new EvalException(EC.TLC_MODULE_ARGUMENT_ERROR_AN, new String[] { "second", "<", "integer",
-                    Value.ppr(x.toString()) });
+                    Values.ppr(y.toString()) });
         }
 
-        return (((IntValue) x).val < ((IntValue) y).val) ? ValTrue : ValFalse;
+        return (((IntValue) x).val < ((IntValue) y).val) ? BoolValue.ValTrue : BoolValue.ValFalse;
     }
 
-    public static BoolValue LE(Value x, Value y)
+    public static IBoolValue LE(Value x, Value y)
     {
         if (!(x instanceof IntValue))
         {
             throw new EvalException(EC.TLC_MODULE_ARGUMENT_ERROR_AN, new String[] { "first", "<=", "integer",
-                    Value.ppr(x.toString()) });
+                    Values.ppr(x.toString()) });
         }
         if (!(y instanceof IntValue))
         {
             throw new EvalException(EC.TLC_MODULE_ARGUMENT_ERROR_AN, new String[] { "second", "<=", "integer",
-                    Value.ppr(x.toString()) });
+                    Values.ppr(y.toString()) });
         }
 
-        return (((IntValue) x).val <= ((IntValue) y).val) ? ValTrue : ValFalse;
+        return (((IntValue) x).val <= ((IntValue) y).val) ? BoolValue.ValTrue : BoolValue.ValFalse;
     }
 
-    public static BoolValue GT(Value x, Value y)
+    public static IBoolValue GT(Value x, Value y)
     {
         if (!(x instanceof IntValue))
         {
             throw new EvalException(EC.TLC_MODULE_ARGUMENT_ERROR_AN, new String[] { "first", ">", "integer",
-                    Value.ppr(x.toString()) });
+                    Values.ppr(x.toString()) });
         }
         if (!(y instanceof IntValue))
         {
             // On 21 May 2012 LL corrected following call, which was reporting the first argument.
             throw new EvalException(EC.TLC_MODULE_ARGUMENT_ERROR_AN, new String[] { "second", ">", "integer",
-                    Value.ppr(y.toString()) });
+                    Values.ppr(y.toString()) });
         }
 
-        return (((IntValue) x).val > ((IntValue) y).val) ? ValTrue : ValFalse;
+        return (((IntValue) x).val > ((IntValue) y).val) ? BoolValue.ValTrue : BoolValue.ValFalse;
     }
 
-    public static BoolValue GEQ(Value x, Value y)
+    public static IBoolValue GEQ(Value x, Value y)
     {
         if (!(x instanceof IntValue))
         {
             throw new EvalException(EC.TLC_MODULE_ARGUMENT_ERROR_AN, new String[] { "first", ">", "integer",
-                    Value.ppr(x.toString()) });
+                    Values.ppr(x.toString()) });
         }
         if (!(y instanceof IntValue))
         {
             // On 21 May 2012 LL corrected following call, which was reporting the first argument.
             throw new EvalException(EC.TLC_MODULE_ARGUMENT_ERROR_AN, new String[] { "second", ">", "integer",
-                    Value.ppr(y.toString()) });
+                    Values.ppr(y.toString()) });
         }
 
-        return (((IntValue) x).val >= ((IntValue) y).val) ? ValTrue : ValFalse;
+        return (((IntValue) x).val >= ((IntValue) y).val) ? BoolValue.ValTrue : BoolValue.ValFalse;
     }
 
     public static IntervalValue DotDot(IntValue x, IntValue y)
@@ -197,7 +205,7 @@ public class Naturals extends UserObj implements ValueConstants
             {
                 throw new EvalException(EC.TLC_MODULE_NULL_POWER_NULL);
             }
-            return ValOne;
+            return IntValue.ValOne;
         }
         long res = n1;
         for (int i = 1; i < n2; i++)
@@ -211,6 +219,7 @@ public class Naturals extends UserObj implements ValueConstants
         return IntValue.gen((int) res);
     }
 
+    @Override
     public final int compareTo(Value val)
     {
         if (val instanceof UserValue)
@@ -226,9 +235,10 @@ public class Naturals extends UserObj implements ValueConstants
         }
         if (val instanceof ModelValue)
             return 1;
-        throw new EvalException(EC.TLC_MODULE_COMPARE_VALUE, new String[] { "Nat", Value.ppr(val.toString()) });
+        throw new EvalException(EC.TLC_MODULE_COMPARE_VALUE, new String[] { "Nat", Values.ppr(val.toString()) });
     }
 
+    @Override
     public final boolean member(Value val)
     {
         if (val instanceof IntValue)
@@ -236,15 +246,17 @@ public class Naturals extends UserObj implements ValueConstants
         if (val instanceof ModelValue)
             return ((ModelValue) val).modelValueMember(this);
 
-        throw new EvalException(EC.TLC_MODULE_CHECK_MEMBER_OF, new String[] { Value.ppr(val.toString()), "Nat" });
+        throw new EvalException(EC.TLC_MODULE_CHECK_MEMBER_OF, new String[] { Values.ppr(val.toString()), "Nat" });
     }
 
+    @Override
     public final boolean isFinite()
     {
         return false;
     }
 
-    public final StringBuffer toString(StringBuffer sb, int offset)
+    @Override
+    public final StringBuffer toString(StringBuffer sb, int offset, boolean swallow)
     {
         return sb.append("Nat");
     }

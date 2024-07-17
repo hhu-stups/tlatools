@@ -3,12 +3,15 @@ package tla2sany.semantic;
 
 import java.util.Hashtable;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
+import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.st.TreeNode;
 import tla2sany.utilities.Strings;
 import tla2sany.utilities.Vector;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
+import tla2sany.xml.SymbolContext;
 
 /***************************************************************************
 * This class represents a non-leaf node in the tree representing a         *
@@ -141,6 +144,7 @@ public class NonLeafProofNode extends ProofNode {
   public LevelNode[] getSteps()   {return steps ;}
   public Context     getContext() {return context ;}
 
+  @Override
   public boolean levelCheck(int iter) {
     /***********************************************************************
     * Level check the steps and the instantiated modules coming from       *
@@ -157,6 +161,7 @@ public class NonLeafProofNode extends ProofNode {
    * The children are the steps.
    * @see tla2sany.semantic.SemanticNode#getChildren()
    */
+  @Override
   public SemanticNode[] getChildren() {
       if (this.steps == null || this.steps.length == 0) {
           return null;
@@ -168,24 +173,28 @@ public class NonLeafProofNode extends ProofNode {
       return res;
    }
 
-  public void walkGraph(Hashtable semNodesTable) {
-    Integer uid = new Integer(myUID);
+  @Override
+  public void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
-    semNodesTable.put(new Integer(myUID), this);
+    semNodesTable.put(uid, this);
+    visitor.preVisit(this);
     for (int  i = 0; i < steps.length; i++) {
-      steps[i].walkGraph(semNodesTable);
+      steps[i].walkGraph(semNodesTable, visitor);
       } ;
     /***********************************************************************
     * Note: there's no need to walk the defs array because all the nodes   *
     * on it are walked from the nodes under which they appear.             *
     ***********************************************************************/
 
-    context.walkGraph(semNodesTable) ;
+    context.walkGraph(semNodesTable, visitor) ;
       /*********************************************************************
       * Walk the ThmOrOpApplDef NumberedProofStepKind nodes.               *
       *********************************************************************/
+    visitor.postVisit(this);
    }
 
+  @Override
   public String toString(int depth) {
     if (depth <= 0) return "";
     String ret = "\n*ProofNode:\n"
@@ -211,7 +220,8 @@ public class NonLeafProofNode extends ProofNode {
     return ret;
    }
 
-  protected Element getLevelElement(Document doc, tla2sany.xml.SymbolContext context) {
+  @Override
+  protected Element getLevelElement(Document doc, SymbolContext context) {
     Element e = doc.createElement("steps");
 
     for (int i=0; i< steps.length; i++) {

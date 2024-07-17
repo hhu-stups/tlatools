@@ -78,7 +78,7 @@ public class SANY {
     //          should be reported
 
   /**
-   * The TLAFrontEnd.frontEndMain method Processes an entire TLA+ spec
+   * The SANY.frontEndMain method Processes an entire TLA+ spec
    * that starts in the file named in "filename", including all files
    * it refers to directly or indirectly in EXTENDS or INSTANCE
    * constructs.  "fileName" is relative to the current directory.  It
@@ -114,7 +114,7 @@ public class SANY {
    * processing--those are reported in the returned specification
    * object, which must be checked as described above.
    */
-  public static final void frontEndMain(
+  public static final int frontEndMain(
                              SpecObj spec, 
                              String fileName, 
                              PrintStream syserr) throws FrontEndException {
@@ -130,20 +130,20 @@ public class SANY {
             {frontEndSemanticAnalysis(spec, syserr, doLevelChecking);} ;
     }
     catch (InitException ie) {
-      return;
+      return -1;
     }
     catch (ParseException pe) {
-      return;
+      return -1;
     }
     catch (SemanticException se) {
-      return;
+      return -1;
     }
     catch (Exception e) {
       // e.printStackTrace(syserr);
       syserr.println(e.toString());
       throw new FrontEndException(e);
     }
-    return;
+    return 0;
   }
 
   /** 
@@ -198,6 +198,10 @@ public class SANY {
   // Parse all of the files referred to by the top-level file in specification
   public static void frontEndParse(SpecObj spec, PrintStream syserr) 
   throws ParseException {
+	  frontEndParse(spec, syserr, true);
+  }
+  public static void frontEndParse(SpecObj spec, PrintStream syserr, boolean validatePCalTranslation) 
+  throws ParseException {
       /***********************************************************************
        * Modified on 12 May 2008 by LL to remove "throws AbortException",     *
        * since it catches all exceptions and turns them into                  *
@@ -206,7 +210,7 @@ public class SANY {
       try 
       {
           // Actual parsing method called from inside loadSpec()
-          if (!spec.loadSpec(spec.getFileName(), spec.parseErrors)) 
+          if (!spec.loadSpec(spec.getFileName(), spec.parseErrors, validatePCalTranslation)) 
           {
               // dead code SZ 02. Aug 2009
               /*
@@ -389,7 +393,7 @@ public class SANY {
   }
 
   /**
-   * Main driver method for maintainers and debuggers of the TLAFrontEnd.
+   * Main driver method for maintainers and debuggers of SANY.
    * 
    * Calls frontEndMain for each file named on the command line and then, 
    * barring errors too severe, calls the Explorer tool with the resulting 
@@ -436,13 +440,16 @@ public class SANY {
       if (FileUtil.createNamedInputStream(args[i], spec.getResolver()) != null) 
       {
           try {
-              frontEndMain(spec, args[i], ToolIO.out);
+              int ret = frontEndMain(spec, args[i], ToolIO.out);
+			  if (ret != 0) {
+            	  System.exit(ret);
+              }
             }
             catch (FrontEndException fe) {
               // For debugging
               fe.printStackTrace();   
               ToolIO.out.println(fe);
-              return;
+              System.exit(-1);
             }
 
             // Compile operator usage stats
@@ -452,13 +459,14 @@ public class SANY {
               // Run the Semantic Graph Exploration tool
               Explorer explorer = new Explorer(spec.getExternalModuleTable());
               try {
-                explorer.main();
+                explorer.main(args);
               }
               catch (ExplorerQuitException e) { /*do nothing*/ }
             }
       } else 
       {
           ToolIO.out.println("Cannot find the specified file " + args[i] + ".");
+          System.exit(-1);
       }
     }
   }

@@ -7,11 +7,14 @@ package tla2sany.semantic;
 
 import java.util.Hashtable;
 
-import tla2sany.st.TreeNode;
-import util.UniqueString;
-
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+
+import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
+import tla2sany.st.TreeNode;
+import tla2sany.xml.SymbolContext;
+import util.UniqueString;
 
 /**
  * An OpDeclNode can have one of the following kinds:
@@ -85,6 +88,7 @@ public class OpDeclNode extends OpDefOrDeclNode {
 
 //  private HashSet levelParams;
 
+  @Override
   public final boolean levelCheck(int iter) {
     /***********************************************************************
     * Level information set by constructor.                                *
@@ -136,12 +140,26 @@ public class OpDeclNode extends OpDefOrDeclNode {
 //           "ArgLevelParams: "      + this.getArgLevelParams()      + "\n";
 //  }
 
-  public final void walkGraph(Hashtable semNodesTable) {
-    Integer uid = new Integer(myUID);
+  @Override
+  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
-    semNodesTable.put(new Integer(myUID), this);
+    semNodesTable.put(uid, this);
+    visitor.preVisit(this);
+    visitor.postVisit(this);
   }
 
+	@Override
+	public String getHumanReadableImage() {
+		if (getKind() == 2) {
+			return super.getName().toString() + " CONSTANT";
+		} else if (getKind() == 3) {
+			return super.getName().toString() + " VARIABLE";
+		}
+		return super.getHumanReadableImage();
+	}
+
+  @Override
   public final String toString (int depth) {
     if (depth <= 0) return "";
     return "\n*OpDeclNode: " + this.getName() + "  " + super.toString(depth)
@@ -156,7 +174,7 @@ public class OpDeclNode extends OpDefOrDeclNode {
     return "OpDeclNodeRef";
   }
 
-  protected Element getSymbolElement(Document doc, tla2sany.xml.SymbolContext context) {
+  protected Element getSymbolElement(Document doc, SymbolContext context) {
     Element e = doc.createElement("OpDeclNode");
     e.appendChild(appendText(doc,"uniquename",getName().toString()));
     e.appendChild(appendText(doc,"arity",Integer.toString(getArity())));

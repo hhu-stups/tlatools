@@ -4,11 +4,14 @@ package tla2sany.semantic;
 
 import java.util.Hashtable;
 
-import tla2sany.st.TreeNode;
-import util.UniqueString;
-
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+
+import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
+import tla2sany.st.TreeNode;
+import tla2sany.xml.SymbolContext;
+import util.UniqueString;
 
 /**
  * A FormalParamNode represents a formal parameter in a user
@@ -67,6 +70,7 @@ public class FormalParamNode extends SymbolNode {
   /* Level checking */
 //  private HashSet levelParams;
 
+  @Override
   public final boolean levelCheck(int iter) {
     if (levelChecked == 0) {
       /*********************************************************************
@@ -111,13 +115,17 @@ public class FormalParamNode extends SymbolNode {
 //           "ArgLevelParams: "      + this.getArgLevelParams()      + "\n" ;
 //  }
 
-  public final void walkGraph(Hashtable semNodesTable) {
-    Integer uid = new Integer(myUID);
+  @Override
+  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
 
-    semNodesTable.put(new Integer(myUID), this);
+    semNodesTable.put(uid, this);
+    visitor.preVisit(this);
+    visitor.postVisit(this);
   }
 
+  @Override
   public final String toString(int depth) {
     if (depth <= 0) return "";
     return ("\n*FormalParamNode: " + this.getName().toString() +
@@ -128,7 +136,7 @@ public class FormalParamNode extends SymbolNode {
     return "FormalParamNodeRef";
   }
 
-  protected Element getSymbolElement(Document doc, tla2sany.xml.SymbolContext context) {
+  protected Element getSymbolElement(Document doc, SymbolContext context) {
     Element e = doc.createElement("FormalParamNode");
     e.appendChild(appendText(doc,"uniquename",getName().toString()));
     e.appendChild(appendText(doc,"arity",Integer.toString(getArity())));

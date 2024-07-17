@@ -4,14 +4,17 @@
 
 package tlc2.tool.liveness;
 
+import java.io.BufferedWriter;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 
 import tlc2.output.EC;
@@ -26,10 +29,11 @@ import util.FileUtil;
  * 
  * - A {@link DiskGraph} has a 1:1 relationship with {@link OrderOfSolution}
  * 
- * - Logically stores the triple of state, tableaux, link (transitions)
+ * - Logically stores a set of triples that represent the liveness/behavior graph (see Manna/Pnuelli book).
+ * - Technically, it stores the triple of <<state (fingerprint), tableau node index, link (transitions)>>
  * -- Technically does *not* store States, but only a state's fingerprints
  * --- Stores a fingerprint split into 2 ints (low & high part of a fingerprint)
- * -- Stores the index of the tableaux, not the tableaux itself
+ * -- Stores the index of the tableau node, not the tableau node itself
  * --- The TableauGraphNode (TBGraphNode) instance can be obtained by reading
  *     the DiskGraph triple into a GraphNode instance and calling 
  *     GraphNode#getTNode(TBGraph). One obviously has to have access to the TBGraph
@@ -69,11 +73,16 @@ public abstract class AbstractDiskGraph {
 	public static final long MAX_LINK = 0x7FFFFFFFFFFFFFFFL;
 
 	public static boolean isFilePointer(long loc) {
+		// TODO Does not check >= 0 and thus accepts TableauDiskGraph.UNDONE as
+		// ptr.
 		return loc < MAX_PTR;
 	}
 
 	private final String chkptName;
 	protected final String metadir;
+	/**
+	 * @see tlatools/test/tlc2/tool/liveness/AbstractDiskGraph.JPG
+	 */
 	protected final BufferedRandomAccessFile nodeRAF;
 	protected final BufferedRandomAccessFile nodePtrRAF;
 	protected final LongVec initNodes;
@@ -107,11 +116,26 @@ public abstract class AbstractDiskGraph {
 		return this.initNodes;
 	}
 
+	/**
+	 * Creates a fixed size in-memory cache of {@link GraphNode}'s. A disk
+	 * lookup is avoid in {@link AbstractDiskGraph#getNode(long, int, long)} on
+	 * each cache hit. The cache is destroyed by
+	 * {@link AbstractDiskGraph#destroyCache()}.
+	 */
 	public final void createCache() {
-		// Make array length a function of the available (heap) memory
+		// Make array length a function of the available (heap) memory. Could
+		// approximate the required memory by taking the size of the on-disk
+		// files into account, but think of hash collisions!
 		this.gnodes = new GraphNode[65536];
 	}
 
+	/**
+	 * Destroys the fixed size in-memory cache created by
+	 * {@link AbstractDiskGraph#createCache()}. This should be done if liveness
+	 * checking wants to destroy in-memory {@link GraphNode} nodes to start a
+	 * new liveness check on them (e.g. to replace SCC link numbers with the
+	 * original disk ptr location).
+	 */
 	public final void destroyCache() {
 		this.gnodes = null;
 	}
@@ -161,11 +185,18 @@ public abstract class AbstractDiskGraph {
 		return ptr;
 	}
 	
+	/**
+	 * @return true iff the given {@link GraphNode} has already been added to
+	 *         this {@link AbstractDiskGraph}.
+	 */
+	protected abstract boolean checkDuplicate(GraphNode node);
+
 	public abstract GraphNode getNode(long fingerprint, int tableauIdx) throws IOException;
 	
 	/**
 	 * @return true iff the given GraphNode belongs to the set of initial
-	 *         states.
+	 *         states. Inefficient, only use for auxiliary use cases (e.g.
+	 *         visualization of the liveness graph (toDotViz())).
 	 */
 	protected boolean isInitState(final GraphNode gnode) {
 		final int numOfInits = initNodes.size();
@@ -199,7 +230,7 @@ public abstract class AbstractDiskGraph {
 		return gnode1;
 	}
 	
-	public final GraphNode getNodeFromDisk(final long stateFP, final int tidx, final long ptr) throws IOException {
+	protected final GraphNode getNodeFromDisk(final long stateFP, final int tidx, final long ptr) throws IOException {
 		// If the node is not found in the in-memory cache, the ptr has to be
 		// positive. BufferedRandomAccessFile#seek will throw an IOException due
 		// to "negative seek offset" anyway. Lets catch it early on!
@@ -228,20 +259,133 @@ public abstract class AbstractDiskGraph {
 		this.nodePtrRAF.seek(ptr);
 	}
 
+	/**
+	 * This methods reads the node PTR file from disk (the ptr file is the
+	 * smaller file ptrs_N of the pair ptrs_N and nodes_N).
+	 * <p>
+	 * The ptr file contains tuples <<fingerprint, tableau idx, ptr location>>
+	 * for all fingerprints times all tableau indices (the corresponding nodes
+	 * file contains the outgoing arcs of the node described in the ptr file).
+	 * <p>
+	 * The reason why the nodePtrTable has to be re-made by calling this method
+	 * prior to running the SCC search, is because the ptr location is
+	 * eventually overwritten with the nodes link number used by SCC search.
+	 * <p>
+	 * makeNodePtrTbl maintains/does not overwrite the isDone state of the node,
+	 * which - iff true - causes SCC search to skip/ignore the node.
+	 * 
+	 * @param ptr
+	 *            The length of the ptr file up to which this method reads.
+	 * @throws IOException
+	 *             Reading the file failed
+	 */
 	protected abstract void makeNodePtrTbl(final long ptr) throws IOException;
 
-	/* Return the link assigned to the node. */
+	/* Link information for SCC search */
+	
+	/**
+	 * Return the link assigned to the node via putLink() or -1 if the node has
+	 * no link assigned yet. Unless -1, the link is in interval [
+	 * {@link AbstractDiskGraph#MAX_PTR}, {@link AbstractDiskGraph#MAX_LINK}]
+	 * 
+	 * @param state
+	 *            The state's fingerprint
+	 * @param tidx
+	 *            The corresponding tableau index
+	 */
 	public abstract long getLink(long state, int tidx);
 
 	/**
-	 * Assign link to node. If a link has already been assigned to the node,
-	 * does nothing by simply returning the existing link. Otherwise, add <node,
-	 * link> into the table and return -1.
+	 * Assign link to node during SCC search. If a link has already been
+	 * assigned to the node, does nothing by simply returning the existing link.
+	 * Otherwise, add &lt;node, link&gt; into the table and return -1. The link
+	 * overwrites the previous value of elem (file pointer into nodes_N) in the
+	 * nodePtrTable.
+	 * <p>
+	 * The link has to be in the range [{@link AbstractDiskGraph#MAX_PTR},
+	 * {@link AbstractDiskGraph#MAX_LINK}). {AbstractDiskGraph#MAX_LINK} is used
+	 * to exclude nodes from being explored by SCC search twice (see
+	 * {@link AbstractDiskGraph#setMaxLink(long, int)}.
+	 * 
+	 * @param state
+	 *            The state's fingerprint
+	 * @param tidx
+	 *            The corresponding tableau index
 	 */
 	public abstract long putLink(long state, int tidx, long link);
 
+	/**
+	 * Assigns the maximum possible link number to the given node &lt;state,
+	 * tidx&gt;. This results in that the node is skipped/ignored if it turns up
+	 * as a node during SCC's depth-first-search.
+	 * 
+	 * @param state
+	 *            The state's fingerprint
+	 * @param tidx
+	 *            The corresponding tableau index
+	 */
 	public abstract void setMaxLink(long state, int tidx);
 
+	/* End link information for SCC search */
+
+	public boolean checkInvariants(final int slen, final int alen) {
+		// Make sure there are no redundant transitions.
+		final Iterator<GraphNode> itr = iterator();
+		while (itr.hasNext()) {
+			final GraphNode gn = itr.next();
+			if (!gn.checkInvariants(slen, alen)) {
+				return false;
+			}
+		}
+		return true;
+	}
+	
+	/* start iteration */
+	
+    private Iterator<GraphNode> iterator() {
+		try {
+			// reverse ptr file to beginning
+			this.nodePtrRAF.seek(0);
+			
+			final long length = this.nodePtrRAF.length();
+	        
+			return new Iterator<GraphNode>() {
+
+				/* (non-Javadoc)
+				 * @see java.util.Iterator#hasNext()
+				 */
+				public boolean hasNext() {
+					return nodePtrRAF.getFilePointer() < length;
+				}
+
+				/* (non-Javadoc)
+				 * @see java.util.Iterator#next()
+				 */
+				public GraphNode next() {
+					try {
+						long fp = nodePtrRAF.readLong();
+						int tidx = nodePtrRAF.readInt();
+						long loc = nodePtrRAF.readLongNat();
+						return getNodeFromDisk(fp, tidx, loc);
+					} catch (IOException e) {
+						throw new RuntimeException(e);
+					}
+				}
+
+				/* (non-Javadoc)
+				 * @see java.util.Iterator#remove()
+				 */
+				public void remove() {
+					throw new UnsupportedOperationException("Not supported!");
+				}
+			};
+		} catch (IOException e1) {
+			throw new RuntimeException(e1);
+		}
+    }
+	
+	/* end iteration */
+	
 	/**
 	 * Return the shortest path (inclusive and in reverse order) from some
 	 * initial state to state. The path is a vector of states <s1, s2, ..., sn>,
@@ -261,6 +405,17 @@ public abstract class AbstractDiskGraph {
 	 */
 	public abstract long size();
 	
+	/**
+	 * @return The size of both disk files (ptrs and nodes) measured in bytes.
+	 *         Can be incorrect during short periods when the graph is being
+	 *         recreated ({@link #makeNodePtrTbl()}) or nodes are read from
+	 *         disk ({@link #getNodeFromDisk(long, int, long)}). It is up to
+	 *         the caller to take this into account.
+	 * @throws IOException
+	 */
+	public long getSizeOnDisk() throws IOException {
+		return this.nodePtrRAF.length() + this.nodeRAF.length();
+	}
 	
 	public long getSizeAtLastCheck() {
 		return sizeAtCheck;
@@ -280,7 +435,77 @@ public abstract class AbstractDiskGraph {
 	 * and call something similar to: 'dot -T svg graphviz.txt -o
 	 * "Graphviz.svg"'. It obviously needs Graphviz (http://www.graphviz.org).
 	 */
-	public abstract String toDotViz();
+	public abstract String toDotViz(final OrderOfSolution oos);
+
+	protected String toDotVizLegend(final OrderOfSolution oos) {
+		final StringBuffer sb = new StringBuffer();
+		sb.append("subgraph cluster_legend {");
+		sb.append("graph[style=bold];");
+		sb.append("label = \"PossibleErrorModel\" style=\"solid\"\n");
+		sb.append("node [ labeljust=\"l\",shape=record ]\n");
+		
+		// State checks
+		int i = 1;
+		LiveExprNode[] checkState = oos.getCheckState();
+		for (LiveExprNode liveExprNode : checkState) {
+			sb.append(String.format("S%s [label=\"S%s: %s\"]", i, i++, node2dot(liveExprNode)));
+			sb.append("\n");
+		}
+		// Actions checks
+		i = 1;
+		checkState = oos.getCheckAction();
+		for (LiveExprNode liveExprNode : checkState) {
+			sb.append(String.format("A%s [label=\"A%s: %s\"]", i, i++, node2dot(liveExprNode)));
+			sb.append("\n");
+		}
+		
+		sb.append("}");
+		return sb.toString();
+	}
+	
+	protected static String node2dot(final LiveExprNode node) {
+		// Replace "\" with "\\" and """ with "\"".	Replace "<" and ">" with "\<" and "\>".
+		return node.toString().replace("\\", "\\\\").replace("\"", "\\\"").replace("<", "\\<").replace(">", "\\>").trim()
+				.replace("\n", "\\l"); // Do not remove remaining (i.e. no dangling/leading) "\n". 
+	}
+
+	
+	/**
+	 * Only useful for debugging.
+	 * 
+	 * Writes the current {@link AbstractDiskGraph} to the given {@link File}.
+	 * <p>
+	 * For the Eclipse IDE there exists a handy plug-in that automatically
+	 * renders a .dot file when selected in the package explorer. Just follow
+	 * the installation instructions at
+	 * https://github.com/abstratt/eclipsegraphviz
+	 * 
+	 * @param oos
+	 *            Length of state checks
+	 * @param alen
+	 *            Length of action checks
+	 * @param file
+	 *            Destination
+	 */
+	public final void writeDotViz(final OrderOfSolution oos, final File file) {
+		this.createCache();
+
+		try {
+			final BufferedWriter bwr = new BufferedWriter(new FileWriter(file));
+
+			// write contents of StringBuffer to a file
+			bwr.write(toDotViz(oos));
+
+			// flush the stream
+			bwr.flush();
+
+			// close the stream
+			bwr.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		this.destroyCache();
+	}
 
 	/* Checkpoint. */
 	public synchronized final void beginChkpt() throws IOException {

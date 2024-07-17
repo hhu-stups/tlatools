@@ -97,19 +97,14 @@ public interface FPSetStatistic {
 	public long getFlushTime();
 	
 	/**
+	 * @return DiskFPSet#getLockCnt()
+	 */
+	public int getLockCnt();
+	
+	/**
 	 * @see DiskFPSet#getReaderWriterCnt()
 	 */
 	public int getReaderWriterCnt();
-	
-	/**
-	 * @return DiskFPSet#getCollisionBucketCnt()
-	 */
-	public long getCollisionBucketCnt();
-
-	/**
-	 * @return DiskFPSet#getCollisionRatio()
-	 */
-	public double getCollisionRatio();
 	
 	/**
 	 * @return DiskFPSet#getLoadFactor();

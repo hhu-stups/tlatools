@@ -2,15 +2,24 @@
 
 package tlc2.tool.distributed.management;
 
+import tlc2.tool.ModelChecker;
+import tlc2.tool.TLCState;
+
 /**
  * @author Markus Alexander Kuppe
  */
-/**
- * @author markus
- *
- */
 public interface TLCStatisticsMXBean {
 
+	/**
+	 * @return The version of TLC.
+	 */
+	String getVersion();
+	
+	/**
+	 * @return The code revision corresponding to this version of TLC.
+	 */
+	String getRevision();
+	
 	/**
 	 * @return The amount of states generated (non-distinct).
 	 *         {@link TLCStatisticsMXBean#getStatesGenerated()} >=
@@ -57,4 +66,46 @@ public interface TLCStatisticsMXBean {
 	 * Creates a checkpoint next time possible
 	 */
 	void checkpoint();
+	
+	/**
+	 * @return The ratio between time dedicated to safety and liveness checking.
+	 */
+	double getRuntimeRatio();
+	
+	/**
+	 * Force new progress interval to check liveness
+	 */
+	void liveCheck();
+	
+	/**
+	 * The string representation of a {@link TLCState} the {@link ModelChecker}
+	 * has recently checked.
+	 */
+	String getCurrentState();
+	
+	/**
+	 * @return The name of the spec currently being checked by TLC.
+	 */
+	String getSpecName();
+	
+	/**
+	 * @return The name of the model curreclty being checked by TLC.
+	 */
+	String getModelName();
+
+	/**
+	 * Force TLC to stop model checking.
+	 */
+	void stop();
+	
+	/**
+	 * Suspend model checking until resume is called.
+	 */
+	void suspend();
+	
+	/**
+	 * Resumes model checking after a suspend. Do not resume an running model checker.
+	 * It could interfere with model checking.
+	 */
+	void resume();
 }

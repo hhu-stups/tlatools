@@ -1,4 +1,9 @@
 ---------------------------- MODULE FiniteSets -----------------------------
+(***************************************************************************)
+(* The two definitions in this standard module are overridden by TLC in    *)
+(* the Java class tlc2.module.FiniteSets.  Each operator is overridden by  *)
+(* the Java method with the same name.                                     *)
+(***************************************************************************)
 LOCAL INSTANCE Naturals
 LOCAL INSTANCE Sequences
   (*************************************************************************)

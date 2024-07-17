@@ -3,12 +3,15 @@ package tla2sany.semantic;
 
 import java.util.Hashtable;
 
-import tla2sany.st.TreeNode;
-import tla2sany.utilities.Strings;
-import util.UniqueString;
-
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+
+import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
+import tla2sany.st.TreeNode;
+import tla2sany.utilities.Strings;
+import tla2sany.xml.SymbolContext;
+import util.UniqueString;
 
 /***************************************************************************
 * This class represents definition step of a proof, which consists of a    *
@@ -47,6 +50,7 @@ public class DefStepNode extends LevelNode {
   public UniqueString getStepNumber() {return stepNumber ;}
   public OpDefNode[] getDefs() {return defs;}
 
+  @Override
   public boolean levelCheck(int iter) {
     /***********************************************************************
     * Level check the steps and the instantiated modules coming from       *
@@ -55,15 +59,19 @@ public class DefStepNode extends LevelNode {
     return this.levelCheckSubnodes(iter, defs) ;
    }
 
-  public void walkGraph(Hashtable semNodesTable) {
-    Integer uid = new Integer(myUID);
+  @Override
+  public void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
-    semNodesTable.put(new Integer(myUID), this);
+    semNodesTable.put(uid, this);
+    visitor.preVisit(this);
     for (int  i = 0; i < defs.length; i++) {
-      defs[i].walkGraph(semNodesTable);
+      defs[i].walkGraph(semNodesTable, visitor);
       } ;
+      visitor.postVisit(this);
    }
 
+  @Override
   public SemanticNode[] getChildren() {
       SemanticNode[] res = new SemanticNode[defs.length];
       for (int i = 0; i < defs.length; i++) {
@@ -71,6 +79,8 @@ public class DefStepNode extends LevelNode {
       }
       return res;
    }
+  
+  @Override
   public String toString(int depth) {
     if (depth <= 0) return "";
     String ret = "\n*DefStepNode:\n"
@@ -82,7 +92,8 @@ public class DefStepNode extends LevelNode {
     return ret;
    }
 
-  protected Element getLevelElement(Document doc, tla2sany.xml.SymbolContext context) {
+  @Override
+  protected Element getLevelElement(Document doc, SymbolContext context) {
       Element e = doc.createElement("DefStepNode");
       for (int i=0; i<defs.length;i++) {
         e.appendChild(defs[i].export(doc,context));

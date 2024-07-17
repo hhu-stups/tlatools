@@ -115,9 +115,11 @@ public class DistributedFPSet  {
 	
 	private static TLCServerRMI lookupTLCServer(final String serverName) throws MalformedURLException, RemoteException, NotBoundException, InterruptedException {
 		String url = "//" + serverName + ":" + TLCServer.Port
-				+ "/TLCServer";
+				+ "/" + TLCServer.SERVER_NAME;
 
-		// try to repeatedly connect to the server until it becomes available
+		// try to repeatedly connect to the server until it becomes available.
+		// see similar while loop in
+		// tlc2.tool.distributed.TLCWorker.main(String[]) for more comments.
 		int i = 1;
 		while(true) {
 			try {
@@ -138,6 +140,15 @@ public class DistributedFPSet  {
 					// how to handle
 					throw e;
 				}
+			} catch (NotBoundException e) {
+				// Registry is available but no object by "TLCServer". This
+				// happens when TLCServer makes it registry available but
+				// has't registered itself yet.
+				long sleep = (long) Math.sqrt(i);
+				ToolIO.out.println("Server " + serverName + " reachable but not ready yet, sleeping " + sleep
+						+ "s for server to come online...");
+				Thread.sleep(sleep * 1000);
+				i *= 2;
 			}
 		}
 	}

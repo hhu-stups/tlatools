@@ -5,8 +5,8 @@
 
 package tlc2.tool.liveness;
 
+import tlc2.tool.ITool;
 import tlc2.tool.TLCState;
-import tlc2.tool.Tool;
 
 /**
  * LNConj - a conjunction. (contains list of conjuncts) LNDisj - a disjunction.
@@ -42,7 +42,13 @@ public abstract class LiveExprNode {
 	/* Returns true iff the expression contains action. */
 	public abstract boolean containAction();
 
-	public abstract boolean eval(Tool tool, TLCState s1, TLCState s2);
+	/**
+	 * @param s1 First state
+	 * @param s2 Second (successor) state
+	 * @param tool (Technical Tool implementation)
+	 * @return true iff both states are consistent with this {@link LiveExprNode}.
+	 */
+	public abstract boolean eval(ITool tool, TLCState s1, TLCState s2);
 
 	/* The string representation. */
 	public final String toString() {

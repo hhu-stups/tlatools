@@ -4,6 +4,12 @@
 
 package tlc2.tool.liveness;
 
+import tlc2.output.EC;
+import tlc2.output.MP;
+
+/**
+ * @see TableauNodePtrTable
+ */
 public class NodePtrTable {
 
 	private int count;
@@ -105,20 +111,56 @@ public class NodePtrTable {
 
 	/* Double the table when the table is full by the threshhold. */
 	private final void grow() {
-		this.length = 2 * this.length + 1;
-		this.thresh = (int) (this.length * 0.75);
-		this.count = 0;
-		long[] oldKeys = this.keys;
-		long[] oldElems = this.elems;
-		this.keys = new long[this.length];
-		this.elems = new long[this.length];
-		for (int i = 0; i < this.length; i++) {
-			this.elems[i] = -1;
-		}
-		for (int i = 0; i < oldElems.length; i++) {
-			long elem = oldElems[i];
-			if (elem != -1) {
-				this.put(oldKeys[i], elem);
+		final int newLength = 2 * this.length + 1;
+		grow(newLength);
+	}
+
+    private final void grow(final int newLength) {
+		try {
+			final long[] oldKeys = this.keys;
+			final long[] oldElems = this.elems;
+			this.keys = new long[newLength];
+			this.elems = new long[newLength];
+			for (int i = 0; i < newLength; i++) {
+				this.elems[i] = -1;
+			}
+			this.count = 0;
+			for (int i = 0; i < oldElems.length; i++) {
+				final long elem = oldElems[i];
+				if (elem != -1) {
+					int loc = ((int) oldKeys[i] & 0x7FFFFFFF) % newLength;
+					while (true) {
+						if (this.elems[loc] == -1) {
+							this.keys[loc] = oldKeys[i];
+							this.elems[loc] = elem;
+							this.count++;
+							break;
+						}
+						if (this.keys[loc] == oldKeys[i]) {
+							this.elems[loc] = elem;
+							break;
+						}
+						loc = (loc + 1) % newLength;
+					}
+				}
+			}
+			this.length = newLength;
+			this.thresh = (int) (newLength * 0.75);
+		} catch (OutOfMemoryError t) {
+			// Handle OOM error locally because grow is on the code path of safety checking
+			// (LiveCheck#addInit/addNext...).
+			System.gc();
+			if (newLength <= this.length + 1) {
+				MP.printError(EC.SYSTEM_OUT_OF_MEMORY, t);
+				System.exit(1);
+			}
+			try {
+				// It doesn't buy us much, but - as fallback - do not grow capacity
+				// exponentially.
+				grow(newLength - (newLength >> 2));
+			} catch (OutOfMemoryError inner) {
+				MP.printError(EC.SYSTEM_OUT_OF_MEMORY, inner);
+				System.exit(1);
 			}
 		}
 	}

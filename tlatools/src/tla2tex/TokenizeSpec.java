@@ -469,9 +469,6 @@ package tla2tex;
 import java.util.Hashtable;
 import java.util.Vector;
 
-import pcal.MappingObject.EndTLAToken;
-import pcal.PCalLocation;
-
 /**
  * @author lamport
  *
@@ -1737,6 +1734,17 @@ public class TokenizeSpec
         /*
          * Prevent null pointer exception in PlusCal algorithm that was
          * not ended.
+         * 
+         * Note added 4 Aug 2015 by LL.  It appears that we will get here with hasPcal
+         * = true and pcalEnd = null TLA2TeX is called to format a snippet of PCal
+         * code.  So, I would expect setting pcalEnd to this dummy non-null value l
+         * often to cause bugs later on in the processing.  However, today is the first 
+         * time I encountered such a bug.  I seem to have fixed this with a patch
+         * to FindAlignments.FindLabelAlignments described in a comment dated today.
+         * I didn't try to understand that code to know if the bug actually was a
+         * reasonable fix or whether it prevents an exception but can produce
+         * unreasonably bad formatting.  Moreover, it seems likely that this dummy
+         * value of pcalEnd will trigger other bugs that I haven't encountered yet.
          */
         if (hasPcal) {
             if (pcalEnd == null) {

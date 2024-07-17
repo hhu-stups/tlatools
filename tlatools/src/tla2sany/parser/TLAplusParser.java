@@ -3,13 +3,13 @@ package tla2sany.parser;
 
 import tla2sany.st.ParseTree;
 import tla2sany.st.TreeNode;
-import tlc2.output.EC;
-
-import tla2sany.utilities.Vector;
 import tla2sany.utilities.Stack;
+import tla2sany.utilities.Vector;
+import tlc2.output.EC;
 import util.Assert;
-import util.UniqueString;
+import util.TLAConstants;
 import util.ToolIO;
+import util.UniqueString;
 
 public class TLAplusParser implements tla2sany.st.SyntaxTreeConstants, ParseTree, TLAplusParserConstants {
 
@@ -1656,7 +1656,7 @@ Token t;
   SyntaxTreeNode tn, sn[];
   Token t;
   bpa("Parameter declaration");
-  expecting = "CONSTANT";
+  expecting = TLAConstants.KeyWords.CONSTANT;
     tn = ParamSubDecl();
                          addHeir(tn);
  expecting = "Identifier, operator or _";

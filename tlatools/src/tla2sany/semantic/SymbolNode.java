@@ -2,11 +2,11 @@
 // Portions Copyright (c) 2003 Microsoft Corporation.  All rights reserved.
 package tla2sany.semantic;
 
-import tla2sany.st.TreeNode;
-import util.UniqueString;
-
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+
+import tla2sany.st.TreeNode;
+import util.UniqueString;
 
 /**
  * Abstract class extended by classes that represent the meaning of an
@@ -73,6 +73,10 @@ public abstract class SymbolNode extends LevelNode {
     return (this instanceof OpDeclNode ||
 	    this instanceof FormalParamNode);
   }
+  
+  public String getSignature() {
+	  return getName().toString();
+  }
 
   /**
    * Returns true iff this node and otherNode are both OpDefOrDeclNode objects or
@@ -127,6 +131,9 @@ public abstract class SymbolNode extends LevelNode {
    * we need to add location and level information here.
    */
   public Element exportDefinition(Document doc, tla2sany.xml.SymbolContext context) {
+    if (!context.isTop_level_entry())
+      throw new IllegalArgumentException("Exporting definition "+getName()+" ref "+getNodeRef()+" twice!");
+    context.resetTop_level_entry();
     try {
       Element e = getSymbolElement(doc, context);
       // level
@@ -158,7 +165,7 @@ public abstract class SymbolNode extends LevelNode {
    * we also override getLevelElement as it should never be called
    */
   protected Element getLevelElement(Document doc, tla2sany.xml.SymbolContext context) {
-    throw new UnsupportedOperationException("This should not be possible and therefore a bug");
+    throw new UnsupportedOperationException("implementation Error: A symbol node may not be called for its level element.");
   }
 
   /** TL

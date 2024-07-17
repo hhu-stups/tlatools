@@ -6,13 +6,15 @@ import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Iterator;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
 import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.st.TreeNode;
 import tla2sany.utilities.Strings;
 import tla2sany.utilities.Vector;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
+import tla2sany.xml.SymbolContext;
 
 public class LetInNode extends ExprNode
 implements ExploreNode, LevelConstants {
@@ -106,6 +108,8 @@ implements ExploreNode, LevelConstants {
 //  private SetOfArgLevelConstraints argLevelConstraints;
 //  private HashSet argLevelParams;
 
+  @Override
+  @SuppressWarnings("unchecked")
   public final boolean levelCheck(int itr) {
     if (this.levelChecked >= itr) return this.levelCorrect;
     levelChecked = itr ;
@@ -141,8 +145,8 @@ implements ExploreNode, LevelConstants {
     * the aliasing of the levelParams and allParams fields of this node    *
     * and its body to the same HashSets, but it doesn't hurt to be safe.   *
     ***********************************************************************/
-    this.levelParams = (HashSet) this.body.getLevelParams().clone();
-    this.allParams   = (HashSet) this.body.getAllParams().clone();
+    this.levelParams = (HashSet<SymbolNode>)this.body.getLevelParams().clone();
+    this.allParams   = (HashSet<SymbolNode>) this.body.getAllParams().clone();
 
 //    this.levelConstraints = new SetOfLevelConstraints();
     this.levelConstraints.putAll(this.body.getLevelConstraints());
@@ -173,9 +177,9 @@ implements ExploreNode, LevelConstants {
         if (this.opDefs[i].getKind() != ThmOrAssumpDefKind){
           params = ((OpDefNode) this.opDefs[i]).getParams();
           } ;
-        Iterator iter = this.opDefs[i].getArgLevelParams().iterator();
+        Iterator<ArgLevelParam> iter = this.opDefs[i].getArgLevelParams().iterator();
         while (iter.hasNext()) {
-          ArgLevelParam alp = (ArgLevelParam)iter.next();
+          ArgLevelParam alp = iter.next();
           if (!alp.occur(params)) {
             this.argLevelParams.add(alp);
           }
@@ -219,6 +223,7 @@ implements ExploreNode, LevelConstants {
 //           "ArgLevelParams: "      + this.argLevelParams      + "\n" ;
 //  }
 
+  @Override
   public SemanticNode[] getChildren() {
       SemanticNode[] res =
          new SemanticNode[this.opDefs.length + this.insts.length + 1];
@@ -233,26 +238,30 @@ implements ExploreNode, LevelConstants {
       return res;
    }
 
-  public final void walkGraph(Hashtable semNodesTable) {
-    Integer uid = new Integer(myUID);
+  @Override
+  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
 
     if (semNodesTable.get(uid) != null) return;
 
-    semNodesTable.put(new Integer(myUID), this);
+    semNodesTable.put(uid, this);
+    visitor.preVisit(this);
 
     /***********************************************************************
     * Can now walk LET nodes from context, don't need to use opDefs        *
     * (which is incomplete).                                               *
     ***********************************************************************/
-    if (context != null){context.walkGraph(semNodesTable);} ;
+    if (context != null){context.walkGraph(semNodesTable, visitor);} ;
 //    if (opDefs != null) {
 //      for (int i = 0; i < opDefs.length; i++) {
 //        if (opDefs[i] != null) opDefs[i].walkGraph(semNodesTable);
 //      }
 //    }
-    if (body != null) body.walkGraph(semNodesTable);
+    if (body != null) body.walkGraph(semNodesTable, visitor);
+    visitor.postVisit(this);
   }
 
+  @Override
   public final String toString(int depth) {
     if (depth <= 0) return "";
 
@@ -286,8 +295,8 @@ implements ExploreNode, LevelConstants {
     return ret;
   }
 
-
-  protected Element getLevelElement(Document doc, tla2sany.xml.SymbolContext context) {
+  @Override
+  protected Element getLevelElement(Document doc, SymbolContext context) {
     Element ret = doc.createElement("LetInNode");
     ret.appendChild(appendElement(doc,"body",body.export(doc,context)));
     Element arguments = doc.createElement("opDefs");

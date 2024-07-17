@@ -4,19 +4,21 @@
 // last modified on Fri 16 Mar 2007 at 17:22:54 PST by lamport
 package tla2sany.semantic;
 
-import java.util.Comparator;
 import java.util.Hashtable;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import tla2sany.explorer.ExploreNode;
-import tla2sany.parser.SyntaxTreeNode;
-import tla2sany.st.Location;
-import tla2sany.st.TreeNode;
-import util.ToolIO;
-
-import tla2sany.xml.XMLExportable;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
+
+import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
+import tla2sany.parser.SyntaxTreeNode;
+import tla2sany.st.Location;
+import tla2sany.st.TreeNode;
+import tla2sany.xml.XMLExportable;
+import tlc2.value.IValue;
+import tlc2.value.Values;
 
 /**
  * SemanticNode is the (abstract) superclass of all nodes in the
@@ -26,15 +28,15 @@ import org.w3c.dom.Node;
  * used to check for equality.
  */
 public abstract class SemanticNode
- implements ASTConstants, ExploreNode, LevelConstants, Comparable, XMLExportable /* interface for exporting into XML */ {
+ implements ASTConstants, ExploreNode, LevelConstants, Comparable<SemanticNode>, XMLExportable /* interface for exporting into XML */ {
 
   private static final Object[] EmptyArr = new Object[0];
 
-  private static int uid = 0;  // the next unique ID for any semantic node
+  private static final AtomicInteger uid = new AtomicInteger();  // the next unique ID for any semantic node
 
   protected static Errors errors;
 
-  public    int      myUID;    // the unique ID of THIS semantic node
+  public    final int      myUID;    // the unique ID of THIS semantic node
   public    TreeNode stn;      // the concrete syntax tree node associated with THIS semantic node
   private   Object[] tools;    // each tool has a location in this array where
                                //   it may store an object for its own purposes
@@ -42,7 +44,7 @@ public abstract class SemanticNode
                                //   strongly correlated with the Java type of the node
 
   public SemanticNode(int kind, TreeNode stn) {
-    myUID = uid++;
+    myUID = uid.getAndIncrement();
     this.kind = kind;
     this.stn = stn;
     this.tools = EmptyArr;
@@ -88,7 +90,6 @@ public abstract class SemanticNode
       this.tools = newTools;
     }
     this.tools[toolId] = obj;
-    ToolIO.registerSemanticNode(this, toolId);
   }
 
   /**
@@ -177,10 +178,12 @@ public abstract class SemanticNode
    * of walkgraph is to find all reachable nodes in the semantic graph
    * and insert them in a Hashtable for use by the Explorer tool.
    */
-  public void walkGraph(Hashtable semNodesTable) {
-    Integer uid = new Integer(myUID);
+  public void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
-    semNodesTable.put(new Integer(myUID), this);
+    semNodesTable.put(uid, this);
+    visitor.preVisit(this);
+    visitor.postVisit(this);
   }
 
   /**
@@ -194,10 +197,25 @@ public abstract class SemanticNode
 	    "  kind: " + (kind == -1 ? "<none>" : kinds[kind])
 	    + getPreCommentsAsString());
   }
+  
+  public boolean isBuiltIn() {
+	  return Context.isBuiltIn(this);
+  }
 
+  /**
+   * @see tla2sany.modanalyzer.ParseUnit.isLibraryModule()
+   * @see StandardModules.isDefinedInStandardModule()
+   */
+  public boolean isStandardModule() {
+	  return StandardModules.isDefinedInStandardModule(this);
+  }
+  
   // YY's code
   public final Location getLocation() {
-    return this.stn.getLocation();
+	  if (this.stn != null) {
+		  return this.stn.getLocation();
+	  }
+	  return Location.nullLoc;
   }
 
   /**
@@ -212,9 +230,9 @@ public abstract class SemanticNode
    * @param s2
    * @return
    */
-  public int compareTo(Object s) {
+  public int compareTo(SemanticNode s) {
        Location loc1 = this.stn.getLocation();
-       Location loc2 = ((SemanticNode) s).stn.getLocation();
+       Location loc2 = s.stn.getLocation();
        if (loc1.beginLine() < loc2.beginLine())
         {
            return -1;
@@ -228,16 +246,68 @@ public abstract class SemanticNode
        return (loc1.beginColumn() < loc2.beginColumn())?-1:1;
   }
 
+	@Override
+	public int hashCode() {
+		final int prime = 31;
+		int result = 1;
+		result = prime * result + kind;
+		result = prime * result + myUID;
+		return result;
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+		if (this == obj) {
+			return true;
+		}
+		if (obj == null) {
+			return false;
+		}
+		if (getClass() != obj.getClass()) {
+			return false;
+		}
+		SemanticNode other = (SemanticNode) obj;
+		if (kind != other.kind) {
+			return false;
+		}
+		if (myUID != other.myUID) {
+			return false;
+		}
+		return true;
+	}
+
 /***************************************************************************
 * XXXXX A test for getLocation() returning null should be added            *
 *       to the following two toString methods.                             *
 ***************************************************************************/
   public final void toString(StringBuffer sb, String padding) {
-    sb.append(this.getLocation());
+	  TreeNode treeNode = getTreeNode();
+		if (treeNode instanceof SyntaxTreeNode
+				&& System.getProperty(SemanticNode.class.getName() + ".showPlainFormulae") != null) {
+		  SyntaxTreeNode stn = (SyntaxTreeNode) treeNode;
+		  sb.append(stn.getHumanReadableImage());
+	  } else {
+		  sb.append(this.getLocation());
+	  }
   }
 
+  @Override
   public String toString() {
+	  TreeNode treeNode = getTreeNode();
+		if (treeNode instanceof SyntaxTreeNode
+				&& System.getProperty(SemanticNode.class.getName() + ".showPlainFormulae") != null) {
+			  SyntaxTreeNode stn = (SyntaxTreeNode) treeNode;
+		  return stn.getHumanReadableImage();
+	  }
     return this.getLocation().toString();
+  }
+
+  public String getHumanReadableImage() {
+	  return getLocation().toString();
+  }
+  
+  public String toString(final IValue aValue) {
+	return Values.ppr(aValue.toString());
   }
 
     /**

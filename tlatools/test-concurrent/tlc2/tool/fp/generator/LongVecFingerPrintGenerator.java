@@ -4,6 +4,9 @@ package tlc2.tool.fp.generator;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
+
+import org.junit.Assert;
 
 import tlc2.tool.fp.FPSet;
 import tlc2.tool.fp.MultiThreadedFPSetTest;
@@ -14,22 +17,27 @@ public class LongVecFingerPrintGenerator extends FingerPrintGenerator {
 
 	private static final int batch = 1024;
 	
-	public LongVecFingerPrintGenerator(MultiThreadedFPSetTest test, int id, FPSet fpSet, CountDownLatch latch, long seed, long insertions) {
-		super(test, id, fpSet, latch, seed, insertions);
+	public LongVecFingerPrintGenerator(MultiThreadedFPSetTest test, int id, int numThreads, FPSet fpSet, CountDownLatch latch, long seed, long insertions, final CyclicBarrier barrier) {
+		super(test, id, numThreads, fpSet, latch, seed, insertions, barrier);
 	}
 	
 	/* (non-Javadoc)
 	 * @see java.lang.Runnable#run()
 	 */
 	public void run() {
+		waitForAllThreadsStarted();
+		
 		TestLongVec predecessors = new TestLongVec(batch);
 		boolean initialized = false;
-		while (fpSet.size() < insertions) {
+		// Reduce number of FPSet#size invocation by counting puts/collisions.
+		// FPSet#size can cause an FPSet to synchronize all its writers slowing
+		// down execution.
+		while (puts + collisions < perThreadInsertions || fpSet.size() < totalInsertions) {
 			try {
 				// Make sure set still contains predecessors
 				if (initialized) {
 					final BitVector bitVector = fpSet.containsBlock(predecessors);
-					MultiThreadedFPSetTest.assertTrue(bitVector.trueCnt() == batch);
+					Assert.assertEquals(batch, batch - bitVector.trueCnt());
 				}
 
 				// Fill new fingerprints and sort them
@@ -43,15 +51,9 @@ public class LongVecFingerPrintGenerator extends FingerPrintGenerator {
 				final BitVector bitVector = fpSet.putBlock(predecessors);
 				puts += bitVector.trueCnt();
 				collisions += (batch - bitVector.trueCnt());
-
-				// First producer prints stats
-				if (id == 0) {
-					test.printInsertionSpeed(fpSet.size());
-				}
-
 			} catch (IOException e) {
 				e.printStackTrace();
-				MultiThreadedFPSetTest.fail("Unexpected");
+				Assert.fail("Unexpected");
 			}
 		}
 		latch.countDown();
