@@ -26,6 +26,9 @@
 package org.lamport.tla.toolbox.jcloud;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -55,7 +58,7 @@ public class Application implements IApplication {
 		final String[] args = (String[]) argObject;
 		final String modelDirectory = args[0];
 		
-		final Properties props = new Properties();
+		final Properties props = initializeFromFile(modelDirectory);
 		props.put(TLCJobFactory.MAIN_CLASS, tlc2.TLC.class.getName());
 
 		// Optional parameters
@@ -108,11 +111,25 @@ public class Application implements IApplication {
 		// Show error message if any such as invalid credentials.
 		if (status.getSeverity() == IStatus.ERROR) {
 			System.err.println(status.getMessage());
+			final Throwable exception = status.getException();
+			if (exception instanceof CloudDistributedTLCJob.ScriptException) {
+				System.err.printf("\n###############################\n\n%s\n###############################\n",
+						exception.getMessage());
+			}
 			// Signal unsuccessful execution.
 			return new Integer(1);
 		}
 		
 		return IApplication.EXIT_OK;
+	}
+
+	private Properties initializeFromFile(final String modelDirectory) throws IOException, FileNotFoundException {
+		final Properties props = new Properties();
+		final File file = new File(modelDirectory + File.separator + "cloud.properties");
+		if (file.exists()) {
+			props.load(new FileInputStream(file));
+		}
+		return props;
 	}
 
 	/* (non-Javadoc)

@@ -34,9 +34,11 @@ import static org.jclouds.scriptbuilder.domain.Statements.exec;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Properties;
 import java.util.Set;
@@ -52,6 +54,7 @@ import org.jclouds.compute.ComputeServiceContext;
 import org.jclouds.compute.RunNodesException;
 import org.jclouds.compute.RunScriptOnNodesException;
 import org.jclouds.compute.domain.ExecChannel;
+import org.jclouds.compute.domain.ExecResponse;
 import org.jclouds.compute.domain.NodeMetadata;
 import org.jclouds.compute.domain.TemplateBuilder;
 import org.jclouds.compute.options.TemplateOptions;
@@ -187,7 +190,7 @@ public class CloudDistributedTLCJob extends Job {
 			// either monitor standalone tlc2.TLC or TLCServer.
 			monitor.subTask("Provisioning TLC environment on all node(s)");
 			final String email = props.getProperty(TLCJobFactory.MAIL_ADDRESS);
-			compute.runScriptOnNodesMatching(
+			Map<? extends NodeMetadata, ExecResponse> execResponse = compute.runScriptOnNodesMatching(
 					inGroup(groupNameUUID),
 					// Creating an entry in /etc/alias that makes sure system email sent
 					// to root ends up at the address given by the user. Note that this
@@ -279,6 +282,7 @@ public class CloudDistributedTLCJob extends Job {
 							+ "ln -s /mnt/tlc/tlc.jfr /var/www/html/tlc.jfr"),
 					new TemplateOptions().runAsRoot(true).wrapInInitScript(
 							false));			
+			throwExceptionOnErrorResponse(execResponse, "Provisioning TLC environment on all nodes");
 			monitor.worked(10);
 			if (monitor.isCanceled()) {
 				return Status.CANCEL_STATUS;
@@ -286,11 +290,12 @@ public class CloudDistributedTLCJob extends Job {
 
 			// Install all security relevant system packages
 			monitor.subTask("Installing security relevant system package upgrades (in background)");
-			compute.runScriptOnNodesMatching(
+			execResponse = compute.runScriptOnNodesMatching(
 					inGroup(groupNameUUID),
-					exec("/usr/bin/unattended-upgrades"),
+					exec("screen -dm -S security bash -c \"/usr/bin/unattended-upgrades\""),
 					new TemplateOptions().runAsRoot(true).wrapInInitScript(
-							false).blockOnComplete(false).blockUntilRunning(false));
+							true).blockOnComplete(false).blockUntilRunning(false));
+			throwExceptionOnErrorResponse(execResponse, "Installing security relevant system package upgrades");
 			monitor.worked(5);
 			final long provision = System.currentTimeMillis();
 
@@ -381,8 +386,14 @@ public class CloudDistributedTLCJob extends Job {
 					// the old net.schmizz.sshj and an update to the newer com.hierynomus seems 
 					// awful lot of work.
 					channel = sshClient.execChannel("cat /mnt/tlc/tlc.jfr");
+					final InputStream output = channel.getOutput();
 					final String cwd = Paths.get(".").toAbsolutePath().normalize().toString() + File.separator;
-					ByteStreams.copy(channel.getOutput(), new FileOutputStream(new File(cwd + "tlc.jfr")));
+					final File jfr = new File(cwd + "tlc.jfr");
+					ByteStreams.copy(output, new FileOutputStream(jfr));
+					if (jfr.length() == 0) {
+						System.err.println("Received empty Java Flight recording. Not creating tlc.jfr file");
+						jfr.delete();
+					}
 				}
 				// Finally close the ssh connection.
 				sshClient.disconnect();
@@ -406,8 +417,9 @@ public class CloudDistributedTLCJob extends Job {
 						return masterHostname.equals(hostname);
 					};
 				};
-				compute.runScriptOnNodesMatching(isMaster, exec(tlcMasterCommand), new TemplateOptions().runAsRoot(false)
+				execResponse = compute.runScriptOnNodesMatching(isMaster, exec(tlcMasterCommand), new TemplateOptions().runAsRoot(false)
 						.wrapInInitScript(true).blockOnComplete(false).blockUntilRunning(false));
+				throwExceptionOnErrorResponse(execResponse, "Starting TLC model checker process on the master node");
 				monitor.worked(5);
 				final long tlcStartUp = System.currentTimeMillis();
 
@@ -417,12 +429,13 @@ public class CloudDistributedTLCJob extends Job {
 					// (*.tla/*.cfg/...) from the jar file to not share the spec
 					// with the world.
 					monitor.subTask("Make TLC code available to all worker node(s)");
-					compute.runScriptOnNodesMatching(
+					execResponse = compute.runScriptOnNodesMatching(
 							isMaster,
 							exec("cp /tmp/tla2tools.jar /var/www/html/tla2tools.jar && "
 									+ "zip -d /var/www/html/tla2tools.jar model/*.tla model/*.cfg model/generated.properties"),
 							new TemplateOptions().runAsRoot(true).wrapInInitScript(
 									false));
+					throwExceptionOnErrorResponse(execResponse, "Make TLC code available to all worker node");
 					monitor.worked(10);
 					if (monitor.isCanceled()) {
 						return Status.CANCEL_STATUS;
@@ -448,7 +461,7 @@ public class CloudDistributedTLCJob extends Job {
 					// see master startup for comments
 					monitor.subTask("Starting TLC workers on the remaining node(s) (in background)");
 					final String privateHostname = Iterables.getOnlyElement(master.getPrivateAddresses());
-					compute.runScriptOnNodesMatching(
+					execResponse = compute.runScriptOnNodesMatching(
 						onWorkers,
 						exec("cd /mnt/tlc/ && "
 								+ "wget http://" + privateHostname + "/tla2tools.jar && "
@@ -477,6 +490,7 @@ public class CloudDistributedTLCJob extends Job {
 								+ "\""), 
 						new TemplateOptions().runAsRoot(false).wrapInInitScript(
 								true).blockOnComplete(false).blockUntilRunning(false));
+					throwExceptionOnErrorResponse(execResponse, "Starting TLC workers");
 					monitor.worked(10);
 				}
 				
@@ -507,6 +521,13 @@ public class CloudDistributedTLCJob extends Job {
 			// signal error to caller
 			return new Status(Status.ERROR, "org.lamport.tla.toolbox.jcloud",
 					e.getMessage(), e);
+		} catch (ScriptException e) {
+			if (context != null) {
+				destroyNodes(context, groupNameUUID);
+			}
+			// signal error to caller
+			return new Status(Status.ERROR, "org.lamport.tla.toolbox.jcloud",
+					e.getTitle(), e);
 		} finally {
 			if (context != null) {
 				// The user has canceled the Toolbox job, take this as a request
@@ -517,6 +538,16 @@ public class CloudDistributedTLCJob extends Job {
 				context.close();
 			}
 		}
+	}
+
+	private void throwExceptionOnErrorResponse(final Map<? extends NodeMetadata, ExecResponse> execResponse, final String step) {
+		execResponse.forEach((node, exec) -> {
+			// If the script above failed on any number of nodes for whatever reason, don't
+			// continue but destroy all nodes.
+			if (exec.getExitStatus() > 0) {
+				throw new ScriptException(node, exec, step);
+			}
+		});
 	}
 	
 	public void setIsCLI(boolean cli) {
@@ -536,6 +567,23 @@ public class CloudDistributedTLCJob extends Job {
 							Predicates.<NodeMetadata> and(not(TERMINATED),
 									inGroup(groupname)));
 			System.out.printf("<< destroyed nodes %s%n", destroyed);
+		}
+	}
+	
+	@SuppressWarnings("serial")
+	class ScriptException extends RuntimeException {
+
+		private final String title;
+
+		public ScriptException(final NodeMetadata node, final ExecResponse exec, final String step) {
+			super(exec.getOutput());
+			this.title = String.format(
+					"Launching TLC on %s unsuccessful.\nStep '%s' failed on node '%s'.",
+					params.getCloudProvider(), step, node.getName());
+		}
+
+		public String getTitle() {
+			return title;
 		}
 	}
 	

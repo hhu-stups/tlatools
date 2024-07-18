@@ -23,45 +23,26 @@
  * Contributors:
  *   Markus Alexander Kuppe - initial API and implementation
  ******************************************************************************/
-package org.lamport.tla.toolbox.jcloud;
+package tlc2.tool;
 
-public class EC2PropertyCloudTLCInstanceParameters extends EC2CloudTLCInstanceParameters {
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
-	public EC2PropertyCloudTLCInstanceParameters(final String tlcParams, int numberOfWorkers) {
-        super(tlcParams.trim(), numberOfWorkers);
+import org.junit.Test;
+
+import tlc2.output.EC;
+import tlc2.tool.liveness.ModelCheckerTestCase;
+
+public class AssignmentNext3Test extends ModelCheckerTestCase {
+
+	public AssignmentNext3Test() {
+		super("AssignmentNext3");
 	}
 
-	@Override
-	public String getImageId() {
-		final String imageId = System.getProperty("aws-ec2.image");
-		if (imageId == null) {
-			return super.getImageId();
-		}
-		return getRegion() + "/" + imageId;
-	}
-
-	@Override
-	public String getRegion() {
-		return System.getProperty("aws-ec2.region", super.getRegion());
-	}
-
-	@Override
-	public String getHardwareId() {
-		return System.getProperty("aws-ec2.instanceType", super.getHardwareId());
-	}
-
-	@Override
-	public String getOSFilesystemTuning() {
-		return System.getProperty("aws-ec2.tuning", super.getOSFilesystemTuning());
-	}
-
-	@Override
-	public String getJavaVMArgs() {
-		return System.getProperty("aws-ec2.vmargs", super.getJavaVMArgs());
-	}
-
-	@Override
-	public String getTLCParameters() {
-		return System.getProperty("aws-ec2.tlcparams", super.getTLCParameters());
+	@Test
+	public void test() {
+		assertTrue(recorder.recorded(EC.TLC_FINISHED));
+		assertFalse(recorder.recorded(EC.GENERAL));
+		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "26", "5", "0"));
 	}
 }

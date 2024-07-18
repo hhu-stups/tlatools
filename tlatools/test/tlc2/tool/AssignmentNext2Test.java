@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2014 Microsoft Research. All rights reserved. 
+ * Copyright (c) 2017 Microsoft Research. All rights reserved. 
  *
  * The MIT License (MIT)
  * 
@@ -23,32 +23,26 @@
  * Contributors:
  *   Markus Alexander Kuppe - initial API and implementation
  ******************************************************************************/
+package tlc2.tool;
 
-package org.lamport.tla.toolbox.jcloud;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
-import java.io.File;
-import java.util.Properties;
+import org.junit.Test;
 
-import org.eclipse.core.runtime.Assert;
-import org.eclipse.core.runtime.jobs.Job;
-import org.lamport.tla.toolbox.tool.tlc.job.TLCJobFactory;
+import tlc2.output.EC;
+import tlc2.tool.liveness.ModelCheckerTestCase;
 
-public class CloudTLCJobFactory implements TLCJobFactory {
+public class AssignmentNext2Test extends ModelCheckerTestCase {
 
-	private static final String AZURECOMPUTE = "Azure";
-	private static final String AWS_EC2 = "aws-ec2";
+	public AssignmentNext2Test() {
+		super("AssignmentNext2");
+	}
 
-	@Override
-	public Job getTLCJob(String aName, File aModelFolder, int numberOfWorkers, final Properties props, String tlcparams) {
-		Assert.isNotNull(aName);
-		Assert.isLegal(numberOfWorkers > 0);
-		if (AWS_EC2.equalsIgnoreCase(aName)) {
-			return new CloudDistributedTLCJob(aName, aModelFolder, numberOfWorkers, props,
-					new EC2CloudTLCInstanceParameters(tlcparams, numberOfWorkers));
-		} else if (AZURECOMPUTE.equalsIgnoreCase(aName)) {
-			return new CloudDistributedTLCJob(aName, aModelFolder, numberOfWorkers, props,
-					new AzureCloudTLCInstanceParameters(tlcparams, numberOfWorkers));
-		}
-		throw new IllegalArgumentException(aName + " is an unknown cloud");
+	@Test
+	public void test() {
+		assertTrue(recorder.recorded(EC.TLC_FINISHED));
+		assertFalse(recorder.recorded(EC.GENERAL));
+		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "3", "2", "0"));
 	}
 }

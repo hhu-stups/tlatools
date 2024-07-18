@@ -13,6 +13,8 @@ import tla2sany.semantic.ExprOrOpArgNode;
 import tla2sany.semantic.FormalParamNode;
 import tla2sany.semantic.LabelNode;
 import tla2sany.semantic.LetInNode;
+import tla2sany.semantic.LevelConstants;
+import tla2sany.semantic.LevelNode;
 import tla2sany.semantic.ModuleNode;
 import tla2sany.semantic.OpApplNode;
 import tla2sany.semantic.OpArgNode;
@@ -310,23 +312,23 @@ public class Tool
    * probably make tools like TLC useless.
    */
   public final StateVec getInitStates() {
-    final StateVec initStates = new StateVec(0);
-    getInitStates(initStates);
-    return initStates;
+	  final StateVec initStates = new StateVec(0);
+	  getInitStates(initStates);
+	  return initStates;
   }
 
   public final void getInitStates(IStateFunctor functor) {
-    Vect init = this.getInitStateSpec();
-    ActionItemList acts = ActionItemList.Empty;
-    for (int i = 1; i < init.size(); i++) {
-      Action elem = (Action)init.elementAt(i);
-      acts = acts.cons(elem.pred, elem.con, -1);
-    }
-    if (init.size() != 0) {
-      Action elem = (Action)init.elementAt(0);
-      TLCState ps = TLCState.Empty.createEmpty();
-      this.getInitStates(elem.pred, acts, elem.con, ps, functor);
-    }
+	  Vect init = this.getInitStateSpec();
+	  ActionItemList acts = ActionItemList.Empty;
+	  for (int i = 1; i < init.size(); i++) {
+		  Action elem = (Action)init.elementAt(i);
+		  acts = acts.cons(elem.pred, elem.con, ActionItemList.PRED);
+	  }
+	  if (init.size() != 0) {
+		  Action elem = (Action)init.elementAt(0);
+		  TLCState ps = TLCState.Empty.createEmpty();
+		  this.getInitStates(elem.pred, acts, elem.con, ps, functor);
+	  }
   }
 
   /* Create the state specified by pred.  */
@@ -463,17 +465,17 @@ public class Tool
 
           if (val instanceof LazyValue) {
             LazyValue lv = (LazyValue)val;
-            if (lv.val == null || lv.val == ValUndef) {
+            if (lv.getValue() == null || lv.isUncachable()) {
               this.getInitStates(lv.expr, acts, lv.con, ps, states);
               return;
             }
-            val = lv.val;
+            val = lv.getValue();
           }
 
           Object bval = val;
           if (alen == 0) {
             if (val instanceof MethodValue) {
-              bval = ((MethodValue)val).apply(EmptyArgs, EvalControl.Clear);
+              bval = ((MethodValue)val).apply(EmptyArgs, EvalControl.Init);
             }
           }
           else {
@@ -482,52 +484,10 @@ public class Tool
               Value[] argVals = new Value[alen];
               // evaluate the actuals:
               for (int i = 0; i < alen; i++) {
-					/*
-					 * MAK 12/2017: Effectively disable LazyValues by passing null to this.eval(..).
-					 * This has the same effect as calling LazyValue#setUncachable upon the creation
-					 * of a LV. However, at this stack level, the LV has long been created. It can
-					 * not be set to be uncachable anymore. This changes fixes Github issue 113:
-					 * "TLC fails to find initial states with bounded exists"
-					 * https://github.com/tlaplus/tlaplus/issues/113. The corresponding unit test is
-					 * tlc2.tool.AssignmentInitTest.
-					 * 
-					 * The bug to fix is, that a the use of an LV breaks evaluation of expressions
-					 * such as:
-					 * 
-					 * Op(var) == var \in {0,1} /\ var > 0
-					 * 
-					 * Op2(var) == \E val \in {0,1} : var = val /\ var > 0
-					 * 
-					 * The "var" is represented by an instance of a LazyValue which only gets
-					 * evaluated once. In the two examples above, the LV statically evaluates to "0"
-					 * even when it should evaluate to "1".
-					 * 
-					 * If the init predicate is defined to such that:
-					 * 
-					 * VARIABLE s Init == Op2(s) ...
-					 * 
-					 * TLC won't generate the initial state s=1. Likewise, the following expression
-					 * causes TLC to generate two initial states (s=0 and s=1). Again, because the
-					 * predicate "var < 1" is both times evaluated with "var=0".
-					 * 
-					 * Init(var) == \E val \in 0..1: var = val /\ var < 1
-					 * 
-					 * Unfortunately, this disables LazyValues for _all_ operators. It affects all
-					 * operators such as IF THEN ELSE, Print, ... Disabling LV only for affected
-					 * operators appears impossible at this stack level. We would somehow have to
-					 * pass along the call context. Alternatively, an attempt could be made to call
-					 * LazyValue#setUncachable upon creation of the LV. However, the LV gets created
-					 * before the call stack "sees" the actual operator.
-					 * 
-					 * If similar expressions are evaluated in the context of the next-state
-					 * relation, line ~921 is responsible. It boils down to line 2059 (opcode prime)
-					 * to disable LV by passing null to tlc2.tool.Tool.evalAppl(...) effectively
-					 * disabling LVs.
-					 */
-	                argVals[i] = this.eval(args[i], c, ps, null, EvalControl.Clear);
+	                argVals[i] = this.eval(args[i], c, ps, TLCState.Empty, EvalControl.Init);
               }
               // apply the operator:
-              bval = opVal.apply(argVals, EvalControl.Clear);
+              bval = opVal.apply(argVals, EvalControl.Init);
             }
           }
 
@@ -567,7 +527,7 @@ public class Tool
         case OPCODE_be:     // BoundedExists
           {
             SemanticNode body = args[0];
-            ContextEnumerator Enum = this.contexts(init, c, ps, TLCState.Empty, EvalControl.Clear);
+            ContextEnumerator Enum = this.contexts(init, c, ps, TLCState.Empty, EvalControl.Init);
             Context c1;
             while ((c1 = Enum.nextElement()) != null) {
               this.getInitStates(body, acts, c1, ps, states);
@@ -577,7 +537,7 @@ public class Tool
         case OPCODE_bf:     // BoundedForall
           {
             SemanticNode body = args[0];
-            ContextEnumerator Enum = this.contexts(init, c, ps, TLCState.Empty, EvalControl.Clear);
+            ContextEnumerator Enum = this.contexts(init, c, ps, TLCState.Empty, EvalControl.Init);
             Context c1 = Enum.nextElement();
             if (c1 == null) {
               this.getInitStates(acts, ps, states);
@@ -586,7 +546,7 @@ public class Tool
               ActionItemList acts1 = acts;
               Context c2;
               while ((c2 = Enum.nextElement()) != null) {
-                acts1 = acts1.cons(body, c2, -1);
+                acts1 = acts1.cons(body, c2, ActionItemList.PRED);
               }
               this.getInitStates(body, acts1, c1, ps, states);
             }
@@ -594,7 +554,7 @@ public class Tool
           }
         case OPCODE_ite:    // IfThenElse
           {
-            Value guard = this.eval(args[0], c, ps);
+            Value guard = this.eval(args[0], c, ps, TLCState.Empty, EvalControl.Init);
             if (!(guard instanceof BoolValue)) {
               Assert.fail("In computing initial states, a non-boolean expression (" +
                           guard.getKindString() + ") was used as the condition " +
@@ -614,7 +574,7 @@ public class Tool
                 other = pairArgs[1];
               }
               else {
-                Value bval = this.eval(pairArgs[0], c, ps);
+                Value bval = this.eval(pairArgs[0], c, ps, TLCState.Empty, EvalControl.Init);
                 if (!(bval instanceof BoolValue)) {
                   Assert.fail("In computing initial states, a non-boolean expression (" +
                               bval.getKindString() + ") was used as a guard condition" +
@@ -635,11 +595,11 @@ public class Tool
           }
         case OPCODE_fa:     // FcnApply
           {
-            Value fval = this.eval(args[0], c, ps);
+            Value fval = this.eval(args[0], c, ps, TLCState.Empty, EvalControl.Init);
             if (fval instanceof FcnLambdaValue) {
               FcnLambdaValue fcn = (FcnLambdaValue)fval;
               if (fcn.fcnRcd == null) {
-                Context c1 = this.getFcnContext(fcn, args, c, ps, TLCState.Empty, EvalControl.Clear);
+                Context c1 = this.getFcnContext(fcn, args, c, ps, TLCState.Empty, EvalControl.Init);
                 this.getInitStates(fcn.body, acts, c1, ps, states);
                 return;
               }
@@ -650,8 +610,8 @@ public class Tool
                           fval.getKindString() + ") was applied as a function.\n" + init);
             }
             Applicable fcn = (Applicable) fval;
-            Value argVal = this.eval(args[1], c, ps);
-            Value bval = fcn.apply(argVal, EvalControl.Clear);
+            Value argVal = this.eval(args[1], c, ps, TLCState.Empty, EvalControl.Init);
+            Value bval = fcn.apply(argVal, EvalControl.Init);
             if (!(bval instanceof BoolValue))
             {
               Assert.fail(EC.TLC_EXPECTED_EXPRESSION_IN_COMPUTING2, new String[] { "initial states", "boolean",
@@ -666,7 +626,7 @@ public class Tool
           {
             SymbolNode var = this.getVar(args[0], c, false);
             if (var == null || var.getName().getVarLoc() < 0) {
-              Value bval = this.eval(init, c, ps);
+              Value bval = this.eval(init, c, ps, TLCState.Empty, EvalControl.Init);
               if (!((BoolValue)bval).val) {
                 return;
               }
@@ -674,7 +634,7 @@ public class Tool
             else {
               UniqueString varName = var.getName();
               Value lval = ps.lookup(varName);
-              Value rval = this.eval(args[1], c, ps);
+              Value rval = this.eval(args[1], c, ps, TLCState.Empty, EvalControl.Init);
               if (lval == null) {
                 ps = ps.bind(varName, rval, init);
                 this.getInitStates(acts, ps, states);
@@ -694,7 +654,7 @@ public class Tool
           {
             SymbolNode var = this.getVar(args[0], c, false);
             if (var == null || var.getName().getVarLoc() < 0) {
-              Value bval = this.eval(init, c, ps);
+              Value bval = this.eval(init, c, ps, TLCState.Empty, EvalControl.Init);
               if (!((BoolValue)bval).val) {
                 return;
               }
@@ -702,7 +662,7 @@ public class Tool
             else {
               UniqueString varName = var.getName();
               Value lval = ps.lookup(varName);
-              Value rval = this.eval(args[1], c, ps);
+              Value rval = this.eval(args[1], c, ps, TLCState.Empty, EvalControl.Init);
               if (lval == null) {
                 if (!(rval instanceof Enumerable)) {
                   Assert.fail("In computing initial states, the right side of \\IN" +
@@ -728,7 +688,7 @@ public class Tool
           }
         case OPCODE_implies:
           {
-            Value lval = this.eval(args[0], c, ps);
+            Value lval = this.eval(args[0], c, ps, TLCState.Empty, EvalControl.Init);
             if (!(lval instanceof BoolValue)) {
               Assert.fail("In computing initial states of a predicate of form" +
                           " P => Q, P was " + lval.getKindString() + "\n." + init);
@@ -750,7 +710,7 @@ public class Tool
         default:
           {
             // For all the other builtin operators, simply evaluate:
-            Value bval = this.eval(init, c, ps);
+            Value bval = this.eval(init, c, ps, TLCState.Empty, EvalControl.Init);
             if (!(bval instanceof BoolValue)) {
 
               Assert.fail("In computing initial states, TLC expected a boolean expression," +
@@ -915,10 +875,10 @@ public class Tool
 
           if (val instanceof LazyValue) {
             LazyValue lv = (LazyValue)val;
-            if (lv.val == null || lv.val == ValUndef) {
+            if (lv.getValue() == null || lv.isUncachable()) {
               return this.getNextStates(lv.expr, acts, lv.con, s0, s1, nss);
             }
-            val = lv.val;
+            val = lv.getValue();
           }
 
           Object bval = val;
@@ -996,7 +956,7 @@ public class Tool
               ActionItemList acts1 = acts;
               Context c2;
               while ((c2 = Enum.nextElement()) != null) {
-                acts1 = acts1.cons(body, c2, -1);
+                acts1 = acts1.cons(body, c2, ActionItemList.PRED);
               }
               resState = this.getNextStates(body, acts1, c1, s0, s1, nss);
             }
@@ -1031,7 +991,7 @@ public class Tool
           }
         case OPCODE_aa:     // AngleAct <A>_e
           {
-            ActionItemList acts1 = acts.cons(args[1], c, -3);
+            ActionItemList acts1 = acts.cons(args[1], c, ActionItemList.CHANGED);
             return this.getNextStates(args[0], acts1, c, s0, s1, nss);
           }
         case OPCODE_sa:     // [A]_e
@@ -1246,7 +1206,7 @@ public class Tool
             if (alen != 0) {
               ActionItemList acts1 = acts;
               for (int i = alen-1; i > 0; i--) {
-                acts1 = acts1.cons(args[i], c, -2);
+                acts1 = acts1.cons(args[i], c, ActionItemList.UNCHANGED);
               }
               return this.processUnchanged(args[0], acts1, c, s0, s1, nss);
             }
@@ -1297,7 +1257,7 @@ public class Tool
    * current state, and partial next state.
    */
   public final Value eval(SemanticNode expr, Context c, TLCState s0,
-                          TLCState s1, int control) {
+                          TLCState s1, final int control) {
     if (this.callStack != null) this.callStack.push(expr);
     try {
         switch (expr.getKind()) {
@@ -1390,8 +1350,8 @@ public class Tool
     }
   }
 
-  public final Value evalAppl(OpApplNode expr, Context c, TLCState s0,
-                              TLCState s1, int control) {
+  private final Value evalAppl(OpApplNode expr, Context c, TLCState s0,
+                              TLCState s1, final int control) {
     if (this.callStack != null) this.callStack.push(expr);
     try {
         ExprOrOpArgNode[] args = expr.getArgs();
@@ -1406,20 +1366,111 @@ public class Tool
 
           // First, unlazy if it is a lazy value. We cannot use the cached
           // value when s1 == null or isEnabled(control).
-          if (val instanceof LazyValue) {
-            LazyValue lv = (LazyValue)val;
-            if (s1 == null ||
-                lv.val == ValUndef ||
-                EvalControl.isEnabled(control)) {
-              val = this.eval(lv.expr, lv.con, s0, s1, control);
-            }
-            else {
-              if (lv.val == null) {
-                lv.val = this.eval(lv.expr, lv.con, s0, s1, control);
-              }
-              val = lv.val;
-            }
-          }
+			if (val instanceof LazyValue) {
+				final LazyValue lv = (LazyValue) val;
+				if (s1 == null) {
+					val = this.eval(lv.expr, lv.con, s0, null, control);
+			    } else if (lv.isUncachable() || EvalControl.isEnabled(control)) {
+					// Never use cached LazyValues in an ENABLED expression. This is why all
+					// this.enabled* methods pass EvalControl.Enabled (the only exclusion being the
+					// call on line line 2799 which passes EvalControl.Primed). This is why we can
+			    	// be sure that ENALBED expressions are not affected by the caching bug tracked
+			    	// in Github issue 113 (see below).
+					val = this.eval(lv.expr, lv.con, s0, s1, control);
+				} else {
+					val = lv.getValue();
+					if (val == null) {
+						final Value res = this.eval(lv.expr, lv.con, s0, s1, control);
+						// This check has been suggested by Yuan Yu on 01/15/2018:
+						//
+						// If init-states are being generated, level has to be <= ConstantLevel for
+						// caching/LazyValue to be allowed. If next-states are being generated, level
+						// has to be <= VariableLevel. The level indicates if the expression to be
+						// evaluated contains only constants, constants & variables, constants & 
+						// variables and primed variables (thus action) or is a temporal formula.
+						//
+						// This restriction is in place to fix Github issue 113
+						// (https://github.com/tlaplus/tlaplus/issues/113) - 
+						// TLC can generate invalid sets of init or next-states caused by broken
+						// LazyValue evaluation. The related tests are AssignmentInit* and
+						// AssignmentNext*. Without this fix TLC essentially reuses a stale lv.val when
+						// it needs to re-evaluate res because the actual operands to eval changed.
+						// Below is Leslie's formal description of the bug:
+						// 
+						// The possible initial values of some variable  var  are specified by a subformula
+						// 
+						// F(..., var, ...)
+						// 
+						// in the initial predicate, for some operator F such that expanding the
+						// definition of F results in a formula containing more than one occurrence of
+						// var , not all occurring in separate disjuncts of that formula.
+						// 
+						// The possible next values of some variable  var  are specified by a subformula
+						// 
+						// F(..., var', ...)
+						// 
+						// in the next-state relation, for some operator F such that expanding the
+						// definition of F results in a formula containing more than one occurrence of
+						// var' , not all occurring in separate disjuncts of that formula.
+						// 
+						// An example of the first case is an initial predicate  Init  defined as follows:
+						// 
+						// VARIABLES x, ...
+						// F(var) == \/ var \in 0..99 /\ var % 2 = 0
+						//           \/ var = -1
+						// Init == /\ F(x)
+						//         /\ ...
+						// 
+						// The error would not appear if  F  were defined by:
+						// 
+						// F(var) == \/ var \in {i \in 0..99 : i % 2 = 0}
+						//           \/ var = -1
+						// 
+						// or if the definition of  F(x)  were expanded in  Init :
+						// 
+						// Init == /\ \/ x \in 0..99 /\ x % 2 = 0
+						//            \/ x = -1
+						//         /\ ...
+						// 
+						// A similar example holds for case 2 with the same operator F and the
+						// next-state formula
+						// 
+						// Next == /\ F(x')
+						//         /\ ...
+						// 
+						// The workaround is to rewrite the initial predicate or next-state relation so
+						// it is not in the form that can cause the bug. The simplest way to do that is
+						// to expand (in-line) the definition of F in the definition of the initial
+						// predicate or next-state relation.
+						//
+						// Note that EvalControl.Init is only set in the scope of this.getInitStates*,
+						// but not in the scope of methods such as this.isInModel, this.isGoodState...
+						// which are invoked by DFIDChecker and ModelChecker#doInit and doNext. These
+						// invocation however don't pose a problem with regards to issue 113 because
+						// they don't generate the set of initial or next states but get passed fully
+						// generated/final states.
+						//
+						// !EvalControl.isInit(control) means Tool is either processing the spec in
+						// this.process* as part of initialization or that next-states are being
+						// generated. The latter case has to restrict usage of cached LazyValue as
+						// discussed above.
+						final int level = ((LevelNode) lv.expr).getLevel(); // cast to LevelNode is safe because LV only subclass of SN.
+						if ((EvalControl.isInit(control) && level <= LevelConstants.ConstantLevel)
+								|| (!EvalControl.isInit(control) && level <= LevelConstants.VariableLevel)) {
+							// The performance benefits of caching values is generally debatable. The time
+							// it takes TLC to check a reasonable sized model of the PaxosCommit [1] spec is
+							// ~2h with, with limited caching due to the fix for issue 113 or without
+							// caching. There is no measurable performance difference even though the change
+							// for issue 113 reduces the cache hits from ~13 billion to ~4 billion. This was
+							// measured with an instrumented version of TLC.
+							// [1] general/performance/PaxosCommit/  
+							lv.setValue(res);
+						}
+						val = res;
+					}
+				}
+
+			}
 
           Value res = null;
           if (val instanceof OpDefNode) {
@@ -2067,20 +2118,12 @@ public class Tool
           }
         case OPCODE_prime:
           {
-            if (EvalControl.isEnabled(control)) {
-              // We are now in primed and enabled.
-              return this.eval(args[0], c, s1, null, EvalControl.setPrimed(control));
-            }
-            return this.eval(args[0], c, s1, null, control);
+            return this.eval(args[0], c, s1, null, EvalControl.setPrimedIfEnabled(control));
           }
         case OPCODE_unchanged:
           {
             Value v0 = this.eval(args[0], c, s0, TLCState.Empty, control);
-            if (EvalControl.isEnabled(control)) {
-              // We are now in primed and enabled.
-              control = EvalControl.setPrimed(control);
-            }
-            Value v1 = this.eval(args[0], c, s1, null, control);
+            Value v1 = this.eval(args[0], c, s1, null, EvalControl.setPrimedIfEnabled(control));
             return (v0.equals(v1)) ? ValTrue : ValFalse;
           }
         case OPCODE_aa:     // <A>_e
@@ -2094,11 +2137,7 @@ public class Tool
               return ValFalse;
             }
             Value v0 = this.eval(args[1], c, s0, TLCState.Empty, control);
-            if (EvalControl.isEnabled(control)) {
-              // We are now in primed and enabled.
-              control = EvalControl.setPrimed(control);
-            }
-            Value v1 = this.eval(args[1], c, s1, null, control);
+            Value v1 = this.eval(args[1], c, s1, null, EvalControl.setPrimedIfEnabled(control));
             return v0.equals(v1) ? ValFalse : ValTrue;
           }
         case OPCODE_sa:     // [A]_e
@@ -2112,11 +2151,7 @@ public class Tool
               return ValTrue;
             }
             Value v0 = this.eval(args[1], c, s0, TLCState.Empty, control);
-            if (EvalControl.isEnabled(control)) {
-              // We are now in primed and enabled.
-              control = EvalControl.setPrimed(control);
-            }
-            Value v1 = this.eval(args[1], c, s1, null, control);
+            Value v1 = this.eval(args[1], c, s1, null, EvalControl.setPrimedIfEnabled(control));
             return (v0.equals(v1)) ? ValTrue : ValFalse;
           }
         case OPCODE_cdot:
@@ -2311,25 +2346,27 @@ public class Tool
   private final TLCState enabled(ActionItemList acts, TLCState s0, TLCState s1) {
     if (acts.isEmpty()) return s1;
 
-    int kind = acts.carKind();
+    final int kind = acts.carKind();
     SemanticNode pred = acts.carPred();
     Context c = acts.carContext();
     ActionItemList acts1 = acts.cdr();
-    if (kind > 0) {
+    if (kind > ActionItemList.CONJUNCT) {
       TLCState res = this.enabled(pred, acts1, c, s0, s1);
       return res;
     }
-    else if (kind == -1) {
+    else if (kind == ActionItemList.PRED) {
       TLCState res = this.enabled(pred, acts1, c, s0, s1);
       return res;
     }
-    if (kind == -2) {
+    if (kind == ActionItemList.UNCHANGED) {
       TLCState res = this.enabledUnchanged(pred, acts1, c, s0, s1);
       return res;
     }
 
     Value v1 = this.eval(pred, c, s0, TLCState.Empty, EvalControl.Enabled);
-    // We are now in ENABLED and primed state.
+	// We are now in ENABLED and primed state. Second TLCState parameter being null
+	// effectively disables LazyValue in evalAppl (same effect as
+	// EvalControl.setPrimed(EvalControl.Enabled)).
     Value v2 = this.eval(pred, c, s1, null, EvalControl.Primed);
 
     if (v1.equals(v2)) return null;
@@ -2390,7 +2427,7 @@ public class Tool
           {
             if (val instanceof MethodValue)
             {
-              bval = ((MethodValue) val).apply(EmptyArgs, EvalControl.Clear);
+              bval = ((MethodValue) val).apply(EmptyArgs, EvalControl.Clear); // EvalControl.Clear is ignored by MethodValuea#apply
             }
           } else
           {
@@ -2426,7 +2463,7 @@ public class Tool
         switch (opcode) {
         case OPCODE_aa: // AngleAct <A>_e
           {
-            ActionItemList acts1 = acts.cons(args[1], c, -3);
+            ActionItemList acts1 = acts.cons(args[1], c, ActionItemList.CHANGED);
             return this.enabled(args[0], acts1, c, s0, s1);
           }
         case OPCODE_be: // BoundedExists
@@ -2456,7 +2493,7 @@ public class Tool
             Context c2;
             while ((c2 = Enum.nextElement()) != null)
             {
-              acts1 = acts1.cons(body, c2, -1);
+              acts1 = acts1.cons(body, c2, ActionItemList.PRED);
             }
             return this.enabled(body, acts1, c1, s0, s1);
           }
@@ -2514,13 +2551,13 @@ public class Tool
           }
         case OPCODE_fa: // FcnApply
           {
-            Value fval = this.eval(args[0], c, s0, s1, EvalControl.setKeepLazy(EvalControl.Enabled));
+            Value fval = this.eval(args[0], c, s0, s1, EvalControl.setKeepLazy(EvalControl.Enabled)); // KeepLazy does not interfere with EvalControl.Enabled in this.evalAppl
             if (fval instanceof FcnLambdaValue)
             {
               FcnLambdaValue fcn = (FcnLambdaValue) fval;
               if (fcn.fcnRcd == null)
               {
-                Context c1 = this.getFcnContext(fcn, args, c, s0, s1, EvalControl.Enabled);
+                Context c1 = this.getFcnContext(fcn, args, c, s0, s1, EvalControl.Enabled); // EvalControl.Enabled passed on to nested this.evalAppl
                 return this.enabled(fcn.body, acts, c1, s0, s1);
               }
               fval = fcn.fcnRcd;
@@ -2529,7 +2566,7 @@ public class Tool
             {
               Applicable fcn = (Applicable) fval;
               Value argVal = this.eval(args[1], c, s0, s1, EvalControl.Enabled);
-              Value bval = fcn.apply(argVal, EvalControl.Enabled);
+              Value bval = fcn.apply(argVal, EvalControl.Enabled); // EvalControl.Enabled not taken into account by any subclass of Applicable
               if (!(bval instanceof BoolValue))
               {
                 Assert.fail(EC.TLC_EXPECTED_EXPRESSION_IN_COMPUTING2, new String[] { "ENABLED", "boolean",
@@ -2756,7 +2793,7 @@ public class Tool
     try {
         SymbolNode var = this.getVar(expr, c, true);
         if (var != null) {
-          // a state variable:
+          // a state variable, e.g. UNCHANGED var1
           UniqueString varName = var.getName();
           Value v0 = this.eval(expr, c, s0, s1, EvalControl.Enabled);
           Value v1 = s1.lookup(varName);
@@ -2780,11 +2817,11 @@ public class Tool
           int opcode = BuiltInOPs.getOpCode(opName);
 
           if (opcode == OPCODE_tup) {
-            // a tuple:
+            // a tuple, e.g. UNCHANGED <<var1, var2>>
             if (alen != 0) {
               ActionItemList acts1 = acts;
               for (int i = 1; i < alen; i++) {
-                acts1 = acts1.cons(args[i], c, -2);
+                acts1 = acts1.cons(args[i], c, ActionItemList.UNCHANGED);
               }
               return this.enabledUnchanged(args[0], acts1, c, s0, s1);
             }
@@ -2810,8 +2847,35 @@ public class Tool
           }
         }
 
-        Value v0 = this.eval(expr, c, s0, TLCState.Empty, EvalControl.Enabled);
-        Value v1 = this.eval(expr, c, s1, TLCState.Empty, EvalControl.Primed);
+        final Value v0 = this.eval(expr, c, s0, TLCState.Empty, EvalControl.Enabled);
+        // We are in ENABLED and primed but why pass only primed? This appears to
+        // be the only place where we call eval from the ENABLED scope without
+        // additionally passing EvalControl.Enabled. Not passing Enabled allows a 
+        // cached LazyValue could be used (see comments above on line 1384).
+        // 
+        // The current scope is a nested UNCHANGED in an ENABLED and evaluation is set
+        // to primed. However, UNCHANGED e equals e' = e , so anything primed in e
+        // becomes double-primed in ENABLED UNCHANGED e. This makes it illegal TLA+
+        // which is rejected by SANY's level checking. A perfectly valid spec - where
+        // e is not primed - but that also causes this code path to be taken is 23 below:
+        // 
+        // -------- MODULE 23 ---------
+        // VARIABLE t
+        // op(var) == var
+        // Next == /\ (ENABLED (UNCHANGED op(t)))
+        //         /\ (t'= t)
+        // Spec == (t = 0) /\ [][Next]_t
+        // ============================
+        // 
+        // However, spec 23 causes the call to this.eval(...) below to throw an
+        // EvalException either with EvalControl.Primed. The exception's message is
+        // "In evaluation, the identifier t is either undefined or not an operator."
+        // indicating that this code path is buggy.
+        // 
+        // If this bug is ever fixed to make TLC accept spec 23, EvalControl.Primed
+        // should likely be rewritten to EvalControl.setPrimed(EvalControl.Enabled)
+        // to disable reusage of LazyValues on line ~1384 above.
+		final Value v1 = this.eval(expr, c, s1, TLCState.Empty, EvalControl.Primed);
         if (!v0.equals(v1)) {
           return null;
         }
@@ -2975,7 +3039,7 @@ public class Tool
 
   public final Context getFcnContext(FcnLambdaValue fcn, ExprOrOpArgNode[] args,
                                      Context c, TLCState s0, TLCState s1,
-                                     int control) {
+                                     final int control) {
     Context fcon = fcn.con;
     int plen = fcn.params.length();
     FormalParamNode[][] formals = fcn.params.formals;
@@ -3054,7 +3118,7 @@ public class Tool
 
   /* A context enumerator for an operator application. */
   public final ContextEnumerator contexts(OpApplNode appl, Context c, TLCState s0,
-                                          TLCState s1, int control) {
+                                          TLCState s1, final int control) {
     FormalParamNode[][] formals = appl.getBdedQuantSymbolLists();
     boolean[] isTuples = appl.isBdedQuantATuple();
     ExprNode[] domains = appl.getBdedQuantBounds();
