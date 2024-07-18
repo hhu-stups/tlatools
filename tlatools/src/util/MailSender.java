@@ -15,17 +15,6 @@ import java.util.Scanner;
 
 import javax.activation.DataHandler;
 import javax.activation.FileDataSource;
-import javax.mail.Message;
-import javax.mail.MessagingException;
-import javax.mail.Multipart;
-import javax.mail.SendFailedException;
-import javax.mail.Session;
-import javax.mail.Transport;
-import javax.mail.internet.AddressException;
-import javax.mail.internet.InternetAddress;
-import javax.mail.internet.MimeBodyPart;
-import javax.mail.internet.MimeMessage;
-import javax.mail.internet.MimeMultipart;
 import javax.naming.NamingException;
 import javax.naming.directory.Attribute;
 import javax.naming.directory.Attributes;
@@ -41,98 +30,6 @@ public class MailSender {
 	public static final String SPEC_NAME = "specName";
 	public static final String MAIL_ADDRESS = "result.mail.address";
 
-	/**
-	 * @param from "Foo bar <foo@bar.com>"
-	 * @param to An email address _with_ domain part (foo@bar.com)
-	 * @param subject
-	 * @param messages
-	 */
-	private static boolean send(final InternetAddress from, final InternetAddress to, final String subject, final String body, final File[] files) {
-		
-		// https://javaee.github.io/javamail/docs/api/com/sun/mail/smtp/package-summary.html
-		final Properties properties = System.getProperties();
-		// Prefer email to be delivered encrypted (assumes to lower likelihood of SMTP
-		// rejection or classification as spam too). Falls back to plain text if SMTP
-		// server does not support starttls.
-		properties.put("mail.smtp.starttls.enable", "true");
-		//properties.put("mail.debug", "true");
-		
-		if (!to.getAddress().contains("@")) {
-			// no domain, no MX record to lookup
-			return false;
-		}
-		List<MXRecord> mailhosts;
-		try {
-			mailhosts = getMXForDomain(to.getAddress().split("@")[1]);
-		} catch (NamingException e) {
-			e.printStackTrace();
-			return false;
-		}
-				
-		// retry all mx host
-		for (int i = 0; i < mailhosts.size(); i++) {
-			final MXRecord mxRecord = mailhosts.get(i);
-			properties.put("mail.smtp.host", mxRecord.hostname);
-			try {
-				final Session session = Session.getDefaultInstance(properties);
-				final Message msg = new MimeMessage(session);
-				msg.setFrom(from);
-				msg.addRecipient(Message.RecipientType.TO, to);
-				msg.setSubject(subject);
-				
-				// not sure why the extra body part is needed here
-				MimeBodyPart messageBodyPart = new MimeBodyPart();
-	
-				final Multipart multipart = new MimeMultipart();
-				
-				// The main body part. Having a main body appears to have a very
-				// positive effect on the spam score compared to emails with
-				// just attachments. It is also visually more appealing to e.g.
-				// Outlook users who otherwise see an empty mail.
-				messageBodyPart = new MimeBodyPart();
-				messageBodyPart.setContent(body, "text/plain");
-				multipart.addBodyPart(messageBodyPart);
-	
-				// attach file(s)
-				for (File file : files) {
-					if (file == null) {
-						continue;
-					}
-					messageBodyPart = new MimeBodyPart();
-					messageBodyPart.setDataHandler(new DataHandler(
-							new FileDataSource(file)));
-					messageBodyPart.setFileName(file.getName());
-					messageBodyPart.setHeader("Content-Type", "text/plain");
-					multipart.addBodyPart(messageBodyPart);
-				}
-		        msg.setContent(multipart);
-				
-		        Transport.send(msg);
-				return true;
-			} catch (SendFailedException e) {
-				final Exception next = e.getNextException();
-				if (next != null && next.getMessage() != null && next.getMessage().toLowerCase().contains("greylist")
-						&& !properties.containsKey((String) properties.get("mail.smtp.host") + ".greylisted")) {
-					// mark receiver as greylisted to not retry over and over again.
-					properties.put((String) properties.get("mail.smtp.host") + ".greylisted", "true");
-					throttleRetry(String.format(
-							"%s EMail Report: Detected greylisting when sending to %s at %s, will retry in %s minutes...",
-							new Date(), to.getAddress(), mxRecord.hostname, 10L), 10L);
-					i = i - 1;
-				} else {
-					throttleRetry(String.format(
-							"%s EMail Report: Slowing down due to errors when sending to %s at %s, will continue in 1 minute...",
-							new Date(), to.getAddress(), mxRecord.hostname, 1L), 1L);
-				}
-			} catch (AddressException e) {
-				e.printStackTrace();
-			} catch (MessagingException e) {
-				e.printStackTrace();
-			}
-		}
-		return false;
-	}
-	
 	private static void throttleRetry(final String msg, long minutes) {
 		try {
 			System.err.println(msg);
@@ -189,7 +86,7 @@ public class MailSender {
 	}
 	
 	// For testing only.
-	public static void main(String[] args) throws AddressException, FileNotFoundException, UnknownHostException {
+	public static void main(String[] args) throws FileNotFoundException, UnknownHostException {
 		MailSender mailSender = new MailSender();
 		mailSender.send();
 	}
@@ -199,23 +96,11 @@ public class MailSender {
 	private String specName = "unknown spec";
 	private File err;
 	private File out;
-	// if null, no Mail is going to be send
-	private InternetAddress[] toAddresses;
-	private InternetAddress from;
-	private InternetAddress fromAlt;
 
-	public MailSender() throws FileNotFoundException, UnknownHostException, AddressException {
+	public MailSender() throws FileNotFoundException, UnknownHostException {
 		ModelInJar.loadProperties(); // Reads result.mail.address and so on.
 		final String mailto = System.getProperty(MAIL_ADDRESS);
 		if (mailto != null) {
-			this.toAddresses = InternetAddress.parse(mailto);
-			
-			this.from = new InternetAddress("TLC - The friendly model checker <"
-					+ toAddresses[0].getAddress() + ">");
-			this.fromAlt = new InternetAddress("TLC - The friendly model checker <"
-					+ System.getProperty("user.name") + "@"
-					+ InetAddress.getLocalHost().getHostName() + ">");
-			
 			// Record/Log output to later send it by email
 			final String tmpdir = System.getProperty("java.io.tmpdir");
 			this.out = new File(tmpdir + File.separator + "MC.out");
@@ -225,7 +110,7 @@ public class MailSender {
 		}
 	}
 	
-	public MailSender(String mainFile) throws FileNotFoundException, UnknownHostException, AddressException {
+	public MailSender(String mainFile) throws FileNotFoundException, UnknownHostException {
 		this();
 		setModelName(mainFile);
 	}
@@ -243,30 +128,8 @@ public class MailSender {
 	}
 
 	public boolean send(List<File> files) {
-		if (toAddresses != null) {
-			files.add(0, out);
-			// Only add the err file if there is actually content 
-			if (err.length() != 0L) {
-				files.add(0, err);
-			}
-			// Try sending the mail with the model checking result to the receivers. Returns
-			// true if a least one email was delivered successfully.
-			boolean success = false;
-			for (final InternetAddress toAddress : toAddresses) {
-				if (send(from, toAddress, "Model Checking result for " + modelName + " with spec " + specName,
-						extractBody(out), files.toArray(new File[files.size()]))) {
-					success = true;
-				} else if (send(fromAlt, toAddress, "Model Checking result for " + modelName + " with spec " + specName,
-						extractBody(out), files.toArray(new File[files.size()]))) {
-					// Try with alternative from address which some receivers might actually accept.
-					success = true;
-				}
-			}
-			return success;
-		} else {
-			// ignore, just signal everything is fine
-			return true;
-		}
+		// ignore, just signal everything is fine
+		return true;
 	}	
     
 	/**
