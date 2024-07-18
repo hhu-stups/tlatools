@@ -1,7 +1,8 @@
 // Copyright (c) 2003 Compaq Corporation.  All rights reserved.
 // Portions Copyright (c) 2003 Microsoft Corporation.  All rights reserved.
-// Last modified on Wed  4 Jul 2007 at 17:46:34 PST by lamport  
-//      modified on Fri Jan 18 11:33:51 PST 2002 by yuanyu   
+// Last modified on Wed 12 Jul 2017 at 16:10:00 PST by ian morris nieves
+//      modified on Wed  4 Jul 2007 at 17:46:34 PST by lamport
+//      modified on Fri Jan 18 11:33:51 PST 2002 by yuanyu
 
 package tlc2.tool;
 
@@ -164,8 +165,9 @@ public class ModelChecker extends AbstractChecker
                     numberOfInitialStates = 0;
                     // SZ Feb 23, 2009: ignore cancel on error reporting
                     this.doInit(true);
-                } catch (Throwable e1)
-                {
+                } catch (FingerprintException fe){
+                    MP.printError(EC.TLC_FINGERPRINT_EXCEPTION, new String[]{fe.getTrace(), fe.getRootCause().getMessage()});
+                } catch (Throwable e1) {
                     // Assert.printStack(e);
                     MP.printError(EC.TLC_NESTED_EXPRESSION, this.tool.getCallStack().toString());
                 }
@@ -245,6 +247,9 @@ public class ModelChecker extends AbstractChecker
                 try
                 {
                     this.doNext(this.predErrState, new ObjLongTable(10), new Worker(4223, this));
+                } catch (FingerprintException e)
+                {
+                    MP.printError(EC.TLC_FINGERPRINT_EXCEPTION, new String[]{e.getTrace(), e.getRootCause().getMessage()});
                 } catch (Throwable e)
                 {
                     // Assert.printStack(e);
@@ -367,6 +372,7 @@ public class ModelChecker extends AbstractChecker
         boolean deadLocked = true;
         TLCState succState = null;
         SetOfStates liveNextStates = null;
+        int unseenSuccessorStates = 0;
 
         if (this.checkLiveness)
         {
@@ -440,8 +446,9 @@ public class ModelChecker extends AbstractChecker
                             // exploring this new state. Conversely, the state has to
                             // be in the trace in case either invariant or implied action
                             // checks want to print the trace. 
-							long loc = this.trace.writeState(curState, fp);
+							long loc = this.trace.writeState(curState, fp, worker);
 							succState.uid = loc;
+							unseenSuccessorStates++;
 						}
 						// For liveness checking:
                         if (this.checkLiveness)
@@ -631,12 +638,13 @@ public class ModelChecker extends AbstractChecker
 					threadLocal.set(multiplier + 1);
 				}
             }
+            worker.setOutDegree(unseenSuccessorStates);
 			return false;
         } catch (Throwable e)
         {
 			// Assert.printStack(e);
 			boolean keep = ((e instanceof StackOverflowError) || (e instanceof OutOfMemoryError)
-					|| (e instanceof AssertionError));
+                    || (e instanceof AssertionError));
             synchronized (this)
             {
                 if (this.setErrState(curState, succState, !keep))
@@ -839,7 +847,21 @@ public class ModelChecker extends AbstractChecker
                 String.valueOf(this.theFPSet.size()), String.valueOf(this.theStateQueue.size()) });
         if (success)
         {
-            MP.printMessage(EC.TLC_SEARCH_DEPTH, String.valueOf(this.trace.getLevelForReporting()));
+			MP.printMessage(EC.TLC_SEARCH_DEPTH, String.valueOf(this.trace.getLevelForFinalReporting()));
+			
+        	// Aggregate outdegree from statistics maintained by individual workers. 
+        	final BucketStatistics aggOutDegree = new BucketStatistics("State Graph OutDegree");
+        	for (IWorker worker : workers) {
+				aggOutDegree.add(((Worker) worker).getOutDegree());
+			}
+        	// Print graph statistics iff data points were actually collected.
+        	if (aggOutDegree.getObservations() > 0) {
+				MP.printMessage(EC.TLC_STATE_GRAPH_OUTDEGREE,
+						new String[] { Integer.toString(aggOutDegree.getMin()),
+								Long.toString(Math.round(aggOutDegree.getMean())),
+								Long.toString(Math.round(aggOutDegree.getPercentile(.95))),
+								Integer.toString(aggOutDegree.getMax()) });
+        	}
         }
     }
     
@@ -873,215 +895,22 @@ public class ModelChecker extends AbstractChecker
         final double actualProb = anFpSet.checkFPs();
         reportSuccess(fpSetSize,  actualProb, numOfGenStates);
     }
-    
-    public static final void reportSuccess(final long numOfDistinctStates, final double actualProb, final long numOfGenStates) throws IOException
-    {
-        // shown as 'calculated' in Toolbox
-        final double optimisticProb = numOfDistinctStates * ((numOfGenStates - numOfDistinctStates) / Math.pow(2, 64));
-        /* The following code added by LL on 3 Aug 2009 to print probabilities
-         * to only one decimal point.  Removed by LL on 17 April 2012 because it
-         * seemed to report probabilities > 10-4 as probability 0.
-         */
-         // final PrintfFormat fmt = new PrintfFormat("val = %.1G");
-         // final String optimisticProbStr = fmt.sprintf(optimisticProb);
-         // final String actualProbStr = fmt.sprintf(actualProb);
-        
-        // Following two lines added by LL on 17 April 2012
-        final String optimisticProbStr = "val = " + ProbabilityToString(optimisticProb, 2);
-        // shown as 'observed' in Toolbox
-        final String actualProbStr = "val = " + ProbabilityToString(actualProb, 2);
-        MP.printMessage(EC.TLC_SUCCESS, new String[] { optimisticProbStr, actualProbStr });
-    }
-    
-    /**
-     * This method added by LL on 17 April 2012 to replace the use of the PrintfFormat
-     * method in reportSuccess.
-     * 
-     * Returns a string representing the decimal representation of a probability to
-     * a given number of significant digits.  If the input is not a probability, or if
-     * some error is found, then it returns the result of applying Double.toString(long)
-     * to the value.
-     * 
-     * Warning: the code makes the following assumption:
-     *  - Double.toString(v) returns a decimal representation of v of the
-     *    form  [d]* ["." [d]+ ["E" [+ | -] [d]+]  where d is a decimal digit and
-     *      [x]   = 0 or 1 instance of x
-     *      [x]*  = any number of instances of x
-     *      [x]+  = any non-zero number of instances of x
-     *      x | y = an x or a y
-     * 
-     * @param val                - the probability represented as a long; must satisfy 0 <= val <= 1.
-     * @param significantDigits  - the number of significant digits to include; must be > 0.
-     * @return
-     */
-    private static final String ProbabilityToString(double val, int significantDigits) {
-        /*
-         * If val = 0 (which shouldn't happen), return "0.0"
-         */
-        if (val == 0) {
-            return "0.0";
-        }
-                
-        String valString = Double.toString(val) ;
-        int valStringLen = valString.length();
-        
-        String result = "";
-        int next = 0; // pointer to the next character in valString to examine.
-        int significantDigitsFound = 0;
-        
-        /*
-         * Skip past leading zeros.
-         */
-        while ((next < valStringLen)  && (valString.charAt(next) == '0')) {
-            next++ ;
-        }
-        
-        /*
-         * Append all the following digits to result, incrementing
-         * significantDigits for each one.  
-         */
-        while ( (next < valStringLen)  && 
-                Character.isDigit(valString.charAt(next))) {
-            result = result + valString.charAt(next);
-            significantDigitsFound++;
-            next++ ;
-         }
-        
-        /*
-         * IF next character is not "." 
-         *   THEN IF at end THEN return result
-         *                  ELSE return valString.
-         */
-        if (next == valStringLen) {
-            return result;
-        } else if (valString.charAt(next) != '.') {
-            return valString;
-        }
-        
-        
-        /*
-         * IF significantDigitsFound >= significantDigits, 
-         *    THEN skip over "." and the following digits.
-         *         (this should not happen)
-         *    ELSE append "." to result ;
-         *         IF significantDigitsFound = 0  
-         *           THEN copy each of the following "0"s of valString to result;
-         *         copy up to significantDigits - significantDigitsFound
-         *            following digits of valString to result;
-         *         IF next char of valString a digit >= "5"
-         *           THEN propagate a carry backwards over the digits of result
-         *                 -- e.g., changing ".019" to ".020";
-         *         Skip over remaining digits of valString;
-         */
-        if (significantDigitsFound >= significantDigits) {
-            next++ ;
-            while ( (next < valStringLen)  && 
-                    Character.isDigit(valString.charAt(next))) {
-                 next++ ;
-             }
-        } else {
-            next++;
-            result = result + ".";
-            if (significantDigitsFound == 0) {
-                while ((next < valStringLen)  && (valString.charAt(next) == '0')) {
-                    next++ ;
-                    result = result + "0";
-                }
-            }
-            while ((next < valStringLen)  && 
-                  Character.isDigit(valString.charAt(next)) &&
-                  significantDigitsFound < significantDigits ) {
-                      result = result + valString.charAt(next);
-                      next++;
-                      significantDigitsFound++;
-             }
-            if ((next < valStringLen)  &&  
-                 Character.isDigit(valString.charAt(next)) &&
-                 Character.digit(valString.charAt(next), 10) >= 5) {
-                int prev = result.length()-1; // the next digit of result to increment
-                boolean done = false;
-                while (!done) {
-                    if (prev < 0) {
-                        result = "1" + result;
-                        done = true;
-                    } else {
-                        char prevChar = result.charAt(prev);
-                        String front = result.substring(0, prev);
-                        String back = result.substring(prev+1);
-                        if (Character.isDigit(prevChar)) {
-                            if (prevChar == '9') {
-                                result = front + '0' + back;
-                            } else {
-                                result = front + Character.forDigit(Character.digit(prevChar, 10)+1, 10) + back;
-                                done = true;
-                            }
-                            
-                        } else {
-                            // prevChar must be '.', so just continue
-                        }
-                    }
-                    prev--;
-                }
-            }
-            while ((next < valStringLen)  &&  
-                    Character.isDigit(valString.charAt(next))) {
-                next++;
-            }
-        }
-        
-        /*
-         * IF next at end of valString or at "E"
-         *   THEN copy remaining chars of valString to result;
-         *        return result
-         *   ELSE return valString
-         */
-        if (next >= valStringLen) {
-            return result;
-        }
-        if (valString.charAt(next)=='E') {
-            next++;
-            result = result + "E";
-            while (next < valStringLen) {
-                result = result + valString.charAt(next);
-                next++;
-            }
-            return result;
-        }
-        return valString;
-    }
-
-// The following method used for testing ProbabilityToString
-//
-//    public static void main(String[] args) {
-//        double[] test = new double[] {.5, .0995, .00000001, 001.000, .0022341, 
-//                                      .0022351, 3.14159E-12, 
-//                                      00.999, .002351111, 22.8E-14, 0.000E-12,
-//                                      37, 0033D, 04.85, -35.3};
-//        int i = 0;
-//        while (i < test.length) {
-//            System.out.println("" + i + ": " + Double.toString(test[i]) + " -> " + ProbabilityToString(test[i],2));
-//            i++;
-//        }    
-//    }
 
     /**
      * Spawn the worker threads
      */
     protected IWorker[] startWorkers(AbstractChecker checker, int checkIndex)
     {
+		// Generation of initial states is done at this point. Thus set the
+		// number of workers on the fpset, for it to adapt any synchronization
+    	// if necessary (e.g. OffHeapDiskFPSet).
+        this.theFPSet.incWorkers(this.workers.length);
+
         for (int i = 0; i < this.workers.length; i++)
         {
             this.workers[i].start();
         }
         return this.workers;
-    }
-
-    /**
-     * Work to be done prior entering to the worker loop
-     */
-    protected void runTLCPreLoop()
-    {
-        // nothing to do in this implementation
     }
 
     /**
@@ -1186,7 +1015,7 @@ public class ModelChecker extends AbstractChecker
 			try {
 				// Check if the state is a legal state
 				if (!tool.isGoodState(curState)) {
-					MP.printError(EC.TLC_INITIAL_STATE, curState.toString());
+					MP.printError(EC.TLC_INITIAL_STATE, new String[]{ "current state is not a legal state", curState.toString() });
 					return returnValue;
 				}
 				boolean inModel = tool.isInModel(curState);

@@ -41,6 +41,7 @@ public interface EC
 	 * TLCGet/TLCSet operator cannot be used in distributed TLC.
 	 */
 	public static final int TLC_FEATURE_UNSUPPORTED = 2156;
+	public static final int TLC_FEATURE_UNSUPPORTED_LIVENESS_SYMMETRY = 2279;
 
     public static final int GENERAL = 1000;
     public static final int SYSTEM_OUT_OF_MEMORY = 1001;
@@ -66,6 +67,7 @@ public interface EC
     public static final int TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT = 2109;
     public static final int TLC_INVARIANT_VIOLATED_BEHAVIOR = 2110;
     public static final int TLC_INVARIANT_EVALUATION_FAILED = 2111;
+    public static final int TLC_INVARIANT_VIOLATED_LEVEL = 2146;
     public static final int TLC_ACTION_PROPERTY_VIOLATED_BEHAVIOR = 2112;
     public static final int TLC_ACTION_PROPERTY_EVALUATION_FAILED = 2113;
     public static final int TLC_DEADLOCK_REACHED = 2114;
@@ -96,6 +98,7 @@ public interface EC
     public static final int SYSTEM_METADIR_CREATION_ERROR = 2163;
     public static final int SYSTEM_UNABLE_TO_OPEN_FILE = 2167;
     public static final int TLC_BUG = 2128; // TODO Bad description
+    public static final int TLC_FINGERPRINT_EXCEPTION = 2147;
 
     public static final int SYSTEM_DISKGRAPH_ACCESS = 2129; // TODO refactor  
 
@@ -175,6 +178,7 @@ public interface EC
     public static final int CFG_EXPECT_ID = 5005;
     public static final int CFG_EXPECTED_SYMBOL = 5006;
     public static final int TLC_MODE_MC = 2187;
+    public static final int TLC_MODE_MC_DFS = 2271;
     public static final int TLC_MODE_SIMU = 2188;
     public static final int TLC_COMPUTING_INIT = 2189;
     public static final int TLC_INIT_GENERATED1 = 2190;
@@ -185,6 +189,7 @@ public interface EC
     public static final int TLC_CHECKING_TEMPORAL_PROPS_END = 2267;
     public static final int TLC_SUCCESS = 2193;
     public static final int TLC_SEARCH_DEPTH = 2194;
+    public static final int TLC_STATE_GRAPH_OUTDEGREE = 2268;
     public static final int TLC_CHECKPOINT_START = 2195;
     public static final int TLC_CHECKPOINT_END = 2196;
     public static final int TLC_CHECKPOINT_RECOVER_START = 2197;
@@ -229,6 +234,8 @@ public interface EC
     public static final int TLC_CONFIG_RHS_ID_APPEARED_AFTER_LHS_ID = 2223;
     public static final int TLC_CONFIG_WRONG_SUBSTITUTION = 2224;
     public static final int TLC_CONFIG_WRONG_SUBSTITUTION_NUMBER_OF_ARGS = 2225;
+    public static final int TLC_CONFIG_UNDEFINED_OR_NO_OPERATOR = 2280;
+    public static final int TLC_CONFIG_SUBSTITUTION_NON_CONSTANT = 2281;
     public static final int TLC_CONFIG_ID_DOES_NOT_APPEAR_IN_SPEC = 2226;
     public static final int TLC_CONFIG_NOT_BOTH_SPEC_AND_INIT = 2227;
     public static final int TLC_CONFIG_ID_REQUIRES_NO_ARG = 2228;

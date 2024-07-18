@@ -1,5 +1,6 @@
 package org.lamport.tla.toolbox.tool.tlc.ui.view;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -97,7 +98,8 @@ import tlc2.output.MP;
  */
 public class TLCErrorView extends ViewPart
 {
-	
+	private static final SimpleDateFormat sdf = new SimpleDateFormat("MMM dd,yyyy HH:mm:ss");
+
 	private static final String INNER_WEIGHTS_KEY = "INNER_WEIGHTS_KEY";
 	private static final String OUTER_WEIGHTS_KEY = "OUTER_WEIGHTS_KEY";
 
@@ -162,7 +164,7 @@ public class TLCErrorView extends ViewPart
      * @param problems
      *            a list of {@link TLCError} objects representing the errors.
      */
-    protected void fill(String modelName, List<TLCError> problems, final List<String> serializedInput)
+    protected void fill(Model model, List<TLCError> problems, final List<String> serializedInput)
     {
         /*
 		 * Fill the trace explorer expression table with expressions saved in
@@ -225,7 +227,12 @@ public class TLCErrorView extends ViewPart
                 this.setTraceInput(trace);
                 traceExplorerComposite.changeExploreEnablement(true);
             }
-            this.form.setText(modelName);
+            if (model.isSnapshot()) {
+            	final String date = sdf.format(model.getSnapshotTimeStamp());
+            	this.form.setText(model.getSnapshotFor().getName() + " (" + date + ")");
+            } else {
+            	this.form.setText(model.getName());
+            }
 
         } else
         {
@@ -664,7 +671,6 @@ public class TLCErrorView extends ViewPart
      *            a list of {@link TLCError}
      */
     public static void updateErrorView(Model model) {
-    	System.out.println(model);
     	updateErrorView(model, true);
     }
 
@@ -706,7 +712,7 @@ public class TLCErrorView extends ViewPart
 
             final List<String> serializedInput = model.getTraceExplorerExpressions();
             // fill the name and the errors
-			errorView.fill(provider.getModel().getName(), provider.getErrors(),
+			errorView.fill(provider.getModel(), provider.getErrors(),
 					serializedInput);
 
 			if (provider.getErrors().size() == 0) {
@@ -1169,13 +1175,16 @@ public class TLCErrorView extends ViewPart
 						return TLCUIActivator.getDefault().getChangedColor();
 					}
 				} else if (value.isAdded()) {
+					// Added takes precedence over deleted. E.g. a value can be
+					// added to a set in this state and be removed in the next
+					// state.
 					return TLCUIActivator.getDefault().getAddedColor();
 				} else if (value.isDeleted()) {
 					return TLCUIActivator.getDefault().getDeletedColor();
 				}
 			} else if (coloring && element instanceof TLCState) {
 				// Assign a color to each location to make actions in the error
-				// viewer easier distinguishable.
+				// viewer more easily distinguishable.
 				final TLCState state = (TLCState) element;
 				Location moduleLocation = state.getModuleLocation();
 				if (moduleLocation == null) {
@@ -1328,5 +1337,9 @@ public class TLCErrorView extends ViewPart
 
 	public void setOriginalTraceShown(boolean b) {
 		this.model.setOriginalTraceShown(b);
+	}
+	
+	TreeViewer getViewer() {
+		return variableViewer;
 	}
 }

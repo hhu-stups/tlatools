@@ -66,6 +66,8 @@ public class AdvancedModelPage extends BasicFormPage implements IConfigurationCo
     private Button dfidOption;
     private Button mcOption;
     private Button simulationOption;
+    private Button deferLiveness;
+    private Button visualizeStateGraph;
     private Text dfidDepthText;
     private Text simuDepthText;
     private Text simuSeedText;
@@ -174,6 +176,9 @@ public class AdvancedModelPage extends BasicFormPage implements IConfigurationCo
             simuSeedText.setText("");
         }
         
+        // Defer Liveness
+        deferLiveness.setSelection(getModel().getAttribute(LAUNCH_DEFER_LIVENESS, LAUNCH_DEFER_LIVENESS_DEFAULT));
+        
         // fp index
         final int fpIndex = getModel().getAttribute(LAUNCH_FP_INDEX, LAUNCH_FP_INDEX_DEFAULT);
        	fpIndexSpinner.setSelection(fpIndex);
@@ -187,6 +192,9 @@ public class AdvancedModelPage extends BasicFormPage implements IConfigurationCo
         int defaultMaxSetSize = TLCUIActivator.getDefault().getPreferenceStore().getInt(
                 ITLCPreferenceConstants.I_TLC_MAXSETSIZE_DEFAULT);
         maxSetSize.setSelection(getModel().getAttribute(LAUNCH_MAXSETSIZE, defaultMaxSetSize));
+        
+        // visualize state graph
+        visualizeStateGraph.setSelection(getModel().getAttribute(LAUNCH_VISUALIZE_STATEGRAPH, LAUNCH_VISUALIZE_STATEGRAPH_DEFAULT));
         
         // Extra JVM arguments and system properties
         final String vmArgs = getModel().getAttribute(LAUNCH_JVM_ARGS, LAUNCH_JVM_ARGS_DEFAULT);
@@ -234,6 +242,9 @@ public class AdvancedModelPage extends BasicFormPage implements IConfigurationCo
         // simulation seed
         getModel().setAttribute(LAUNCH_SIMU_ARIL, simuAril);
 
+        // Defer Liveness
+        getModel().setAttribute(LAUNCH_DEFER_LIVENESS, deferLiveness.getSelection());
+        
         // FP Seed index
         getModel().setAttribute(LAUNCH_FP_INDEX, fpIndexSpinner.getSelection());
 
@@ -242,6 +253,9 @@ public class AdvancedModelPage extends BasicFormPage implements IConfigurationCo
 
         // fpBits
         getModel().setAttribute(LAUNCH_MAXSETSIZE, maxSetSize.getSelection());
+
+        // Visualize State Graph
+        getModel().setAttribute(LAUNCH_VISUALIZE_STATEGRAPH, visualizeStateGraph.getSelection());
         
         // definitions
         List<String> definitions = FormHelper.getSerializedInput(definitionsTable);
@@ -768,9 +782,11 @@ public class AdvancedModelPage extends BasicFormPage implements IConfigurationCo
         maxSetSize.addModifyListener(launchListener);
         dfidDepthText.addModifyListener(launchListener);
         simulationOption.addSelectionListener(launchListener);
+        deferLiveness.addSelectionListener(launchListener);
         dfidOption.addSelectionListener(launchListener);
         mcOption.addSelectionListener(launchListener);
         viewSource.addTextListener(launchListener);
+        visualizeStateGraph.addSelectionListener(launchListener);
         extraTLCParametersText.addModifyListener(launchListener);
         extraVMArgumentsText.addModifyListener(launchListener);
 
@@ -909,7 +925,25 @@ public class AdvancedModelPage extends BasicFormPage implements IConfigurationCo
         toolkit.createSeparator(area, SWT.HORIZONTAL);
         // add empty composite to make the two column grid layout happy
         toolkit.createComposite(area);
-        
+
+        // label deferred liveness checking
+		final String deferLivenessHelp = "Defer verification of temporal properties (liveness) to the end of model checking"
+				+ " to reduce overall model checking time. Liveness violations will be found late compared to invariant "
+				+ "violations. In other words check liveness only once on the complete state space.";
+        Label deferLivenessLabel = toolkit.createLabel(area, "Verify temporal properties upon termination only:");
+        gd = new GridData();
+        gd.horizontalIndent = 0;
+        deferLivenessLabel.setLayoutData(gd);
+		deferLivenessLabel.setToolTipText(deferLivenessHelp);
+
+        deferLiveness = toolkit.createButton(area, "", SWT.CHECK);
+        gd = new GridData();
+        gd.widthHint = 200;
+        gd.verticalIndent = 20;
+        gd.horizontalIndent = 0;
+        deferLiveness.addFocusListener(focusListener);
+        deferLiveness.setToolTipText(deferLivenessHelp);
+       
         // label fp
         Label fpLabel = toolkit.createLabel(area, "Fingerprint seed index:");
         gd = new GridData();
@@ -977,6 +1011,23 @@ public class AdvancedModelPage extends BasicFormPage implements IConfigurationCo
         int defaultMaxSetSize = TLCUIActivator.getDefault().getPreferenceStore().getInt(
         		ITLCPreferenceConstants.I_TLC_MAXSETSIZE_DEFAULT);
         maxSetSize.setSelection(defaultMaxSetSize);
+        
+        // Visualize State Graph with GraphViz (dot)
+		final String visualizeStateGraphHelp = "Draw the state graph after completion of model checking provided the "
+				+ "state graph is sufficiently small (cannot handle more than a few dozen states and slows down model checking).";
+        Label visualizeStateGraphLabel = toolkit.createLabel(area, "Visualize state graph after completion of model checking:");
+        gd = new GridData();
+        gd.horizontalIndent = 0;
+        visualizeStateGraphLabel.setLayoutData(gd);
+        visualizeStateGraphLabel.setToolTipText(visualizeStateGraphHelp);
+
+        visualizeStateGraph = toolkit.createButton(area, "", SWT.CHECK);
+        gd = new GridData();
+        gd.widthHint = 200;
+        gd.verticalIndent = 20;
+        gd.horizontalIndent = 0;
+        visualizeStateGraph.addFocusListener(focusListener);
+        visualizeStateGraph.setToolTipText(visualizeStateGraphHelp);
     
 		// Extra/Additional VM arguments and system properties
         toolkit.createLabel(area, "JVM arguments:");

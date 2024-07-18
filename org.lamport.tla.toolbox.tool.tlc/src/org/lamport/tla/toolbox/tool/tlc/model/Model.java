@@ -26,15 +26,23 @@
 
 package org.lamport.tla.toolbox.tool.tlc.model;
 
+import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Vector;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.filefilter.DirectoryFileFilter;
+import org.apache.commons.io.filefilter.NotFileFilter;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IFolder;
 import org.eclipse.core.resources.IMarker;
@@ -46,8 +54,11 @@ import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.Assert;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IAdaptable;
+import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Platform;
+import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.SubProgressMonitor;
 import org.eclipse.core.runtime.jobs.ISchedulingRule;
 import org.eclipse.debug.core.DebugPlugin;
@@ -67,6 +78,8 @@ import org.lamport.tla.toolbox.tool.tlc.TLCActivator;
 import org.lamport.tla.toolbox.tool.tlc.launch.IConfigurationConstants;
 import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationConstants;
 import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationDefaults;
+import org.lamport.tla.toolbox.tool.tlc.model.Model.StateChangeListener.ChangeEvent;
+import org.lamport.tla.toolbox.tool.tlc.model.Model.StateChangeListener.ChangeEvent.State;
 import org.lamport.tla.toolbox.tool.tlc.traceexplorer.SimpleTLCState;
 import org.lamport.tla.toolbox.tool.tlc.util.ModelHelper;
 import org.lamport.tla.toolbox.util.ResourceHelper;
@@ -77,8 +90,7 @@ import tlc2.output.MP;
  * This class represents a Toolbox Model that can be executed by TLC.
  */
 public class Model implements IModelConfigurationConstants, IAdaptable {
-
-    /**
+	/**
      * Marker indicating an error in the model
      */
 	private static final String TLC_MODEL_ERROR_MARKER = "org.lamport.tla.toolbox.tlc.modelErrorMarker";
@@ -90,15 +102,11 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
     /**
      * marker on .launch file with boolean attribute modelIsRunning 
      */
-	public static final String TLC_MODEL_IN_USE_MARKER = "org.lamport.tla.toolbox.tlc.modelMarker";
+	private static final String TLC_MODEL_IN_USE_MARKER = "org.lamport.tla.toolbox.tlc.modelMarker";
     /**
      * marker on .launch file, binary semantics
      */
     private static final String TLC_CRASHED_MARKER = "org.lamport.tla.toolbox.tlc.crashedModelMarker";
-    /**
-     * model is being run
-     */
-    private static final String MODEL_IS_RUNNING = "modelIsRunning";
     /**
      * model is locked by a user lock
      */
@@ -130,7 +138,57 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	public static Model getByName(final String modelName) {
 		return TLCModelFactory.getByName(modelName);
 	}
+	       
+	/**
+	 * A {@link StateChangeListener} is notified when the running state of the model
+	 * changes. There is no guarantee as to which thread is being used to send the
+	 * notification. A {@link StateChangeListener} has subscribe and unsubscribe
+	 * via {@link Model#add(StateChangeListener)} and {@link Model#remove(StateChangeListener)}.
+	 */
+	public static class StateChangeListener {
 
+		public static class ChangeEvent {
+
+			public enum State {
+				RUNNING, NOT_RUNNING, DELETED;
+				
+				public boolean in(State ... states) {
+					for (State state : states) {
+						if (state == this) {
+							return true;
+						}
+					}
+					return false;
+				}
+			}
+
+			private final State state;
+			private final Model model;
+
+			private ChangeEvent(Model model, State state) {
+				this.model = model;
+				this.state = state;
+			}
+
+			public State getState() {
+				return state;
+			}
+
+			public Model getModel() {
+				return model;
+			}
+		}
+
+		/**
+		 * @return true iff the listener should be unsubscribed from receiving future
+		 *         events after it handled the event.
+		 */
+		public boolean handleChange(ChangeEvent event) {
+			return false;
+		}
+	}
+
+	private final Set<StateChangeListener> listeners = new CopyOnWriteArraySet<StateChangeListener>();
 	private TLCSpec spec;
 	private ILaunchConfiguration launchConfig;
 
@@ -164,6 +222,23 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		this.launchConfig = launchConfig;
 	}
 	
+	public boolean add(StateChangeListener stateChangeListener) {
+		return this.listeners.add(stateChangeListener);
+	}
+
+	public boolean remove(StateChangeListener stateChangeListener) {
+		return this.listeners.remove(stateChangeListener);
+	}
+
+	private void notifyListener(final StateChangeListener.ChangeEvent event) {
+		for (StateChangeListener scl : listeners) {
+			if (scl.handleChange(event)) {
+				// Listener wants to be deregistered as a listener.
+				listeners.remove(scl);
+			}
+		}
+	}
+		       
 	public TLCSpec getSpec() {
 		if (this.spec == null) {
 			final String launchName = this.launchConfig.getName();
@@ -191,7 +266,13 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	}
 
 	public void rename(String newModelName) {
+		final Collection<Model> snapshots = getSnapshots();
+		
 		renameLaunch(getSpec(), sanitizeName(newModelName));
+		
+		for (Model snapshot : snapshots) {
+			snapshot.rename(newModelName + snapshot.getSnapshotSuffix());
+		}
 	}
 	
 	/**
@@ -199,10 +280,16 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	 * @param newSpecName
 	 */
 	void specRename(final Spec newSpec) {
+		final Collection<Model> snapshots = getSnapshots();
+
 		renameLaunch(newSpec, getName());
 		// The spec's name has changed. Force a re-lookup of the instance with
 		// the updated name.
 		this.spec = null;
+		
+		for (Model snapshot : snapshots) {
+			snapshot.specRename(newSpec);;
+		}
 	}
 
 	private void renameLaunch(final Spec newSpec, String newModelName) {
@@ -261,7 +348,6 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	}
 
 	public boolean isRunning() {
-		final boolean marker = isMarkerSet(TLC_MODEL_IN_USE_MARKER, MODEL_IS_RUNNING);
 		final ILaunchManager launchManager = DebugPlugin.getDefault().getLaunchManager();
 		final ILaunch[] launches = launchManager.getLaunches();
 		for (int i = 0; i < launches.length; i++) {
@@ -269,31 +355,20 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 			if (launch.getLaunchConfiguration() != null
 					&& launch.getLaunchConfiguration().contentsEqual(this.launchConfig)) {
 				if (!launch.isTerminated()) {
-					if (marker != true) {
-						TLCActivator.logInfo("Model state out-of-sync. Close and reopen spec to sync.");
-					}
 					return true;
 				}
 			}
-		}
-		if (marker != false) {
-			TLCActivator.logInfo("Model state out-of-sync. Close and reopen spec to sync.");
 		}
 		return false;
 	}
 	
 	public void setRunning(boolean isRunning) {
 		if (isRunning) {
-			// Clear the stale/crashed marker. After all, the model is obviously
+			// Clear the crashed marker. After all, the model is obviously
 			// running now.
 			recover();
 		}
-		
-		// There marker is set regardless of the actual isRunning() state
-		// returned by the ILaunchManager above. This is, because the marker
-		// mechanism is used to send "events" to the Toolbox's UI to update the
-		// model editor.
-		setMarker(TLC_MODEL_IN_USE_MARKER, MODEL_IS_RUNNING, isRunning);
+		notifyListener(new StateChangeListener.ChangeEvent(this, isRunning ? State.RUNNING : State.NOT_RUNNING));
 	}
 
 	public boolean isLocked() {
@@ -334,7 +409,116 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		}
 	}
 
-    /**
+	/*
+	 * Snapshot related methods.
+	 */
+
+    private static final String SNAP_SHOT = "_SnapShot_";
+	static final String SNAPSHOT_REGEXP = SNAP_SHOT + "[0-9]*$";
+	
+	private String getSnapshotSuffix() {
+		if (isSnapshot()) {
+			final int idx = getName().lastIndexOf(SNAP_SHOT);
+			return getName().substring(idx, getName().length());
+		}
+		return "";
+	}
+	
+	public long getSnapshotTimeStamp() {
+		final int idx = getName().lastIndexOf(SNAP_SHOT) + 10;
+		return Long.valueOf(getName().substring(idx, getName().length()));
+	}
+	
+	public Collection<Model> getSnapshots() {
+		return getSpec().getModels(getName() + SNAPSHOT_REGEXP, true).values();
+	}
+
+	public boolean isSnapshot() {
+		return getName().matches(".*" + SNAPSHOT_REGEXP);
+	}
+
+	public boolean hasSnapshots() {
+		return !getSpec().getModels(getName() + SNAPSHOT_REGEXP, true).isEmpty();
+	}
+
+	public Model getSnapshotFor() {
+		return getSpec().getModel(getName().replaceFirst(SNAPSHOT_REGEXP, ""));
+	}
+
+	public Model snapshot() throws CoreException {
+		// Create a copy of the underlying launch configuration.
+		final Model snapshot = copy(getName() + SNAP_SHOT + System.currentTimeMillis());
+
+		// Snapshot the model's markers as well (e.g. the information about errors, see hasErrors()).
+    	final IMarker[] markers = getMarkers();
+    	for (IMarker iMarker : markers) {
+    		snapshot.setMarker(iMarker.getAttributes(), iMarker.getType());
+		}
+		
+    	// Set the snapshot to be locked? Do we want the user to be able to run it again?
+//    	snapshot.setLocked(true);
+
+		/*
+		 * Snapshot (copy) the model folder which include the TLC output as well as the version
+		 * of the spec and module overwrites with which TLC ran.
+		 */
+		final IPath snapshotPath = getSpec().getProject().getFolder(snapshot.getName()).getLocation();
+		final IPath modelFolder = getSpec().getProject().getFolder(this.getName()).getLocation();
+		// Use non-Eclipse API instead of modelFolder.copy(snapshotFolder, false,
+		// monitor which supports a non-recursive copy. A recursive copy includes the
+		// states/ directory leftover from TLC which waste quite some space and might
+		// take some time to copy.
+		try {
+			FileUtils.copyDirectory(modelFolder.toFile(), snapshotPath.toFile(),
+					new NotFileFilter(DirectoryFileFilter.DIRECTORY));
+			                       
+			// Rename .dot file name because hasStateGraphDump checks if a .dot file exists
+			// that matches the name of the model.
+			if (hasStateGraphDump()) {
+				final IPath oldDotFile = getSpec().getProject()
+						.getFolder(snapshot.getName() + File.separator + this.getName() + ".dot").getLocation();
+				final IPath newDotFile = getSpec().getProject()
+						.getFolder(snapshot.getName() + File.separator + snapshot.getName() + ".dot").getLocation();
+				FileUtils.moveFile(oldDotFile.toFile(), newDotFile.toFile());
+			}
+			// Refresh the snapshot folder after having copied files without using the
+			// Eclipse resource API. Otherwise, the resource API does not see the files
+			// which e.g. results in an incomplete model deletion or hasStateGraphDump
+			// incorrectly returning false.
+			snapshot.getFolder().refreshLocal(IResource.DEPTH_INFINITE, new NullProgressMonitor());
+		} catch (IOException e) {
+			throw new CoreException(new Status(Status.ERROR, TLCActivator.PLUGIN_ID, e.getMessage(), e));
+		}
+        
+		return snapshot;
+	}
+
+	/*
+	 * End of snapshot related methods.
+	 */
+	
+	/*
+	 * State Graph dump in dot file format (GraphViz).
+	 */
+
+	private static final String DOT_FILE_EXT = ".dot";
+	
+	public boolean hasStateGraphDump() {
+		final String name = getName().concat(DOT_FILE_EXT);
+		final IFile file = getFolder().getFile(name);
+		return file.exists();
+	}
+
+	public IFile getStateGraphDump() {
+		final String name = getName().concat(DOT_FILE_EXT);
+		return getFolder().getFile(name);
+	}
+
+	/*
+	 * End of state graph dump related methods.
+	 */	
+
+	/**
      * Returns whether the original trace or the trace with trace explorer expressions from the
      * most recent run of the trace explorer for the model should be shown in the TLC error view.
      * 
@@ -362,6 +546,10 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
      */
 	public void setOriginalTraceShown(boolean isOriginalTraceShown) {
 		setMarker(TRACE_EXPLORER_MARKER, IS_ORIGINAL_TRACE_SHOWN, isOriginalTraceShown);
+	}
+
+	public boolean hasError() {
+		return getMarkers().length > 0;
 	}
 
 	private boolean isMarkerSet(String markerType, final String attributeName) {
@@ -484,6 +672,7 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	}
 
 	public void delete(IProgressMonitor monitor) throws CoreException {
+		notifyListener(new ChangeEvent(this, State.DELETED));
 		
 		final IResource[] members;
 
@@ -550,6 +739,17 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		return getFile(ModelHelper.FILE_TLA);
 	}
 
+	/**
+	 * Retrieves the TE file that is being used by the trace explorer.
+	 * 
+	 * @param config
+	 *            configuration representing the model
+	 * @return a file handle or <code>null</code>
+	 */
+	public IFile getTEFile() {
+		return getFile(ModelHelper.TE_FILE_TLA);
+	}
+
 	public IFile getOutputLogFile() {
 		return getOutputLogFile(false);
 	}
@@ -572,7 +772,7 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	}
 
     /**
-     * Retrives the TLA file used by the trace explorer
+     * Retrieves the TLA file used by the trace explorer
      * @return a file handle or <code>null</code>
      */
 	public IFile getTraceExplorerTLAFile() {

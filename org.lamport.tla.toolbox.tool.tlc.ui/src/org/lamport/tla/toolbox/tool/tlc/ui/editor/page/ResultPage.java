@@ -109,6 +109,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
     // method.
     private long startTime = 0;
     private Text finishTimestampText;
+    private Text tlcModeText;
     private Text lastCheckpointTimeText;
     private Text coverageTimestampText;
     private Text currentStatusText;
@@ -135,6 +136,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
     };
 
 	private IMarker incompleteStateExploration;
+	private IMarker zeroCoverage;
 
     /**
      * Constructor for the page
@@ -205,6 +207,8 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
 	                    ResultPage.this.finishTimestampText.setToolTipText(sdf.format(new Date(elapsedTime)));
 	                    ResultPage.this.startTimestampText.setToolTipText(sdf.format(new Date(elapsedTime)));
 	                    break;
+	                case TLC_MODE:
+	                	ResultPage.this.tlcModeText.setText(dataProvider.getTLCMode());
 	                case LAST_CHECKPOINT_TIME:
 	                    long lastCheckpointTimeStamp = dataProvider.getLastCheckpointTimeStamp();
 	                    if(lastCheckpointTimeStamp > 0) {
@@ -223,7 +227,26 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
 	                    ResultPage.this.coverageTimestampText.setText(dataProvider.getCoverageTimestamp());
 	                    break;
 	                case COVERAGE:
-	                    ResultPage.this.coverage.setInput(dataProvider.getCoverageInfo());
+	                	final List<CoverageInformationItem> coverageInfo = dataProvider.getCoverageInfo();
+	                	ResultPage.this.coverage.setInput(coverageInfo);
+						if (dataProvider.isDone() && coverageInfo.size() > 0) {
+							if (dataProvider.hasZeroCoverage()) {
+								if (zeroCoverage == null) {
+									final Hashtable<String, Object> marker = ModelHelper.createMarkerDescription(
+											"Coverage is zero for one or more modules.", IMarker.SEVERITY_WARNING);
+									marker.put(ModelHelper.TLC_MODEL_ERROR_MARKER_ATTRIBUTE_PAGE, 2);
+									zeroCoverage = getModel().setMarker(marker, ModelHelper.TLC_MODEL_ERROR_MARKER_TLC);
+								}
+							} else if (zeroCoverage != null) {
+								try {
+									zeroCoverage.delete();
+									ResultPage.this.resetMessage(RESULT_PAGE_PROBLEM);
+									zeroCoverage = null;
+								} catch (CoreException e) {
+									TLCUIActivator.getDefault().logError(e.getMessage(), e);
+								}
+							}
+						}
 	                    break;
 	                case PROGRESS:
 	                    ResultPage.this.stateSpace.setInput(dataProvider.getProgressInformation());
@@ -357,6 +380,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
     		this.startTimestampText.setText("");
     		this.startTime = 0;
     		this.finishTimestampText.setText("");
+    		this.tlcModeText.setText("");
     		this.lastCheckpointTimeText.setText("");
     		this.currentStatusText.setText(TLCModelLaunchDataProvider.NOT_RUNNING);
     		this.errorStatusHyperLink.setText(TLCModelLaunchDataProvider.NO_ERRORS);
@@ -391,6 +415,11 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
 			if (incompleteStateExploration != null) {
 				incompleteStateExploration.delete();
 				incompleteStateExploration = null;
+			}
+			
+			if (zeroCoverage != null) {
+				zeroCoverage.delete();
+				zeroCoverage = null;
 			}
 
 			JFaceResources.getFontRegistry().removeListener(fontChangeListener);
@@ -461,7 +490,10 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
         // elapsed time
         this.finishTimestampText = FormHelper.createTextLeft("End time:", statusComposite, toolkit);
         this.finishTimestampText.setEditable(false);
-        // last checkpoint time
+        // elapsed time
+        this.tlcModeText = FormHelper.createTextLeft("TLC mode:", statusComposite, toolkit);
+        this.tlcModeText.setEditable(false);
+       // last checkpoint time
         this.lastCheckpointTimeText = FormHelper.createTextLeft("Last checkpoint time:", statusComposite, toolkit);
         this.lastCheckpointTimeText.setEditable(false);
         // current status
@@ -966,7 +998,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
     /**
      * Provides labels for the coverage table 
      */
-    static class CoverageLabelProvider extends LabelProvider implements ITableLabelProvider
+    static class CoverageLabelProvider extends LabelProvider implements ITableLabelProvider, ITableColorProvider
     {
         public final static String[] columnTitles = new String[] { "Module", "Location", "Count" };
         public final static int[] columnWidths = { 80, 200, 80 };
@@ -1018,6 +1050,17 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
             return null;
         }
 
+		public Color getForeground(Object element, int columnIndex) {
+			return null; // Use default color
+		}
+
+		public Color getBackground(Object element, int columnIndex) {
+			final CoverageInformationItem cii = (CoverageInformationItem) element;
+			if (cii.getCount() == 0) {
+				return TLCUIActivator.getColor(SWT.COLOR_YELLOW);
+			}
+			return null;
+		}
     }
 
     /**

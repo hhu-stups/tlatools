@@ -34,7 +34,7 @@ Init == /\ x = {"a"}
         /\ y = {"a"}
 Next == /\ x'= x \cup {"a"}
         /\ y'= y \cup {"b"}
-Spec == Init /\ [][Next]_x
+Spec == Init /\ [][Next]_<<x, y>>
 
 EnabledTest(Foo(_)) == Foo(x'=x)
 UnchangedTest(Foo(_)) == Foo(x)

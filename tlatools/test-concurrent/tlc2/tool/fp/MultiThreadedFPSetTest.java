@@ -22,6 +22,7 @@ import tlc2.tool.fp.generator.BatchedFingerPrintGenerator;
 import tlc2.tool.fp.generator.FingerPrintGenerator;
 import tlc2.tool.fp.generator.LongVecFingerPrintGenerator;
 import tlc2.tool.fp.generator.PartitionedFingerPrintGenerator;
+import tlc2.util.IdThread;
 
 public abstract class MultiThreadedFPSetTest extends AbstractFPSetTest {
 
@@ -99,6 +100,7 @@ public abstract class MultiThreadedFPSetTest extends AbstractFPSetTest {
 		// "FingerPrintGenerator" itself.
 		Assume.assumeFalse(System.getProperty(MultiThreadedFPSetTest.class.getName() + ".excludes", "")
 				.contains("_" + fpgClass.getSimpleName()));
+		System.out.println("Running test: " + fpgClass.getSimpleName());
 		
 		TLCGlobals.setNumWorkers(NUM_THREADS);
 		final FPSet fpSet = getFPSetInitialized(NUM_THREADS);
@@ -108,7 +110,7 @@ public abstract class MultiThreadedFPSetTest extends AbstractFPSetTest {
 				int.class, int.class, FPSet.class, CountDownLatch.class, long.class, long.class, CyclicBarrier.class });
 		
 		// Take timestamp after instantiating FPSet to not measure zero'ing/initializing FPSet.  
-		previousTimestamp = startTimestamp = System.currentTimeMillis();
+		startTimestamp = System.currentTimeMillis();
 
 		final Timer timer = new Timer();
 		final CyclicBarrier barrier = new CyclicBarrier(NUM_THREADS, new Runnable() {
@@ -118,11 +120,19 @@ public abstract class MultiThreadedFPSetTest extends AbstractFPSetTest {
 				// reporter.
 				final TimerTask reporter = new TimerTask() {
 					public void run() {
-						printInsertionSpeed(fpSet);
+						final long currentSize = fpSet.size();
+						final long insertions = currentSize - previousSize;
+						if (fpSet instanceof FPSetStatistic) {
+							FPSetStatistic fpSetStatistics = (FPSetStatistic) fpSet;
+							System.out.println(System.currentTimeMillis() + " s (epoch); " + df.format(insertions) + " insertions/min; " + pf.format(fpSetStatistics.getLoadFactor()) + " load factor");
+						} else {
+							System.out.println(System.currentTimeMillis() + " s (epoch); " + df.format(insertions) + " insertions/min");
+						}
+						previousSize = currentSize;
 					}
 				};
 				// Take timestamp after instantiating FPSet to not measure zero'ing/initializing FPSet.  
-				previousTimestamp = startTimestamp = System.currentTimeMillis();
+				startTimestamp = System.currentTimeMillis();
 				timer.scheduleAtFixedRate(reporter, 1L, 60 * 1000);
 			}
 		});
@@ -132,7 +142,7 @@ public abstract class MultiThreadedFPSetTest extends AbstractFPSetTest {
 		for (int i = 0; i < fpgs.length; i++) {
 			fpgs[i] = (FingerPrintGenerator) constructor.newInstance(
 					this, i, fpgs.length, fpSet, latch, seed++, INSERTIONS, barrier);
-			Thread thread = new Thread(fpgs[i], "Producer#" + i);
+			Thread thread = new IdThread(fpgs[i], "Producer#" + i, i);
 			thread.start();
 		}
 

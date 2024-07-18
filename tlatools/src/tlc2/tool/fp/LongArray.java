@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
@@ -14,6 +15,7 @@ import java.util.concurrent.Future;
 import sun.misc.Unsafe;
 import tlc2.output.EC;
 import util.Assert;
+import util.TLCRuntime;
 
 /**
  * This implementation uses sun.misc.Unsafe instead of a wrapping
@@ -58,7 +60,37 @@ public final class LongArray {
 		Assert.check(this.unsafe.addressSize() == (Long.SIZE / 8), EC.GENERAL);
 		baseAddress = this.unsafe.allocateMemory(positions << logAddressSize);
 	}
+	
+	LongArray(final Collection<Long> from) {
+		this(from.size());
+		
+		final Iterator<Long> itr = from.iterator();
+		long i = 0L;
+		while(itr.hasNext()) {
+			Long next = itr.next();
+			set(i++, next);
+		}
+	}
 
+	/**
+	 * @return true iff LongArray can be used on the current JVM. It cannot be used
+	 *         if the architecture is not 64 bit and the sun.misc.Unsafe class
+	 *         cannot be loaded (on some JVM implementations, this isn't possible).
+	 */
+	public static boolean isSupported() {
+		if (TLCRuntime.ARCH.x86_64 != TLCRuntime.getInstance().getArchitecture()) {
+			return false;
+		}
+		try {
+			if (getUnsafe() != null) {
+				return true;
+			}
+			return false;
+		} catch (RuntimeException e) {
+			return false;
+		}
+	}
+	
 	/**
 	 * @return An Unsafe object or a {@link RuntimeException} wrapping any {@link Exception}. 
 	 */
@@ -180,6 +212,18 @@ public final class LongArray {
 		rangeCheck(position);
 		return this.unsafe.getAddress(log2phy(position));
 	}
+
+	/**
+	 * Swaps elements at pos1 and pos2. This is not atomic. The element at pos1
+	 * will for a moment not be an element of {@link LongArray}.
+	 */
+	public final void swap(final long position1, final long position2) {
+		rangeCheck(position1);
+		rangeCheck(position2);
+		final long tmp = get(position1);
+		set(position1, get(position2));
+		set(position2, tmp);
+	}
 	
     /**
      * Returns the number of elements in this array.
@@ -189,19 +233,23 @@ public final class LongArray {
 	public final long size() {
 		return length;
 	}
-
+	
 	/* (non-Javadoc)
 	 * @see java.lang.Object#toString()
 	 */
 	public String toString() {
-        long iMax = length - 1;
+		return toString(0L, length - 1L);
+	}
+
+	public String toString(long start, long end) {
+        long iMax = end;
         if (iMax == -1L) {
         	return "[]";
         }
 
         final StringBuilder b = new StringBuilder();
         b.append('[');
-        for (long i = 0; ; i++) {
+        for (long i = start; ; i++) {
             final long lng = get(i);
             if (lng == 0L) {
             	b.append("e");

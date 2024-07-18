@@ -1,9 +1,9 @@
 /*******************************************************************************
- * Copyright (c) 2017 Microsoft Research. All rights reserved. 
+ * Copyright (c) 2017 Microsoft Research. All rights reserved.
  *
  * The MIT License (MIT)
- * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy 
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
@@ -11,8 +11,8 @@
  * so, subject to the following conditions:
  *
  * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software. 
- * 
+ * copies or substantial portions of the Software.
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
  * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
@@ -22,19 +22,31 @@
  *
  * Contributors:
  *   Markus Alexander Kuppe - initial API and implementation
+ *   Ian Morris Nieves - added support for fingerprint stack trace
  ******************************************************************************/
+
 package tlc2.value;
+
+import tlc2.tool.ModelChecker;
+import tlc2.tool.FingerprintException;
 
 public abstract class EnumerableValue extends Value implements Enumerable, ValueConstants {
 
-	public Value isSubsetEq(Value other) {
-		final ValueEnumeration Enum = this.elements();
-		Value elem;
-		while ((elem = Enum.nextElement()) != null) {
-			if (!other.member(elem)) {
-				return ValFalse;
-			}
-		}
-		return ValTrue;
-	}
+  public Value isSubsetEq(Value other) {
+    try {
+      final ValueEnumeration Enum = this.elements();
+      Value elem;
+      while ((elem = Enum.nextElement()) != null) {
+        if (!other.member(elem)) {
+          return ValFalse;
+        }
+      }
+      return ValTrue;
+    }
+    catch (RuntimeException | OutOfMemoryError e) {
+      if (hasSource()) { throw FingerprintException.getNewHead(this, e); }
+      else { throw e; }
+    }
+  }
+
 }

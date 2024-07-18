@@ -1,9 +1,13 @@
 package org.lamport.tla.toolbox.tool.tlc.ui.editor;
 
+import java.io.ByteArrayInputStream;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.text.SimpleDateFormat;
+
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IFolder;
 import org.eclipse.core.resources.IMarker;
-import org.eclipse.core.resources.IMarkerDelta;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.IResourceChangeEvent;
 import org.eclipse.core.resources.IResourceChangeListener;
@@ -11,10 +15,15 @@ import org.eclipse.core.resources.IResourceDelta;
 import org.eclipse.core.resources.IWorkspace;
 import org.eclipse.core.resources.IWorkspaceRunnable;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.resources.WorkspaceJob;
 import org.eclipse.core.runtime.Assert;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.MultiStatus;
 import org.eclipse.core.runtime.NullProgressMonitor;
+import org.eclipse.core.runtime.Platform;
+import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.SubProgressMonitor;
 import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.jface.dialogs.IMessageProvider;
@@ -28,6 +37,8 @@ import org.eclipse.swt.custom.CTabFolder2Listener;
 import org.eclipse.swt.custom.CTabFolderEvent;
 import org.eclipse.swt.custom.CTabItem;
 import org.eclipse.swt.widgets.Control;
+import org.eclipse.swt.widgets.Display;
+import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.IEditorInput;
 import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.IEditorReference;
@@ -43,9 +54,11 @@ import org.eclipse.ui.texteditor.ITextEditor;
 import org.lamport.tla.toolbox.Activator;
 import org.lamport.tla.toolbox.spec.Spec;
 import org.lamport.tla.toolbox.spec.parser.IParseConstants;
+import org.lamport.tla.toolbox.tool.tlc.TLCActivator;
 import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationDefaults;
 import org.lamport.tla.toolbox.tool.tlc.launch.TLCModelLaunchDelegate;
 import org.lamport.tla.toolbox.tool.tlc.model.Model;
+import org.lamport.tla.toolbox.tool.tlc.model.Model.StateChangeListener.ChangeEvent.State;
 import org.lamport.tla.toolbox.tool.tlc.model.TLCModelFactory;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCModelLaunchDataProvider;
 import org.lamport.tla.toolbox.tool.tlc.output.source.TLCOutputSourceRegistry;
@@ -61,8 +74,11 @@ import org.lamport.tla.toolbox.tool.tlc.ui.view.TLCErrorView;
 import org.lamport.tla.toolbox.tool.tlc.util.ChangedSpecModulesGatheringDeltaVisitor;
 import org.lamport.tla.toolbox.tool.tlc.util.ModelHelper;
 import org.lamport.tla.toolbox.ui.handler.OpenSpecHandler;
+import org.lamport.tla.toolbox.ui.view.PDFBrowserEditor;
 import org.lamport.tla.toolbox.util.ResourceHelper;
 import org.lamport.tla.toolbox.util.UIHelper;
+
+import com.abstratt.graphviz.GraphViz;
 
 import tla2sany.semantic.ModuleNode;
 
@@ -72,6 +88,7 @@ import tla2sany.semantic.ModuleNode;
  */
 public class ModelEditor extends FormEditor
 {
+	private static final SimpleDateFormat sdf = new SimpleDateFormat("MMM dd,yyyy HH:mm:ss");
 
 	/**
      * Editor ID
@@ -83,8 +100,40 @@ public class ModelEditor extends FormEditor
      */
     // helper to resolve semantic matches of words
     private SemanticHelper helper;
-    // reacts on model changes
-    private IResourceChangeListener modelFileChangeListener;
+    private final Model.StateChangeListener modelStateListener = new Model.StateChangeListener() {
+		@Override
+		public boolean handleChange(final ChangeEvent event) {
+			if (event.getState().in(State.NOT_RUNNING, State.RUNNING)) {
+				UIHelper.runUIAsync(new Runnable() {
+					public void run() {
+						for (int i = 0; i < getPageCount(); i++) {
+							final Object object = pages.get(i);
+							if (object instanceof BasicFormPage) {
+								final BasicFormPage bfp = (BasicFormPage) object;
+								bfp.refresh();
+							}
+						}
+						if (event.getState().in(State.RUNNING)) {
+							// Switch to Result Page (put on top) of model editor stack. A user wants to see
+							// the status of a model run she has just started.
+							ModelEditor.this.showResultPage();
+						}
+						if (event.getState().in(State.NOT_RUNNING)) {
+							// Model checking finished, lets open state graph if any.
+							if (event.getModel().hasStateGraphDump()) {
+								try {
+									ModelEditor.this.addOrUpdateStateGraphEditor(event.getModel().getStateGraphDump());
+								} catch (CoreException e) {
+									TLCUIActivator.getDefault().logError("Error initializing editor", e);
+								}
+							}
+						}
+					}
+				});
+			}
+			return false;
+		}
+	};
 
     /**
      * This runnable is responsible for the validation of the pages.
@@ -223,61 +272,13 @@ public class ModelEditor extends FormEditor
 		
         model = TLCModelFactory.getBy(finput.getFile());
         
-        /*
-         * Install a resource change listener on the file opened which react
-         * on marker changes
-         */
-        // construct the listener
-		modelFileChangeListener = new IResourceChangeListener() {
-			public void resourceChanged(IResourceChangeEvent event) {
-				// get the marker changes
-				IMarkerDelta[] markerChanges = event.findMarkerDeltas(Model.TLC_MODEL_IN_USE_MARKER, false);
-
-				// usually this list has at most one element
-				for (int i = 0; i < markerChanges.length; i++) {
-					if (getFileEditorInput().getFile().equals(markerChanges[i].getResource())) {
-						UIHelper.runUIAsync(
-								/*
-								 * If the model file is changed, refresh the
-								 * changes in the editor if the model is in use,
-								 * activate the third page
-								 */
-								new Runnable() {
-							public void run() {
-								// update the pages
-								for (int i = 0; i < getPageCount(); i++) {
-									/*
-									 * Note that all pages are not necessarily
-									 * instances of BasicFormPage. Some are read
-									 * only editors showing saved versions of
-									 * modules.
-									 */
-									if (pages.get(i) instanceof BasicFormPage) {
-										BasicFormPage page = (BasicFormPage) pages.get(i);
-										((BasicFormPage) page).refresh();
-									}
-								}
-
-								if (model.isRunning()) {
-									showResultPage();
-								}
-								// evtl. add more graphical sugar here,
-								// like changing the model icon,
-								// changing the editor title (part name)
-							}
-						});
-						// It's sufficient to only update the UI once
-						return;
-					}
-				}
-			}
-		};
-
-        // add to the workspace root
-        ResourcesPlugin.getWorkspace().addResourceChangeListener(modelFileChangeListener, IResourceChangeEvent.POST_CHANGE);
- 
         // setContentDescription(path.toString());
-        this.setPartName(model.getName());
+        if (model.isSnapshot()) {
+        	final String date = sdf.format(model.getSnapshotTimeStamp());
+            this.setPartName(model.getSnapshotFor().getName() + " (" + date + ")");
+        } else {
+        	this.setPartName(model.getName());
+        }
         this.setTitleToolTip(model.getFile().getLocation().toOSString());
 
         // add a listener that will update the tlc error view when a model editor
@@ -305,6 +306,8 @@ public class ModelEditor extends FormEditor
 				addPageChangedListener(pageChangedListener);
 			}
 		});
+		
+		model.add(modelStateListener);
 	}
 
 	/**
@@ -324,7 +327,7 @@ public class ModelEditor extends FormEditor
 			navigationHistory.markLocation((IEditorPart) event
 					.getSelectedPage());
 		}
-	};;
+	};
 
 	/**
 	 * @see org.eclipse.ui.forms.editor.FormEditor#dispose()
@@ -334,7 +337,7 @@ public class ModelEditor extends FormEditor
         // TLCUIActivator.getDefault().logDebug("entering ModelEditor#dispose()");
         // remove the listeners
         ResourcesPlugin.getWorkspace().removeResourceChangeListener(workspaceResourceChangeListener);
-        ResourcesPlugin.getWorkspace().removeResourceChangeListener(modelFileChangeListener);
+		model.remove(modelStateListener);
 
         super.dispose();
         
@@ -541,21 +544,132 @@ public class ModelEditor extends FormEditor
             // run the validation
             UIHelper.runUIAsync(validateRunable);
 
-        } catch (PartInitException e)
+            
+            ModuleNode rootModule = SemanticHelper.getRootModuleNode();
+            if (rootModule != null && rootModule.getVariableDecls().length == 0
+            		&& rootModule.getConstantDecls().length == 0)
+            {
+            	showResultPage();
+            }
+            
+            if (model.hasStateGraphDump()) {
+            	addOrUpdateStateGraphEditor(model.getStateGraphDump());
+            }
+        } catch (CoreException e)
         {
             TLCUIActivator.getDefault().logError("Error initializing editor", e);
         }
 
-        ModuleNode rootModule = SemanticHelper.getRootModuleNode();
-        if (rootModule != null && rootModule.getVariableDecls().length == 0
-                && rootModule.getConstantDecls().length == 0)
-        {
-            showResultPage();
-        }
-
         // TLCUIActivator.getDefault().logDebug("leaving ModelEditor#addPages()");
     }
+    
+	public void addOrUpdateStateGraphEditor(final IFile stateGraphDotDump) throws CoreException {
+		// For historical reasons this preference is found in the tlatex bundle. Thus,
+		// we read the value from there, but don't refer to the corresponding string
+		// constants to not introduce a plugin dependency.
+		// org.lamport.tla.toolbox.tool.tla2tex.TLA2TeXActivator.PLUGIN_ID
+		// org.lamport.tla.toolbox.tool.tla2tex.preference.ITLA2TeXPreferenceConstants.EMBEDDED_VIEWER
+		final boolean useEmbeddedViewer = Platform.getPreferencesService()
+				.getBoolean("org.lamport.tla.toolbox.tool.tla2tex", "embeddedViewer", false, null);
+		
+		final IEditorPart findEditor;
+		if (useEmbeddedViewer) {
+			// Try to get hold of the editor instance without opening it yet. Opening is
+			// triggered by calling addPage.
+			findEditor = UIHelper.findEditor("de.vonloesch.pdf4eclipse.editors.PDFEditor");
+		} else {
+			findEditor = UIHelper.findEditor(PDFBrowserEditor.ID);
+		}
 
+		// Load a previously generated pdf file.
+		final IFile file = model.getFolder().getFile(model.getName() + ".pdf");
+		if (file.exists()) {
+			addPage(findEditor, new FileEditorInput(file));
+			return;
+		}
+
+		// Generating a PDF from the dot file can be a time consuming task. Thus, wrap
+		// the generation inside a background job for processing. When done, the job will join the
+		// main thread and update the UI (create the multipage editor page that renders
+		// the pdf). Errors (IStatus) are handled by the Job framework and trigger a dialog, unless
+		// errors occur inside the UI runnable. There we handle errors manually.
+		final Job j = new WorkspaceJob("Generating State Graph Visualization...") {
+			@Override
+			public IStatus runInWorkspace(IProgressMonitor monitor) throws CoreException {
+				try {
+					// Generate PDF (this process runs with a timeout of one minute which is why we
+					// don't provide a mechanism to cancel it.
+					final byte[] load = GraphViz.load(new FileInputStream(stateGraphDotDump.getLocation().toFile()),
+							"pdf", 0, 0);
+					// Write byte[] into IFile file
+					file.create(new ByteArrayInputStream(load), IResource.NONE, null);
+					UIHelper.runUISync(new Runnable() {
+						@Override
+						public void run() {
+							try {
+								addPage(findEditor, new FileEditorInput(file));
+							} catch (PartInitException e) {
+								final Shell shell = Display.getDefault().getActiveShell();
+								MessageDialog.openError(shell == null ? new Shell() : shell,
+										"Opening state graph visualization failed.",
+										"Opening state graph visualization failed: " + e.getMessage());
+							} catch (OutOfMemoryError e) {
+								final Shell shell = Display.getDefault().getActiveShell();
+								MessageDialog.openError(shell == null ? new Shell() : shell, "Opening state graph visualization ran out of memory.",
+										"Opening state graph visualization ran out of memory. The state graph is likely too large. "
+										+ "Try using a standalone PDF viewer if the Toolbox is currently set to use the built-in one.");
+							}
+						}
+					});
+				} catch (CoreException e) {
+					// If generation failed to generate a pdf, inform the user by raising a dialog.
+					// Reason of failure can be 1) input too large 2) incorrect dot path 3) ...
+					return shortenStatusMessage(e.getStatus());
+				} catch (FileNotFoundException notExpectedTohappen) {
+					// We don't expect this to happen, because addOrUpdateStateGraphEditor gets
+					// called with a valid file.
+					return new Status(IStatus.ERROR, TLCActivator.PLUGIN_ID, notExpectedTohappen.getMessage(),
+							notExpectedTohappen);
+				}
+				return Status.OK_STATUS;
+			}
+		};
+		j.setUser(true);
+		j.setPriority(Job.LONG);
+		j.schedule();
+	}
+
+	// Shorten message to 1024 chars in case GraphViz attached the complete dot
+	// input which can be huge.
+	// https://github.com/abstratt/eclipsegraphviz/issues/8
+	private static IStatus shortenStatusMessage(IStatus status) {
+		if (status.isMultiStatus()) {
+			final IStatus[] convertedChildren = new Status[status.getChildren().length];
+			// convert nested status objects.
+			final IStatus[] children = status.getChildren();
+			for (int i = 0; i < children.length; i++) {
+				final IStatus child = children[i];
+				convertedChildren[i] = new Status(child.getSeverity(), child.getPlugin(), child.getCode(),
+						substring(child.getMessage()),
+						child.getException());
+			}
+			return new MultiStatus(status.getPlugin(), status.getCode(), convertedChildren,
+					substring(status.getMessage()),
+					status.getException());
+		} else {
+			return new Status(status.getSeverity(), status.getPlugin(), status.getCode(),
+					substring(status.getMessage()),
+					status.getException());
+		}
+	}
+	
+	private static String substring(String in) {
+		if (in.length() > 1024) {
+			return in.substring(0, 1024) + "... (" + (in.length() - 1024) + " chars omitted)";
+		}
+		return in;
+	}
+	
     /* --------------------------------------------------------------------- */
     
 	public void launchModel(final String mode, final boolean userPased) {
@@ -572,6 +686,15 @@ public class ModelEditor extends FormEditor
 	 * @throws CoreException
 	 */
 	public void launchModel(final String mode, final boolean userPased, final IProgressMonitor monitor) {
+		if (model.isSnapshot()) {
+			final boolean launchSnapshot = MessageDialog.openConfirm(getSite().getShell(), "Model is a snapshot",
+					"The model which is about to launch is a snapshot of another model. "
+					+ "Beware that no snapshots of snapshots are taken. "
+					+ "Click the \"OK\" button to launch the snapshot anyway.");
+			if (!launchSnapshot) {
+				return;
+			}
+		}
 		final IWorkspace workspace = ResourcesPlugin.getWorkspace();
 		try {
 			workspace.run(new IWorkspaceRunnable() {
@@ -718,11 +841,11 @@ public class ModelEditor extends FormEditor
 						 */
 						for (int i = 0; i < getPageCount(); i++) {
 							/*
-							 * The normal form pages (main model page, advanced
-							 * options, results) are not text editors. We leave
-							 * those pages but remove all text editors.
+							 * The normal form pages (main model page, advanced options, results) are remain
+							 * open, all other pages get closed i.e. Saved Module Editor and State Graph
+							 * editor.
 							 */
-							if (pages.get(i) instanceof ITextEditor) {
+							if (!(pages.get(i) instanceof BasicFormPage)) {
 								removePage(i);
 							}
 						}
@@ -738,7 +861,7 @@ public class ModelEditor extends FormEditor
 						}
 					}
 				}
-			}, monitor);
+			}, workspace.getRoot(), IWorkspace.AVOID_UPDATE, monitor);
 		} catch (CoreException e) {
 			TLCUIActivator.getDefault().logError(
 					"Error launching the configuration " + model.getName(), e);
@@ -1019,6 +1142,20 @@ public class ModelEditor extends FormEditor
             }
         }
     }
+    
+	/**
+	 * Expands the properties section on the main model editor page. 
+	 */
+	public void expandPropertiesSection() {
+		for (int i = 0; i < pagesToAdd.length; i++) {
+			final BasicFormPage basicFormPage = pagesToAdd[i];
+			if (basicFormPage instanceof MainModelPage) {
+				final MainModelPage mainPage = (MainModelPage) basicFormPage;
+				mainPage.expandPropertiesSection();
+				return;
+			}
+		}
+	}
 
     // TODO remove
     public void setUpPage(BasicFormPage newPage, int index)
@@ -1140,7 +1277,9 @@ public class ModelEditor extends FormEditor
 
             }
             // setPageImage(pageIndex, image);
-        }
+		} else if (input instanceof FileEditorInput && "pdf".equals(((FileEditorInput) input).getFile().getFileExtension())) {
+			setPageText(index, "State Graph");
+		}
     }
 
     /**

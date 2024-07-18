@@ -196,6 +196,13 @@ public abstract class TLCJob extends AbstractJob implements IModelConfigurationC
             }
         }
         
+        // Defer liveness checking
+        final boolean deferLiveness = launch.getLaunchConfiguration().getAttribute(LAUNCH_DEFER_LIVENESS, false);
+        if (deferLiveness) {
+        	arguments.add("-lncheck");
+        	arguments.add("final");
+        }
+        
         // fpBits
         int fpBits = launch.getLaunchConfiguration().getAttribute(LAUNCH_FPBITS, -1);
         if(fpBits >= 0) {
@@ -217,6 +224,16 @@ public abstract class TLCJob extends AbstractJob implements IModelConfigurationC
         	arguments.add(String.valueOf(maxSetSize));
         }
         
+        // Visualize state graph
+        final boolean visualizeStateGraph = launch.getLaunchConfiguration().getAttribute(LAUNCH_VISUALIZE_STATEGRAPH, false);
+        if (visualizeStateGraph && hasSpec) {
+			// Visualize state graph when requested and a behavior spec is given. A behavior
+			// spec is required for TLC to create states.
+        	arguments.add("-dump");
+        	arguments.add("dot");
+        	arguments.add(modelName);
+        }
+      
         arguments.add("-config");
         arguments.add(cfgFile.getName()); // configuration file
 

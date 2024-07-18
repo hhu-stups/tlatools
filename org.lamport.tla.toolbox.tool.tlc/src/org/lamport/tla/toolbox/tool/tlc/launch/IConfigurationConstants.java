@@ -91,6 +91,15 @@ public interface IConfigurationConstants
     public static final String LAUNCH_FP_INDEX = "fpIndex";
 
     /**
+	 * Defers verification of liveness properties upon the final stage of model
+	 * checking (upon termination).
+	 */
+    public static final String LAUNCH_DEFER_LIVENESS = "deferLiveness";
+    /**
+	 * Visualize state graph after model checking with GraphViz.
+	 */
+    public static final String LAUNCH_VISUALIZE_STATEGRAPH = "visualizeStateGraph";
+    /**
      * Run from the checkpoint
      */
     public static final String LAUNCH_RECOVER = "recover";

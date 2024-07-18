@@ -9,6 +9,8 @@ import java.util.List;
 
 import tlc2.output.EC;
 import tlc2.output.MP;
+import util.TLCRuntime;
+import util.TLCRuntime.ARCH;
 
 public abstract class FPSetFactory {
 
@@ -22,7 +24,7 @@ public abstract class FPSetFactory {
 		return !OffHeapDiskFPSet.class.isAssignableFrom(clazz);
 	}
 
-	static boolean allocatesOnHeap(final String clazz) {
+	public static boolean allocatesOnHeap(final String clazz) {
 		try {
 			final ClassLoader classLoader = FPSet.class.getClassLoader();
 			@SuppressWarnings("unchecked")
@@ -32,6 +34,26 @@ public abstract class FPSetFactory {
 		} catch (ClassNotFoundException e) {
 			return false;
 		}
+	}
+
+	private static boolean supportsArchitecture(String clazz) {
+		try {
+			final ClassLoader classLoader = FPSet.class.getClassLoader();
+			@SuppressWarnings("unchecked")
+			Class<? extends FPSet> cls = (Class<? extends FPSet>) classLoader
+					.loadClass(clazz);
+			return supports32Bits(cls);
+		} catch (ClassNotFoundException e) {
+			return false;
+		}
+	}
+
+	private static boolean supports32Bits(final Class<? extends FPSet> clazz) {
+		if (TLCRuntime.getInstance().getArchitecture() == TLCRuntime.ARCH.x86
+				&& OffHeapDiskFPSet.class.isAssignableFrom(clazz)) {
+			return false;
+		}
+		return true;
 	}
 	
 	private static boolean isDiskFPSet(Class<? extends FPSet> cls) {
@@ -78,10 +100,20 @@ public abstract class FPSetFactory {
 			return new MultiFPSet(fpSetConfig);
 		} else {
 			if (implClassname != null) {
-				return loadImplementation(implClassname, fpSetConfig);
-			} else {
-				return new MSBDiskFPSet(fpSetConfig);
+				if (supportsArchitecture(implClassname)) {
+					return loadImplementation(implClassname, fpSetConfig);
+				} else {
+					final ARCH architecture = TLCRuntime.getInstance().getArchitecture();
+					final String msg = String.format(
+							"Selected fingerprint set (set of visited states) %s does not support current architecture %s. "
+									+ "Reverting to default fingerprint set. "
+									+ "Off-heap memory allocated via -XX:MaxDirectMemorySize flag cannot be used by default "
+									+ "fingerprint set and is therefore wasted.",
+							implClassname, architecture);
+					MP.printWarning(EC.TLC_FEATURE_UNSUPPORTED, msg);
+				}
 			}
+			return new MSBDiskFPSet(fpSetConfig);
 		}
 	}
 

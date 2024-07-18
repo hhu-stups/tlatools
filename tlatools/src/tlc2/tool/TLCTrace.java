@@ -15,6 +15,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
+import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.output.OutputCollector;
@@ -28,6 +29,11 @@ public class TLCTrace {
 	private static String filename;
 	private BufferedRandomAccessFile raf;
 	private long lastPtr;
+	// TODO This arrays causes coherence. This problem is easily removed by
+	// storing each ptr in lastPtrs in the corresponding worker. That's a little
+	// bit ugly though in terms of separation of concerns. The current solution
+	// confines all related aspects to TLCTrace. 
+	private final long[] lastPtrs = new long[TLCGlobals.getNumWorkers()];
 	private TraceApp tool;
 
   public TLCTrace(String metadir, String specFile, TraceApp tool)
@@ -59,6 +65,13 @@ public class TLCTrace {
 		return writeState(predecessor.uid, aFingerprint);
 	}
 
+  public final synchronized long writeState(final TLCState predecessor, final long aFingerprint, final IWorker worker)
+  throws IOException {
+		final long lastPtr = writeState(predecessor.uid, aFingerprint);
+		this.lastPtrs[worker.myGetId()] = lastPtr;
+		return lastPtr;
+	}
+  
 	/**
    * @param predecessorLoc The location of the state predecessor
    * @param fp A finger print
@@ -90,6 +103,33 @@ public class TLCTrace {
 	}
 
 	/**
+	 * The level is the length of the longest path in the execution trees
+	 * (forest) (his forest is stored in the trace file).
+	 * <p>
+	 * With multiple workers, the level is an approximation. With multiple
+	 * workers, the forest has an unknown number of leafs and we do not know the
+	 * position of leafs in the trace file.
+	 * <p>
+	 * We know however the vertices, that the set of workers last added to the
+	 * forest. Thus, we calculate the lengths of each path or path fragment
+	 * from those vertices. The maximum length is then our approximation of the
+	 * longest path. It's not elegant but good enough for now.
+	 * 
+	 * @see TLCTrace#getLevel()
+	 */
+	public final synchronized int getLevelForFinalReporting() throws IOException {
+		// TODO We generally assume the length and the number of workers to be
+		// relatively small to not warrant parallelization. The current
+		// getLevel(lastPtr) cannot be called concurrently, because it uses a
+		// single BufferedRandomAccessFile.
+		int max = 0;
+		for (long lastPtr : lastPtrs) {
+			max = Math.max(max, lastPtr > 0 ? getLevel(lastPtr) : 0);
+		}
+		return max;
+	}
+
+	/**
 	 * Returns the level (monotonically increasing)!
 	 * 
 	 * LL: The user has no real need of an accurate tree height. Breadth-first
@@ -109,7 +149,7 @@ public class TLCTrace {
 	 * 
 	 * @see TLCTrace#getLevel()
 	 */
-	public final int getLevelForReporting() throws IOException {
+	public final synchronized int getLevelForReporting() throws IOException {
 		final int calculatedLevel = getLevel(this.lastPtr);
 		if (calculatedLevel > previousLevel) {
 			previousLevel = calculatedLevel;
@@ -124,18 +164,51 @@ public class TLCTrace {
 
 	/**
 	 * @see TLCTrace#getLevel(long)
+	 * @return 1 to the length of the longest behavior found so far.
 	 */
 	public final int getLevel() throws IOException {
-	// This assumption (lastPtr) only holds for the TLC in non-parallel mode.
+	    // This assumption (lastPtr) only holds for the TLC in non-parallel mode.
 		// Generally the last line (logically a state) is not necessarily
-		// on the highest level of the state tree. This is only the case if
-		// states are explored strictly by breadth-first search.
+		// on the highest level of the state tree, which is only true if
+		// states are explored with strict breadth-first search.
+		//
+		// The (execution) trace is a forest of one to n trees, where each path 
+		// in the forest represents the order in which states have been generated
+		// by the workers.
+		// The algorithm, with which the diameter is approximated from the trace,
+		// is pretty simple; too simple. The trace is constantly written to the .st
+		// file where each "record" in the file is a link from a successor state to
+		// its predecessor state. Thus, the link is a position in the trace file
+		// where the predecessor state - actually its fingerprint - is stored. At
+		// the end of the trace file, there are up to m leaf records for which no
+		// successors have been appended (yet, assuming there are any).
+		//
+		// Once the workers have terminated, TLC traverses the trace from a leaf record
+		// back to a root record. This height is what is reported as the diameter. 
+		// The selection, from what leaf record TLC starts the traversal, is based on
+		// the last record inserted into the trace file. If this record is one with a
+		// low height (because its corresponding worker waited most of the time), the
+		// diameter will thus be underreport. If, on the other hand, the last record 
+		// happens to be one with a large height, the diameter will be overreported.
+		// 
+		// The selection of the leaf record is the source of the algorithm's 
+		// non-determinism. With a single worker, the last record in the trace is
+		// always the same which always corresponds to the longest behavior found so 
+		// far (strict BFS). This invariant does not hold with multiple workers.
+        //
+		// Obviously, with multiple workers the approximation of the diameter will
+		// improve with the size of the state graph. Assuming a well-shaped state graph,
+		// we can argue that the approximation is good enough and document, that its 
+		// value can be anything from 1 to the longest behavior found so far.
 		return getLevel(this.lastPtr);
 	}
 
 	/**
-   * @param startLoc The start location (pointer) from where the level (height) of the state tree should be calculated
-	 * @return The level (height) of the state tree.
+	 * @param startLoc
+	 *            The start location (pointer) from where the level (height) of
+	 *            the path in the execution tree should be calculated.
+	 * @return The level (height) of the path in the execution tree (the trace)
+	 *         starting at startLoc.
 	 * @throws IOException
 	 */
 	public synchronized final int getLevel(long startLoc) throws IOException {

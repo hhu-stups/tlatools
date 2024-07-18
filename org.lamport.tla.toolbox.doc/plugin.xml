@@ -24,5 +24,207 @@
             file="tocsamples.xml">
       </toc>
     </extension>
+   <extension
+         point="org.eclipse.ui.commands">
+      <command
+            defaultHandler="org.lamport.tla.toolbox.doc.handler.HelpContentsHandler"
+            id="org.lamport.tla.toolbox.doc.contents"
+            name="Table of Contents">
+      </command>
+      <command
+            defaultHandler="org.lamport.tla.toolbox.doc.handler.HelpPDFHandler"
+            id="org.lamport.tla.toolbox.doc.pdf"
+            name="Help located in a local PDF">
+         <commandParameter
+               id="org.lamport.tla.toolbox.doc.pdf.file"
+               name="pdf"
+               optional="false">
+         </commandParameter>
+         <commandParameter
+               id="org.lamport.tla.toolbox.doc.pdf.name"
+               name="name"
+               optional="false">
+         </commandParameter>
+      </command>
+      <command
+            defaultHandler="org.lamport.tla.toolbox.doc.handler.HelpURLHandler"
+            id="org.lamport.tla.toolbox.doc.url"
+            name="Help located at a URL">
+         <commandParameter
+               id="org.lamport.tla.toolbox.doc.url.name"
+               name="name"
+               optional="false">
+         </commandParameter>
+      </command>
+   </extension>
+   <extension
+         point="org.eclipse.ui.menus">
+      <menuContribution
+            allPopups="false"
+            locationURI="menu:toolbox.menu.help?before=toolbox.menuItem.dynamicHelp">
+            <command
+                  commandId="org.lamport.tla.toolbox.doc.contents"
+                  id="toolbox.menuItem.contentsHelp"
+                  label="Table of Contents"
+                  mnemonic="T"
+                  mode="FORCE_TEXT"
+                  style="push"
+                  tooltip="Opens Table of Contents">
+            </command>
+      </menuContribution>
+      <!-- The Operators of TLA+ -->
+      <menuContribution
+            allPopups="false"
+            locationURI="menu:toolbox.menu.help?after=toolbox.command.help.tlaplus">
+         <command
+               commandId="org.lamport.tla.toolbox.doc.pdf"
+               label="The Operators of TLA+"
+               mnemonic="O"
+               mode="FORCE_TEXT"
+               style="push"
+               tooltip="Opens the paper &quot;The Operators of  TLA+&quot;">
+            <parameter
+                  name="org.lamport.tla.toolbox.doc.pdf.file"
+                  value="SRC-TN-1997-006A.pdf">
+            </parameter>
+            <parameter
+                  name="org.lamport.tla.toolbox.doc.pdf.name"
+                  value="Operators of TLA+">
+            </parameter>
+         </command>
+      </menuContribution>
+      <!-- The TLA+ Cheat Sheet: -->
+      <menuContribution
+            allPopups="false"
+            locationURI="menu:toolbox.menu.help?after=toolbox.command.help.tlaplus">
+         <command
+               commandId="org.lamport.tla.toolbox.doc.pdf"
+               label="The TLA+ Cheat Sheet"
+               mnemonic="C"
+               mode="FORCE_TEXT"
+               style="push"
+               tooltip="Opens the paper &quot;Summary of TLA+&quot;">
+            <parameter
+                  name="org.lamport.tla.toolbox.doc.pdf.file"
+                  value="summary-standalone.pdf">
+            </parameter>
+            <parameter
+                  name="org.lamport.tla.toolbox.doc.pdf.name"
+                  value="TLA+ Cheat Sheet">
+            </parameter>
+         </command>
+      </menuContribution>
+      <!-- C PlusCal Manual -->
+      <menuContribution
+            allPopups="false"
+            locationURI="menu:toolbox.menu.help?after=toolbox.command.help.tlaplus">
+         <command
+               commandId="org.lamport.tla.toolbox.doc.pdf"
+               label="PlusCal User Manual"
+               mnemonic="P"
+               mode="FORCE_TEXT"
+               style="push"
+               tooltip="Opens the paper &quot;A PlusCal User’s Manual - C-Syntax&quot;">
+            <parameter
+                  name="org.lamport.tla.toolbox.doc.pdf.file"
+                  value="c-manual.pdf">
+            </parameter>
+            <parameter
+                  name="org.lamport.tla.toolbox.doc.pdf.name"
+                  value="PlusCal Manual">
+            </parameter>
+         </command>
+      </menuContribution>
+      <!-- Specifying Systems -->
+      <menuContribution
+            allPopups="false"
+            locationURI="menu:toolbox.menu.help?after=toolbox.command.help.tlaplus">
+         <command
+               commandId="org.lamport.tla.toolbox.doc.pdf"
+               label="Specifying Systems"
+               mnemonic="S"
+               mode="FORCE_TEXT"
+               style="push"
+               tooltip="Opens the book &quot;Specifying Systems&quot;">
+            <parameter
+                  name="org.lamport.tla.toolbox.doc.pdf.file"
+                  value="book-02-08-08.pdf">
+            </parameter>
+            <parameter
+                  name="org.lamport.tla.toolbox.doc.pdf.name"
+                  value="Specifying Systems">
+            </parameter>
+         </command>
+      </menuContribution>
+      <menuContribution
+            allPopups="false"
+            locationURI="menu:toolbox.menu.help?before=toolbox.command.about">
+         <command
+               commandId="org.lamport.tla.toolbox.doc.url"
+               label="TLA+ Video Course"
+               mnemonic="V"
+               mode="FORCE_TEXT"
+               style="push">
+            <parameter
+                  name="org.lamport.tla.toolbox.doc.url.name"
+                  value="http://lamport.azurewebsites.net/video/videos.html">
+            </parameter>
+         </command>
+      </menuContribution>
+      <menuContribution
+            allPopups="false"
+            locationURI="menu:toolbox.menu.help?before=toolbox.command.about">
+	         <command
+	               commandId="org.lamport.tla.toolbox.doc.url"
+	               label="TLA+ Examples"
+	               mnemonic="E"
+	               mode="FORCE_TEXT"
+	               style="push">
+	            <parameter
+	                  name="org.lamport.tla.toolbox.doc.url.name"
+	                  value="https://github.com/tlaplus/Examples">
+	            </parameter>
+	         </command>
+      </menuContribution>
+      <menuContribution
+            allPopups="false"
+            locationURI="menu:toolbox.menu.help?before=toolbox.command.about">
+         <menu id="community" label="Community" mnemonic="Y">
+	         <command
+	               commandId="org.lamport.tla.toolbox.doc.url"
+	               label="TLA+ user group"
+	               mnemonic="V"
+	               mode="FORCE_TEXT"
+	               style="push">
+	            <parameter
+	                  name="org.lamport.tla.toolbox.doc.url.name"
+	                  value="https://groups.google.com/forum/#!forum/tlaplus">
+	            </parameter>
+	         </command>
+	         <command
+	               commandId="org.lamport.tla.toolbox.doc.url"
+	               label="TLA+ reddit"
+	               mnemonic="V"
+	               mode="FORCE_TEXT"
+	               style="push">
+	            <parameter
+	                  name="org.lamport.tla.toolbox.doc.url.name"
+	                  value="https://www.reddit.com/r/tlaplus/">
+	            </parameter>
+	         </command>
+	         <command
+	               commandId="org.lamport.tla.toolbox.doc.url"
+	               label="Learn TLA"
+	               mnemonic="V"
+	               mode="FORCE_TEXT"
+	               style="push">
+	            <parameter
+	                  name="org.lamport.tla.toolbox.doc.url.name"
+	                  value="https://learntla.com/">
+	            </parameter>
+	         </command>
+         </menu>
+      </menuContribution>
+   </extension>
 
 </plugin>

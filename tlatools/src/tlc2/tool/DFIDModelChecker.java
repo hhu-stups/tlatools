@@ -164,11 +164,14 @@ public class DFIDModelChecker extends AbstractChecker
                 }
 
                 // Start working on this level:
-                MP.printMessage(EC.TLC_PROGRESS_STATS_DFID, new String[] { String.valueOf(level),
+                MP.printMessage(EC.TLC_PROGRESS_START_STATS_DFID, new String[] { String.valueOf(level),
                         String.valueOf(this.numOfGenStates), String.valueOf(this.theFPSet.size()) });
 
                 FPIntSet.incLevel();
                 success = this.runTLC(level);
+				// Recent done flag before after the workers have checked the
+				// current level in preparation for the next level.
+                this.done = false;
                 if (!success)
                     return;
 
@@ -705,13 +708,9 @@ public class DFIDModelChecker extends AbstractChecker
                 String.valueOf(this.theFPSet.size()) });
     }
 
-    public final void reportSuccess() throws IOException
+    private final void reportSuccess() throws IOException
     {
-        long d = this.theFPSet.size();
-        double prob1 = (d * (this.numOfGenStates.get() - d)) / Math.pow(2, 64);
-        double prob2 = this.theFPSet.checkFPs();
-
-        MP.printMessage(EC.TLC_SUCCESS, new String[] { String.valueOf(prob1), String.valueOf(prob2) });
+        reportSuccess(this.theFPSet.size(), this.theFPSet.checkFPs(), numOfGenStates.get());
     }
 
     /**
@@ -722,17 +721,15 @@ public class DFIDModelChecker extends AbstractChecker
         for (int i = 0; i < this.workers.length; i++)
         {
             this.workers[i] = new DFIDWorker(i, checkIndex, checker);
+        }
+		// Start all workers once instantiated to avoid a race with setStop,
+		// when setStop is being called concurrently with startWorkers. This
+		// happens, if a DFIDWorker terminates immediately.
+        for (int i = 0; i < this.workers.length; i++)
+        {
             this.workers[i].start();
         }
         return this.workers;
-    }
-
-    /**
-     * Run prior the worker loop
-     */
-    protected void runTLCPreLoop()
-    {
-        this.done = false;
     }
 
     /**

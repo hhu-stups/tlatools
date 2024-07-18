@@ -51,15 +51,15 @@ public class EC2CloudTLCInstanceParameters extends CloudTLCInstanceParameters {
 
 	@Override
 	public String getImageId() {
-		// Ubuntu 64bit 14.04.4 Trusty paravirtual/instance-store release
-		// https://cloud-images.ubuntu.com/releases/14.04/release/
-		// or http://cloud-images.ubuntu.com/locator/ec2/
+		// Ubuntu 64bit 16.04 Xenial
+		// http://cloud-images.ubuntu.com/locator/ec2/
 		// See http://aws.amazon.com/amazon-linux-ami/instance-type-matrix/
 		// for paravirtual vs. hvm
-		return getRegion() + "/ami-2ae6633c"; // "xenial,amd64,hvm:instance-store"
+		return getRegion() + "/ami-84a048fe"; // "xenial,amd64,hvm:instance-store"
 	}
 
-	private String getRegion() {
+	@Override
+	public String getRegion() {
 		return "us-east-1";
 	}
 
@@ -108,5 +108,30 @@ public class EC2CloudTLCInstanceParameters extends CloudTLCInstanceParameters {
 		// added because I was seeing intermittent timeouts with other regions
 		// (i.e. South America).
 		properties.setProperty(LocationConstants.PROPERTY_REGIONS, getRegion());
+	}
+
+	/* (non-Javadoc)
+	 * @see org.lamport.tla.toolbox.jcloud.CloudTLCInstanceParameters#getOSFilesystemTuning()
+	 */
+	@Override
+	public String getOSFilesystemTuning() {
+		// Create a raid0 out of the two instance store
+		// disks and optimize its fs towards performance
+		// by sacrificing data durability.
+		return "umount /mnt && "
+		+ "/usr/bin/yes|/sbin/mdadm --create --force --auto=yes /dev/md0 --level=0 --raid-devices=2 --assume-clean --name=tlaplus /dev/xvdb /dev/xvdc && "
+		+ "/sbin/mdadm --detail --scan >> /etc/mdadm/mdadm.conf && "
+		+ "sed -i '\\?^/dev/xvdb?d' /etc/fstab && "
+		+ "echo \"/dev/md127 /mnt ext4 defaults 0 0\" >> /etc/fstab && "
+		+ "/sbin/mkfs.ext4 -O ^has_journal /dev/md0 && "
+		+ "mount /dev/md0 /mnt";
+	}
+
+	@Override
+	public String getHostnameSetup() {
+		// Lookup public ipv4 hostname and configure /etc/hosts accordingly. Otherwise,
+		// MailSender uses the internal name which increases likelihood of email being
+		// classified/rejected as spam.
+		return "echo \"$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4) $(curl -s http://169.254.169.254/latest/meta-data/public-hostname)\" >> /etc/hosts && hostname $(curl -s http://169.254.169.254/latest/meta-data/public-hostname)";
 	}
 }

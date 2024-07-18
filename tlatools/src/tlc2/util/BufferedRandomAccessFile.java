@@ -37,8 +37,9 @@ public final class BufferedRandomAccessFile extends java.io.RandomAccessFile {
     private long maxHi;     // this.lo + this.buff.length
     private boolean hitEOF; // buffer contains last file block?
     private long diskPos;   // disk position
+	private long mark;
     
-    private static Object mu = new Object(); // protects the following fields
+    private static final Object mu = new Object(); // protects the following fields
     private static byte[][] availBuffs = new byte[100][];
     private static int numAvailBuffs = 0;
 
@@ -175,7 +176,7 @@ public final class BufferedRandomAccessFile extends java.io.RandomAccessFile {
     }
     
     /* Flush any dirty bytes in the buffer to disk. */
-    private void flushBuffer() throws IOException {
+    private boolean flushBuffer() throws IOException {
         if (this.dirty) {
             // Assert.check(this.curr > this.lo);
             if (this.diskPos != this.lo) super.seek(this.lo);
@@ -183,7 +184,9 @@ public final class BufferedRandomAccessFile extends java.io.RandomAccessFile {
             super.write(this.buff, 0, len); 
             this.diskPos = this.curr;
             this.dirty = false;
+            return true;
         }
+        return false;
     }
     
     /* Read at most "this.buff.length" bytes into "this.buff",
@@ -248,7 +251,7 @@ public final class BufferedRandomAccessFile extends java.io.RandomAccessFile {
 			// seeking inside current buffer -- no read required
 			if (pos < this.curr) {
 				// if seeking backwards, we must flush to maintain V4
-				this.flushBuffer();
+				pageReadNeeded = this.flushBuffer();
 			} else {
 				pageReadNeeded = false;
 			}
@@ -441,6 +444,21 @@ public final class BufferedRandomAccessFile extends java.io.RandomAccessFile {
     public void reset() throws IOException {
     	setLength(0);
     	this.init();
+    }
+    
+    public long getMark() {
+    	return this.mark;
+    }
+    
+    public long mark() {
+    	final long oldMark = this.mark; 
+    	this.mark = getFilePointer();
+    	return oldMark;
+    }
+    
+    public void seekAndMark(long pos) throws IOException {
+    	this.mark = pos;
+    	this.seek(pos);
     }
 
   public static void main(String[] args) throws IOException {

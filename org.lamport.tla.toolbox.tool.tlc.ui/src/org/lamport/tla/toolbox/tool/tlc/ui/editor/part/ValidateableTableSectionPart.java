@@ -2,6 +2,7 @@ package org.lamport.tla.toolbox.tool.tlc.ui.editor.part;
 
 import java.util.Vector;
 
+import org.eclipse.core.runtime.Platform;
 import org.eclipse.jface.viewers.CheckStateChangedEvent;
 import org.eclipse.jface.viewers.CheckboxTableViewer;
 import org.eclipse.jface.viewers.DoubleClickEvent;
@@ -29,6 +30,7 @@ import org.eclipse.ui.forms.widgets.Section;
 import org.lamport.tla.toolbox.tool.tlc.model.Formula;
 import org.lamport.tla.toolbox.tool.tlc.ui.editor.page.BasicFormPage;
 import org.lamport.tla.toolbox.tool.tlc.ui.editor.provider.FormulaContentProvider;
+import org.lamport.tla.toolbox.tool.tlc.ui.editor.provider.FormulaLabelProvider;
 import org.lamport.tla.toolbox.tool.tlc.ui.util.FormHelper;
 import org.lamport.tla.toolbox.tool.tlc.ui.wizard.FormulaWizard;
 
@@ -170,6 +172,13 @@ public class ValidateableTableSectionPart extends SectionPart implements IValida
     {
         // create
         CheckboxTableViewer tableViewer = new CheckboxTableViewer(table);
+		if (Platform.WS_GTK.equals(Platform.getWS())) {
+			// Ideally, the invariants and properties viewer would show the formula with a
+			// fixed-width font (monospace). However, this has issues on Mac and Windows
+			// (does not handle multi-line formula). Hence, only use a monospaced font
+			// on GTK (Linux) where the behaviour is fine.
+			tableViewer.setLabelProvider(new FormulaLabelProvider());
+		}
         // represent formulas in the view
         tableViewer.setContentProvider(new FormulaContentProvider());
         // on changed selection change button enablement

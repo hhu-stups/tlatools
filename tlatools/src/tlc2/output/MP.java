@@ -12,6 +12,7 @@ import tlc2.tool.TLCState;
 import tlc2.tool.TLCStateInfo;
 import tlc2.tool.liveness.LiveWorker;
 import tlc2.util.statistics.IBucketStatistics;
+import util.Assert;
 import util.DebugPrinter;
 import util.Set;
 import util.ToolIO;
@@ -249,7 +250,7 @@ public class MP
             break;
 		case EC.SYSTEM_ERROR_CLEANING_POOL:
 			if (messageClass == ERROR) {
-				b.append("Exception %2% cleaning up an obsolete disk files.\n%1%");
+				b.append("Exception cleaning up an obsolete disk file.\n%1%");
 			} else if (messageClass == WARNING) {
 				b.append("Failed to clean up an obsolete disk file. Please manually delete %1% if free disk space is low.");
 			}
@@ -348,7 +349,7 @@ public class MP
             b.append("Evaluating assumption %1% failed.\n%2%");
             break;
         case EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_INITIAL:
-            b.append("State is not completely specified by the " + "initial predicate:\n%2%");
+            b.append("State is not completely specified by the initial predicate:\n%1%");
             break;
         case EC.TLC_INVARIANT_VIOLATED_INITIAL:
             b.append("Invariant %1% is violated by the initial state:\n%2%");
@@ -363,9 +364,22 @@ public class MP
         case EC.TLC_INVARIANT_VIOLATED_BEHAVIOR:
             b.append("Invariant %1% is violated.");
             break;
+        case EC.TLC_INVARIANT_VIOLATED_LEVEL:
+        	b.append("The invariant %1% is not a state predicate (one with no primes or temporal operators).");
+        	if (parameters.length > 1) {
+        		b.append("\nNote that a bug can cause TLC to incorrectly report this error.\n"
+        				+ "If you believe your TLA+ or PlusCal specification to be correct,\n"
+        				+ "please check if this bug described in LevelNode.java starting at line 590ff affects you.");
+        	}
+            break;
 
         case EC.TLC_INVARIANT_EVALUATION_FAILED:
-            b.append("Evaluating invariant %1% failed:\n%2%");
+            if (parameters.length == 1) {
+                b.append("Evaluating invariant %1% failed.");
+            }
+            else if (parameters.length == 2) {
+                b.append("Evaluating invariant %1% failed.\n%2%");
+            }
             break;
 
         case EC.TLC_ACTION_PROPERTY_VIOLATED_BEHAVIOR:
@@ -373,7 +387,12 @@ public class MP
             break;
 
         case EC.TLC_ACTION_PROPERTY_EVALUATION_FAILED:
-            b.append("Evaluating action property %1% failed.");
+            if (parameters.length == 1) {
+                b.append("Evaluating action property %1% failed.");
+            }
+            else if (parameters.length == 2) {
+                b.append("Evaluating action property %1% failed.\n%2%");
+            }
             break;
 
         case EC.TLC_DEADLOCK_REACHED:
@@ -402,6 +421,16 @@ public class MP
             b.append("This is probably a TLC bug(%1%).");
             break;
 
+        case EC.TLC_FINGERPRINT_EXCEPTION:
+            b.append("TLC was unable to fingerprint."
+                + "\n"
+                + "\nFingerprint Stack Trace:"
+                + "\n%1%"
+                + "\nReason:"
+                + "\n%2%"); // reason must come last, with nothing following, because Tool cannot parse the embedded error otherwise
+
+            break;
+
         case EC.TLC_NO_STATES_SATISFYING_INIT:
             b.append("There is no state satisfying the initial state predicate.");
             break;
@@ -414,9 +443,19 @@ public class MP
             if (TLCGlobals.tool) {
                 // format same as state printing for easier
                 // parsing by toolbox
-                b.append("%1%: Back to state: %2%\n");
+                if (parameters.length == 1) {
+                    b.append("%1%: Back to state\n");
+                }
+                else if (parameters.length == 2) {
+                    b.append("%1%: Back to state: %2%\n");
+                }
             } else {
-                b.append("Back to state %1%: %2%\n");
+                if (parameters.length == 1) {
+                    b.append("Back to state %1%\n");
+                }
+                else if (parameters.length == 2) {
+                    b.append("Back to state %1%: %2%\n");
+                }
             }
             break;
 
@@ -497,7 +536,12 @@ public class MP
             break;
 
         case EC.CHECK_PARAM_UNRECOGNIZED:
-            b.append("Unrecognized option: %1%");
+            if (parameters.length == 1) {
+                b.append("Unrecognized option: %1%");
+            }
+            else if (parameters.length == 2) {
+                b.append("Unrecognized option in file %2%: %1%");
+            }
             break;
         case EC.CHECK_PARAM_TOO_MANY_INPUT_FILES:
             b.append("More than one input files: %1% and %2%");
@@ -626,6 +670,11 @@ public class MP
         case EC.TLC_FEATURE_UNSUPPORTED:
             b.append("%1%");
             break;
+        case EC.TLC_FEATURE_UNSUPPORTED_LIVENESS_SYMMETRY:
+            b.append("Declaring symmetry during liveness checking is dangerous. "
+            		+ "It might cause TLC to miss violations of the stated liveness properties. "
+            		+ "Please check liveness without symmetry defined.");
+            break;
 
         /* Liveness errors */
         case EC.TLC_LIVE_BEGRAPH_FAILED_TO_CONSTRUCT:
@@ -748,10 +797,13 @@ public class MP
             b.append("Finished in %1% at (").append(SDF.format(new Date())).append(")");
             break;
         case EC.TLC_MODE_MC:
-            b.append("Running in Model-Checking mode with %1% worker%2%.");
+            b.append("Running breadth-first search Model-Checking with %1% worker%2% on %3% cores with %10%MB heap and %11%MB offheap memory (%4% %5% %6%, %7% %8% %9%).");
+            break;
+        case EC.TLC_MODE_MC_DFS:
+            b.append("Running depth-first search Model-Checking with %1% worker%2% on %3% cores with %10%MB heap and %11%MB offheap memory (%4% %5% %6%, %7% %8% %9%).");
             break;
         case EC.TLC_MODE_SIMU:
-            b.append("Running Random Simulation with seed %1%.");
+            b.append("Running Random Simulation with seed %1% with %2% worker%3% on %4% cores with %11%MB heap and %12%MB offheap memory (%5% %6% %7%, %8% %9% %10%).");
             break;
         case EC.TLC_COMPUTING_INIT:
             b.append("Computing initial states...");
@@ -783,9 +835,12 @@ public class MP
                     + "  based on the actual fingerprints:  %2%");
             break;
         case EC.TLC_SEARCH_DEPTH:
-            b.append("The depth of the complete state graph search is %1%.");
+			b.append("The depth of the complete state graph search is %1%.");
             break;
-        case EC.TLC_CHECKPOINT_START:
+        case EC.TLC_STATE_GRAPH_OUTDEGREE:
+			b.append("The average outdegree of the complete state graph is %2% (minimum is %1%, the maximum %4% and the 95th percentile is %3%).");
+            break;
+       case EC.TLC_CHECKPOINT_START:
             b.append("Checkpointing of run %1%");
             break;
         case EC.TLC_CHECKPOINT_END:
@@ -814,7 +869,7 @@ public class MP
         	if (parameters.length == 4) {
 				b.append("Progress(%1%) at " + SDF.format(new Date()) + ": %2% states generated, "
 						+ "%3% distinct states found, " + "%4% states left on queue.");
-        	} else {
+        	} else if (parameters.length == 6) {
         		b.append("Progress(%1%) at " + SDF.format(new Date()) + ": %2% states generated ("
         				+ df.format(Long.valueOf(parameters[4])) + " s/min), %3% distinct states found ("
         				+ df.format(Long.valueOf(parameters[5])) + " ds/min), %4% states left on queue.");
@@ -871,6 +926,12 @@ public class MP
         case EC.TLC_CONFIG_WRONG_SUBSTITUTION:
             b.append("The configuration file substitutes for %1% with the undefined identifier %2%.");
             break;
+        case EC.TLC_CONFIG_UNDEFINED_OR_NO_OPERATOR:
+            b.append("In evaluation, the identifier %1% is either undefined or not an operator.\n%2%");
+            break;
+        case EC.TLC_CONFIG_SUBSTITUTION_NON_CONSTANT:
+            b.append("The configuration file substitutes constant %1% with non-constant %2%.");
+            break;
         case EC.TLC_CONFIG_WRONG_SUBSTITUTION_NUMBER_OF_ARGS:
             b.append("The configuration file substitutes for %1% with %2% of different number of arguments.");
             break;
@@ -881,7 +942,12 @@ public class MP
             b.append("The configuration file cannot specify both INIT/NEXT and SPECIFICATION fields.");
             break;
         case EC.TLC_CONFIG_ID_REQUIRES_NO_ARG:
-            b.append("TLC requires %1% not to take any argument.");
+            if (parameters.length == 1) {
+                b.append("TLC requires %1% not to take any argument.");
+            }
+            else if (parameters.length == 2) {
+                b.append("TLC requires %1% not to take any argument, but one was given: %2%");
+            }
             break;
         case EC.TLC_CONFIG_SPECIFIED_NOT_DEFINED:
             b.append("The %1% %2% specified in the configuration file" + "\nis not defined in the specification.");
@@ -1068,6 +1134,7 @@ public class MP
      */
     public static String getError(int errorCode, String[] parameters)
     {
+    	recorder.record(errorCode, parameters);
         return getMessage(ERROR, errorCode, parameters);
     }
 
@@ -1098,6 +1165,7 @@ public class MP
      */
     public static String getMessage(int errorCode, String[] parameters)
     {
+    	recorder.record(errorCode, parameters);
         return getMessage(NONE, errorCode, parameters);
     }
 
@@ -1224,7 +1292,14 @@ public class MP
         } else {
             msg = msg + "\nThe error occurred when TLC was " + cause + ".";
         }
-        msg = msg + "\nThe exception was a " + throwable.getClass().getName() + "\n";
+        if (throwable instanceof Assert.TLCRuntimeException) {
+			// MK 07/25/2017: Disguise TLCRuntimeException with its parent class
+			// RuntimeException to not change the externally visible TLC output 
+        	// when an exception gets reports.
+        	msg = msg + "\nThe exception was a " +  RuntimeException.class.getName() + "\n";
+        } else {
+        	msg = msg + "\nThe exception was a " +  throwable.getClass().getName() + "\n";
+        }
         if (throwable.getMessage() != null) {
             msg = msg + ": " + throwable.getMessage();
             
@@ -1337,6 +1412,13 @@ public class MP
         ToolIO.out.println(getMessage(TLCBUG, errorCode, parameters));
         DebugPrinter.print("leaving printTLCBug(int, String[])"); //$NON-NLS-1$
     }
+
+    /**
+     * @see MP#printWarning(int)
+     */
+	public static void printWarning(final int errorCode) {
+		printWarning(errorCode, new String[0]);
+	}
 
     /**
      * @see MP#printWarning(int, String[])

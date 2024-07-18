@@ -7,10 +7,8 @@ package tlc2;
 
 import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.net.UnknownHostException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Enumeration;
@@ -40,6 +38,7 @@ import util.FileUtil;
 import util.FilenameToStream;
 import util.MailSender;
 import util.SimpleFilenameToStream;
+import util.TLCRuntime;
 import util.ToolIO;
 import util.UniqueString;
 
@@ -171,6 +170,9 @@ public class TLC
      *    Defaults to no coverage if not specified
      *  o -continue: continue running even when invariant is violated
      *    Defaults to stop at the first violation if not specified
+     *  o -lncheck: Check liveness properties at different times
+     *    of model checking.
+     *    Defaults to false increasing the overall model checking time.
      *  o -nowarning: disable all the warnings
      *    Defaults to report warnings if not specified
      *  o -fp num: use the num'th irreducible polynomial from the list
@@ -191,7 +193,7 @@ public class TLC
      *                     default: 1000000
      *   
      */
-    public static void main(String[] args) throws UnknownHostException, FileNotFoundException
+    public static void main(String[] args) throws Exception
     {
         TLC tlc = new TLC();
 
@@ -270,7 +272,7 @@ public class TLC
             } else if (args[index].equals("-gzip"))
             {
                 index++;
-                TLCGlobals.useGZIP = false;
+                TLCGlobals.useGZIP = true;
             } else if (args[index].equals("-terse"))
             {
                 index++;
@@ -295,7 +297,19 @@ public class TLC
             {
                 printUsage();
                 return false;
-            } else if (args[index].equals("-config"))
+            } else if (args[index].equals("-lncheck"))
+            {
+                index++;
+                if (index < args.length)
+                {
+                    TLCGlobals.lnCheck = args[index].toLowerCase();
+                    index++;
+                } else
+                {
+                    printErrorMsg("Error: expect a strategy such as final for -lncheck option.");
+                    return false;
+                }
+           } else if (args[index].equals("-config"))
             {
                 index++;
                 if (index < args.length)
@@ -757,6 +771,22 @@ public class TLC
             }
             FP64.Init(fpIndex);
 
+            
+    		final TLCRuntime tlcRuntime = TLCRuntime.getInstance();
+    		final long offHeapMemory = tlcRuntime.getNonHeapPhysicalMemory() / 1024L / 1024L;
+    		final String arch = tlcRuntime.getArchitecture().name();
+    		
+    		final Runtime runtime = Runtime.getRuntime();
+    		final long heapMemory = runtime.maxMemory() / 1024L / 1024L;
+    		final String cores = Integer.toString(runtime.availableProcessors());
+
+    		final String vendor = System.getProperty("java.vendor");
+    		final String version = System.getProperty("java.version");
+
+    		final String osName = System.getProperty("os.name");
+    		final String osVersion = System.getProperty("os.version");
+    		final String osArch = System.getProperty("os.arch");
+    		
             // Start checking:
             if (isSimulate)
             {
@@ -770,7 +800,10 @@ public class TLC
                 {
                     rng.setSeed(seed, aril);
                 }
-                MP.printMessage(EC.TLC_MODE_SIMU, String.valueOf(seed));
+				MP.printMessage(EC.TLC_MODE_SIMU,
+						new String[] { String.valueOf(seed), String.valueOf(TLCGlobals.getNumWorkers()),
+								TLCGlobals.getNumWorkers() == 1 ? "" : "s", cores, osName, osVersion, osArch, vendor,
+								version, arch, Long.toString(heapMemory), Long.toString(offHeapMemory) });
                 Simulator simulator = new Simulator(mainFile, configFile, null, deadlock, traceDepth, 
                         traceNum, rng, seed, true, resolver, specObj);
                 TLCGlobals.simulator = simulator;
@@ -780,17 +813,20 @@ public class TLC
                 simulator.simulate();
             } else
             {
-                // model checking
-				MP.printMessage(EC.TLC_MODE_MC, new String[] { String.valueOf(TLCGlobals.getNumWorkers()),
-						TLCGlobals.getNumWorkers() == 1 ? "" : "s" });
-                
-                AbstractChecker mc = null;
+            	final String[] parameters = new String[] { String.valueOf(TLCGlobals.getNumWorkers()),
+            			TLCGlobals.getNumWorkers() == 1 ? "" : "s", cores, osName, osVersion, osArch, vendor,
+            					version, arch, Long.toString(heapMemory), Long.toString(offHeapMemory) };
+
+            	// model checking
+        		AbstractChecker mc = null;
                 if (TLCGlobals.DFIDMax == -1)
                 {
+					MP.printMessage(EC.TLC_MODE_MC, parameters);
                     mc = new ModelChecker(mainFile, configFile, dumpFile, asDot, deadlock, fromChkpt, resolver, specObj, fpSetConfiguration);
                     modelCheckerMXWrapper = new ModelCheckerMXWrapper((ModelChecker) mc, this);
                 } else
                 {
+					MP.printMessage(EC.TLC_MODE_MC_DFS, parameters);
                     mc = new DFIDModelChecker(mainFile, configFile, dumpFile, asDot, deadlock, fromChkpt, true, resolver, specObj);
                 }
                 TLCGlobals.mainChecker = mc;
@@ -830,8 +866,11 @@ public class TLC
 				}
         	}
 			modelCheckerMXWrapper.unregister();
+			// In tool mode print runtime in milliseconds, in non-tool mode print human
+			// readable runtime (days, hours, minutes, ...).
+			final long runtime = System.currentTimeMillis() - startTime;
 			MP.printMessage(EC.TLC_FINISHED,
-					convertRuntimeToHumanReadable(System.currentTimeMillis() - startTime));
+					TLCGlobals.tool ? Long.toString(runtime) + "ms" : convertRuntimeToHumanReadable(runtime));
 			MP.flush();
         }
     }

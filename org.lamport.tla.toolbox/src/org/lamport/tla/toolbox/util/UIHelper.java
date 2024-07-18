@@ -1,5 +1,6 @@
 package org.lamport.tla.toolbox.util;
 
+import java.io.File;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
@@ -11,11 +12,16 @@ import org.eclipse.core.commands.NotEnabledException;
 import org.eclipse.core.commands.NotHandledException;
 import org.eclipse.core.commands.ParameterizedCommand;
 import org.eclipse.core.commands.common.NotDefinedException;
+import org.eclipse.core.filesystem.EFS;
+import org.eclipse.core.filesystem.IFileStore;
+import org.eclipse.core.filesystem.IFileSystem;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.runtime.Assert;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IAdaptable;
+import org.eclipse.core.runtime.IConfigurationElement;
+import org.eclipse.core.runtime.IExtensionRegistry;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Platform;
 import org.eclipse.e4.core.contexts.IEclipseContext;
@@ -65,6 +71,7 @@ import org.eclipse.ui.WorkbenchException;
 import org.eclipse.ui.commands.ICommandService;
 import org.eclipse.ui.editors.text.FileDocumentProvider;
 import org.eclipse.ui.handlers.IHandlerService;
+import org.eclipse.ui.ide.FileStoreEditorInput;
 import org.eclipse.ui.part.FileEditorInput;
 import org.eclipse.ui.part.MultiPageEditorPart;
 import org.eclipse.ui.texteditor.ITextEditor;
@@ -325,6 +332,26 @@ public class UIHelper {
 	public static String getActivePerspectiveId() {
 		return UIHelper.getActivePage().getPerspective().getId();
 	}
+	
+	/**
+	 * @return Returns the {@link IEditorPart} for the given editor id without
+	 *         opening the editor or null if no editor with the given id exists.
+	 *         Contrary to the Eclipse facilities to find and editor, this method
+	 *         does not initialize/render/configure the editor instance. It is left
+	 *         to the callee to properly initialize the editor instance by e.g.
+	 *         adding it to a MultipageEditor.
+	 * @throws CoreException
+	 */
+	public static IEditorPart findEditor(final String editorId) throws CoreException {
+		final IExtensionRegistry registry = Platform.getExtensionRegistry();
+		final IConfigurationElement[] elements = registry.getConfigurationElementsFor(PlatformUI.PLUGIN_ID, "editors");
+		for (IConfigurationElement ice : elements) {
+			if (editorId.equals(ice.getAttribute("id"))) {
+				return (IEditorPart) ice.createExecutableExtension("class");
+			}
+		}
+		return null;
+	}
 
 	/**
 	 * Convenience method to reduce client dependencies
@@ -381,7 +408,25 @@ public class UIHelper {
 	public static IEditorPart openEditorUnchecked(String editorId, IFile file, boolean activate) throws PartInitException {
 		return openEditorUnchecked(editorId, new FileEditorInput(file), activate);
 	}
-
+	
+	/**
+	 * @see UIHelper#openEditorUnchecked(String, File, String, boolean)
+	 */
+	public static IEditorPart openEditorUnchecked(String editorId, File file, final String name) throws PartInitException {
+		return openEditorUnchecked(editorId, file, name, true);
+	}
+	
+	/**
+	 * @param file The file to open
+	 * @param name A human readable name for the input file. If the file name is to be used, pass {@link File#getName()}
+	 * @see UIHelper#openEditorUnchecked(String, IEditorInput, boolean)
+	 */
+	public static IEditorPart openEditorUnchecked(final String editorId, final File file, final String name, final boolean activate) throws PartInitException {
+		final IFileSystem localFileSystem = EFS.getLocalFileSystem();
+		final IFileStore fromLocalFile = localFileSystem.fromLocalFile(file);
+		return openEditorUnchecked(editorId, new NamedFileStoreEditorInput(fromLocalFile, name), activate);
+	}
+	
 	public static IEditorPart openEditorUnchecked(String editorId, IEditorInput input) throws PartInitException {
 		return openEditorUnchecked(editorId, input, true);
 	}
@@ -1235,6 +1280,21 @@ public class UIHelper {
 			// you do get the current string.
 			statusLineManager.setMessage(null);
 			selectionService.removeSelectionChangedListener(this);
+		}
+	}
+
+	private static class NamedFileStoreEditorInput extends FileStoreEditorInput {
+
+		private final String name;
+
+		public NamedFileStoreEditorInput(final IFileStore fileStore, final String name) {
+			super(fileStore);
+			this.name = name;
+		}
+		
+		@Override
+		public String getName() {
+			return name;
 		}
 	}
 

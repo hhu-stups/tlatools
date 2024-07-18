@@ -44,6 +44,7 @@ import org.lamport.tla.toolbox.tool.prover.ui.preference.ProverSecondPreferenceP
 import org.lamport.tla.toolbox.tool.prover.ui.view.ObligationsView;
 import org.lamport.tla.toolbox.ui.dialog.InformationDialog;
 import org.lamport.tla.toolbox.util.AdapterFactory;
+import org.lamport.tla.toolbox.util.LegacyFileDocumentProvider;
 import org.lamport.tla.toolbox.util.ResourceHelper;
 import org.lamport.tla.toolbox.util.UIHelper;
 
@@ -1155,7 +1156,19 @@ public class ProverHelper
              * the finally block of the following try block to avoid a memory leak.
              */
             FileEditorInput fileEditorInput = new FileEditorInput((IFile) module);
-            FileDocumentProvider fileDocumentProvider = new FileDocumentProvider();
+			// Fix deadlock introduced with upgrade to Eclipse Oxygen framework/platform.
+			// FileDocumentProvider has changed an no longer checks if the IFile module is
+			// synced. This results in a refresh Job with a lock on the file which deadlocks
+			// because the ProverJob locked the entire workspace (including the file). At
+			// the same time, the ProverJob waits for
+			// org.lamport.tla.toolbox.tool.prover.ui.output.TagBasedTLAPMOutputIncrementalParser.appendText(String)
+			// to finish. Its implementation calls this method. In other words, the
+			// ProverJob locks the workspace and triggers a (workspace) Job to refresh the
+			// module. The refresh Job and the ProverJob deadlock.
+			// Alternatively, it's possible to acquire/create the IDocument in the ProverJob
+			// and pass it to the TagBasedTLAPMOutputIncrementalParser. However, I'm not
+			// sure if this causes problems if a proof spans across multiple files.
+            final FileDocumentProvider fileDocumentProvider = new LegacyFileDocumentProvider();
 
             try
             {

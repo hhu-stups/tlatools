@@ -25,19 +25,27 @@
  ******************************************************************************/
 package tlc2.tool.fp;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
 import java.io.IOException;
 
-import junit.framework.TestCase;
+import org.junit.Assume;
+import org.junit.Before;
+import org.junit.Test;
 
-public class LongArrayTest extends TestCase {
+import util.TLCRuntime;
 
+public class LongArrayTest {
+	
+	@Before
+	public void setup() {
+		Assume.assumeTrue(TLCRuntime.getInstance().getArchitecture() == TLCRuntime.ARCH.x86_64);
+	}
+
+	@Test
 	public void testGetAndSet() throws IOException {
-		if (!System.getProperty("sun.arch.data.model").equals("64")) {
-			// LongArray only works on 64bit architectures. See comment in
-			// LongArray ctor.
-			return;
-		}
-		
 		final int elements = 100;
 
 		final LongArray array = new LongArray(elements);
@@ -72,6 +80,7 @@ public class LongArrayTest extends TestCase {
 		}
 	}
 	
+	@Test
 	public void testOutOfRangePositive() throws IOException {
 		final LongArray array = new LongArray(1);
 		try {
@@ -82,6 +91,7 @@ public class LongArrayTest extends TestCase {
 		fail();
 	}
 	
+	@Test
 	public void testOutOfRangeNegative() throws IOException {
 		final LongArray array = new LongArray(1);
 		try {
@@ -92,6 +102,45 @@ public class LongArrayTest extends TestCase {
 		fail();
 	}
 	
+	@Test
+	public void testGetAndTrySet() throws IOException {
+		final int elements = 100;
+
+		final LongArray array = new LongArray(elements);
+		array.zeroMemory(1);
+		
+		// Assert zero successful
+		for (long i = 0L; i < elements; i++) {
+			assertEquals(0L, array.get(i));
+		}
+
+		// trySet linear elements.
+		for (long i = 0L; i < elements; i++) {
+			assertTrue(array.trySet(i, 0, i));
+		}
+		for (long i = 0L; i < elements; i++) {
+			assertEquals(i, array.get(i));
+		}
+
+		// Replace with largest possible values
+		for (long i = 0L; i < elements; i++) {
+			array.trySet(i, i, Long.MAX_VALUE - i);
+		}
+		for (long i = 0L; i < elements; i++) {
+			assertEquals(Long.MAX_VALUE - i, array.get(i));
+		}
+		
+
+		// Replace with smallest possible values
+		for (long i = 0L; i < elements; i++) {
+			array.trySet(i, Long.MAX_VALUE - i, Long.MIN_VALUE + i);
+		}
+		for (long i = 0L; i < elements; i++) {
+			assertEquals(Long.MIN_VALUE + i, array.get(i));
+		}
+	}
+	
+	@Test
 	public void testZeroMemory() throws IOException {
 		for (int k = 1; k < 8; k++) {
 			for (int i = 1; i < 128; i++) {

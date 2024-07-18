@@ -74,11 +74,13 @@ public abstract class CloudTLCInstanceParameters {
 		if (numberOfWorkers == 1) {
 			return getJavaWorkerVMArgs();
 		}
-		return "-Xmx56G -Xms56G";
+		// See org.lamport.tla.toolbox.tool.tlc.job.TLCProcessJob.getAdditionalVMArgs()
+		return "--add-modules=java.activation -XX:+IgnoreUnrecognizedVMOptions -Xmx56G -Xms56G";
 	}
 	
 	public String getJavaWorkerVMArgs() {
-		return "-Xmx24G -Xms24G -XX:MaxDirectMemorySize=32g";
+		// See org.lamport.tla.toolbox.tool.tlc.job.TLCProcessJob.getAdditionalVMArgs()
+		return "--add-modules=java.activation -XX:+IgnoreUnrecognizedVMOptions -Xmx24G -Xms24G -XX:MaxDirectMemorySize=32g";
 	}
 
 	// tlc parameters
@@ -102,6 +104,8 @@ public abstract class CloudTLCInstanceParameters {
 	
 	public abstract String getCloudProvider();
 
+	public abstract String getRegion();
+	
 	public abstract String getImageId();
 
 	public abstract String getHardwareId();
@@ -118,5 +122,33 @@ public abstract class CloudTLCInstanceParameters {
 
 	public void mungeBuilder(ContextBuilder builder) {
 		// Nothing to be done here
+	}
+
+	public String getOSFilesystemTuning() {
+		return "/bin/true"; // no-op, because concat with && ... && in CDTJ.
+	}
+	
+	public String getFlightRecording() {
+		return "-XX:+UnlockCommercialFeatures "
+				+ "-XX:+FlightRecorder "
+				+ "-XX:+UnlockDiagnosticVMOptions "
+				+ "-XX:+DebugNonSafepoints "
+				+ "-XX:FlightRecorderOptions=defaultrecording=true,disk=true,repository=/mnt/tlc,dumponexit=true,dumponexitpath=/mnt/tlc/tlc.jfr,maxage=12h";
+	}
+
+	public String getHostnameSetup() {
+		return "/bin/true"; // no-op, because concat with && ... && in CDTJ.
+	}
+
+	public String getCloudAPIShutdown() {
+		return "/bin/true"; // no-op, because concat with && ... && in CDTJ.
+	}
+
+	public String getExtraRepositories() {
+		return "/bin/true"; // no-op, because concat with && ... && in CDTJ.
+	}
+
+	public String getExtraPackages() {
+		return ""; // no-op, because concat with && ... && in CDTJ.
 	}
 }

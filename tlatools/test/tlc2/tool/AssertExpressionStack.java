@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2016 Microsoft Research. All rights reserved. 
+ * Copyright (c) 2017 Microsoft Research. All rights reserved. 
  *
  * The MIT License (MIT)
  * 
@@ -23,43 +23,38 @@
  * Contributors:
  *   Markus Alexander Kuppe - initial API and implementation
  ******************************************************************************/
-package org.lamport.tla.toolbox.tool.tla2tex.view;
+package tlc2.tool;
 
-import org.eclipse.swt.SWT;
-import org.eclipse.swt.browser.Browser;
-import org.eclipse.swt.layout.FillLayout;
-import org.eclipse.swt.widgets.Composite;
-import org.eclipse.ui.part.ViewPart;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
-public class PDFBrowser extends ViewPart {
+import java.util.ArrayList;
+import java.util.List;
 
-	public static final String ID = "org.lamport.tla.toolbox.tool.tla2tex.PDFBrowser";
-	
-	private Browser browser;
+import org.junit.Test;
 
-	/* (non-Javadoc)
-	 * @see org.eclipse.ui.part.WorkbenchPart#createPartControl(org.eclipse.swt.widgets.Composite)
-	 */
-	public void createPartControl(Composite parent) {
-		final Composite body = new Composite(parent, SWT.NONE);
-        body.setLayout(new FillLayout());
-        this.browser = new Browser(body, SWT.NONE);
-        setBlank();
+import tlc2.output.EC;
+import tlc2.tool.liveness.ModelCheckerTestCase;
+
+public class AssertExpressionStack extends ModelCheckerTestCase {
+
+	public AssertExpressionStack() {
+		super("AssertExpressionStack");
 	}
 
-	/* (non-Javadoc)
-	 * @see org.eclipse.ui.part.WorkbenchPart#setFocus()
-	 */
-	public void setFocus() {
-		this.browser.setFocus();
-	}
+	@Test
+	public void testSpec() {
+		assertTrue(recorder.recorded(EC.TLC_FINISHED));
+		assertFalse(recorder.recorded(EC.TLC_BUG));
 
-	public void setBlank() {
-		this.browser.setText("<html><body></body></html>");
-	}
-	
-	public void setInput(String title, String url) {
-		this.setPartName(title);
-		this.browser.setUrl(url);
+		assertTrue(recorder.recorded(EC.TLC_BEHAVIOR_UP_TO_THIS_POINT));
+		
+		final List<String> expectedTrace = new ArrayList<String>(2);
+		expectedTrace.add("x = 0");
+		expectedTrace.add("x = 1");
+		assertTraceWith(recorder.getRecords(EC.TLC_STATE_PRINT2), expectedTrace);
+		
+		// Assert a proper nested expression has been recorded which represents the call stack.
+		assertFalse(recorder.recordedWithStringValue(EC.TLC_NESTED_EXPRESSION, "    The error call stack is empty.\n"));
 	}
 }

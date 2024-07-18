@@ -22,7 +22,7 @@ public class TLCGlobals
 {
 
     // The current version of TLC
-    public static String versionOfTLC = "Version 2.09 of 10 March 2017";
+    public static String versionOfTLC = "Version 2.10 of 28 September 2017";
     
     // The bound for set enumeration, used for pretty printing
     public static int enumBound = 2000;
@@ -47,6 +47,12 @@ public class TLCGlobals
 	 * (see ILiveCheck#addNextState) and thus part of safety checking..
 	 */
 	public static double livenessRatio = 0.2d;
+	
+	public static String lnCheck = "default";
+	
+	public static boolean doLiveness() {
+		return !lnCheck.equals("final");
+	}
 
     public synchronized static void setNumWorkers(int n)
     {
@@ -148,7 +154,7 @@ public class TLCGlobals
     public static boolean useView = false;
 
     // The flag to control if gzip is applied to Value input/output stream.
-    public static boolean useGZIP = true;
+    public static boolean useGZIP = false;
 
     // The tool id number for TLC2.
     public static int ToolId = FrontEnd.getToolId();

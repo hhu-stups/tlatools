@@ -118,7 +118,7 @@
 		</echo>
 		<!-- compile -->
 		<mkdir dir="${class.dir}" />
-		<javac includeantruntime="false" srcdir="${src.dir}" destdir="${class.dir}" debug="true" verbose="false" source="1.5" target="1.5">
+		<javac includeantruntime="false" srcdir="${src.dir}" destdir="${class.dir}" debug="true" verbose="false" source="1.8" target="1.8">
 			<!-- compilerarg value="-Xlint:deprecation"/-->
 			<classpath refid="project.classpath" />
 			<classpath>
@@ -147,7 +147,7 @@
 			====================================================================
 		</echo>
 		<!-- compile aspectj related class files -->
-		<iajc destdir="${class.dir}" sourceRoots="${src-aj.dir}" debug="true" source="1.5" target="1.5">
+		<iajc destdir="${class.dir}" sourceRoots="${src-aj.dir}" debug="true" source="1.8" target="1.8">
 			<classpath refid="project.classpath" />
 			<classpath>
 				<pathelement location="lib/aspectjrt-1.8.5.jar" />
@@ -223,7 +223,7 @@
 	<target name="compile-test" unless="test.skip">
 		<!-- compile unit tests -->
 		<mkdir dir="${test.class.dir}" />
-		<javac includeantruntime="false" srcdir="${test.dir}" destdir="${test.class.dir}" debug="true" verbose="false">
+		<javac includeantruntime="false" srcdir="${test.dir}" destdir="${test.class.dir}" debug="true" verbose="false" source="1.8" target="1.8">
 			<classpath refid="project.classpath" />
 			<classpath>
 				<pathelement location="lib/junit-4.12.jar" />
@@ -253,9 +253,7 @@
 			<junit printsummary="yes" haltonfailure="${test.halt}" haltonerror="${test.halt}"  forkmode="perTest" fork="yes">
 				<!-- enable all assertions -->
 				<jvmarg value="-ea"/>
-				<!-- Uncomment to run TLC with alternative fingerprintset impl. See sysproperty below too.
-				<jvmarg value="-XX:MaxDirectMemorySize=32m"/>
-				-->
+				<jvmarg value="-XX:MaxDirectMemorySize=512k"/>
 				<!-- Uncomment to open a debug port in each forked VM to remote attach your Eclipse at port 1044.
 	            <jvmarg value="-Xdebug" />
 		        <jvmarg value="-Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=1044" />
@@ -275,9 +273,7 @@
 
 				<!-- Pass the base path of the tlatools project to unit tests in case they need it to locate TLA+ specs or configs -->
 				<sysproperty key="basedir" value="${basedir}/"/>
-				<!-- Uncomment to run TLC with alternative fingerprintset impl. See jvmarg above too.
 				<sysproperty key="tlc2.tool.fp.FPSet.impl" value="tlc2.tool.fp.OffHeapDiskFPSet"/>
-				-->
 				<sysproperty key="util.FileUtil.milliseconds" value="true"/>
 				<sysproperty key="tlc2.tool.distributed.TLCWorker.threadCount" value="4"/>
 				<batchtest fork="yes" todir="${test.reports}">
@@ -292,6 +288,7 @@
 						<exclude name="**/SuccessfulSimulationTestCase.java" />
 						<exclude name="**/AbstractExampleTestCase.java" />
 						<exclude name="**/TestMPRecorder.java" />
+						<exclude name="**/TestPrintStream.java" />
 						<exclude name="**/Abstract*Test.java" />
 						<exclude name="**/TestDriver.java" />
 						<exclude name="**/TestDriver2.java" />
@@ -339,6 +336,7 @@
 					<exclude name="**/SuccessfulSimulationTestCase.java" />
 					<exclude name="**/AbstractExampleTestCase.java" />
 					<exclude name="**/TestMPRecorder.java" />
+					<exclude name="**/TestPrintStream.java" />
 					<exclude name="**/Abstract*Test.java" />
 					<exclude name="**/TestDriver.java" />
 					<exclude name="**/TestDriver2.java" />
