@@ -53,6 +53,8 @@ if (project.hasProperty('ossrhUsername') && project.hasProperty('ossrhPassword')
 	task sourcesJar(type: Jar) {
 		classifier = 'sources'
 		from sourceSets.main.allSource
+		// Ignore duplicates because the same directory is used for sources and resources.
+		duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 	}
 
 	artifacts {
