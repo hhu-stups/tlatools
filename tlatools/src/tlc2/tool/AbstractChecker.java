@@ -2,7 +2,6 @@ package tlc2.tool;
 
 import java.io.IOException;
 import java.util.Hashtable;
-import java.util.concurrent.atomic.AtomicLong;
 
 import tla2sany.modanalyzer.SpecObj;
 import tla2sany.semantic.SemanticNode;
@@ -16,7 +15,9 @@ import tlc2.tool.liveness.ILiveCheck;
 import tlc2.tool.liveness.LiveCheck;
 import tlc2.tool.liveness.Liveness;
 import tlc2.tool.liveness.NoOpLiveCheck;
-import tlc2.util.IdThread;
+import tlc2.util.DotStateWriter;
+import tlc2.util.IStateWriter;
+import tlc2.util.NoopStateWriter;
 import tlc2.util.ObjLongTable;
 import tlc2.util.StateWriter;
 import tlc2.util.statistics.BucketStatistics;
@@ -30,7 +31,6 @@ import util.FilenameToStream;
 /**
  * The abstract checker
  * @author Simon Zambrovski
- * @version $Id$
  */
 public abstract class AbstractChecker implements Cancelable
 {
@@ -45,8 +45,6 @@ public abstract class AbstractChecker implements Cancelable
 	
 	protected static final boolean LIVENESS_STATS = Boolean.getBoolean(Liveness.class.getPackage().getName() + ".statistics");
 	
-    // SZ Mar 9, 2009: static modifier removed
-    protected AtomicLong numOfGenStates;
     protected TLCState predErrState;
     protected TLCState errState;
     protected boolean done;
@@ -61,9 +59,9 @@ public abstract class AbstractChecker implements Cancelable
     public Action[] impliedActions;
     public Action[] impliedInits;
     public Action[] actions;
-    protected StateWriter allStateWriter;
+    protected final IStateWriter allStateWriter;
     protected boolean cancellationFlag;
-    private IdThread[] workers;
+    protected IWorker[] workers;
 	protected final ILiveCheck liveCheck;
 
 	protected final ThreadLocal<Integer> threadLocal = new ThreadLocal<Integer>() {
@@ -85,7 +83,7 @@ public abstract class AbstractChecker implements Cancelable
      * @param resolver
      * @param spec - pre-built specification object (e.G. from calling SANY from the tool previously)
      */
-    public AbstractChecker(String specFile, String configFile, String dumpFile, boolean deadlock, String fromChkpt,
+    public AbstractChecker(String specFile, String configFile, String dumpFile, final boolean asDot, boolean deadlock, String fromChkpt,
             boolean preprocess, FilenameToStream resolver, SpecObj spec) throws EvalException, IOException
     {
         this.cancellationFlag = false;
@@ -106,7 +104,6 @@ public abstract class AbstractChecker implements Cancelable
         // moved to file utilities
         this.metadir = FileUtil.makeMetaDir(specDir, fromChkpt);
         
-        this.numOfGenStates = new AtomicLong(0);
         this.errState = null;
         this.predErrState = null;
         this.done = false;
@@ -117,7 +114,20 @@ public abstract class AbstractChecker implements Cancelable
         // Initialize dumpFile:
         if (dumpFile != null)
         {
-            this.allStateWriter = new StateWriter(dumpFile);
+        	if (dumpFile.startsWith("${metadir}")) {
+				// prefix dumpfile with the known value of this.metadir. There
+				// is no way to determine the actual value of this.metadir
+				// before TLC startup and thus it's impossible to make the
+				// dumpfile end up in the metadir if desired.
+        		dumpFile = dumpFile.replace("${metadir}", this.metadir);
+        	}
+        	if (asDot) {
+        		this.allStateWriter = new DotStateWriter(dumpFile);
+        	} else {
+        		this.allStateWriter = new StateWriter(dumpFile);
+        	}
+        } else {
+        	 this.allStateWriter = new NoopStateWriter();
         }
 
         this.impliedInits = this.tool.getImpliedInits(); // implied-inits to be checked
@@ -136,7 +146,7 @@ public abstract class AbstractChecker implements Cancelable
 			if (LIVENESS_TESTING_IMPLEMENTATION) {
 				this.liveCheck = new AddAndCheckLiveCheck(this.tool, this.actions, this.metadir, stats);
 			} else {
-				this.liveCheck = new LiveCheck(this.tool, this.actions, this.metadir, stats);
+				this.liveCheck = new LiveCheck(this.tool, this.actions, this.metadir, stats, dumpFile);
 			}
             report("liveness checking initialized");
         } else {
@@ -147,11 +157,6 @@ public abstract class AbstractChecker implements Cancelable
     public final void setDone()
     {
         this.done = true;
-    }
-
-    protected final void incNumOfGenStates(int n)
-    {
-        this.numOfGenStates.getAndAdd(n);
     }
 
     /**
@@ -342,7 +347,7 @@ public abstract class AbstractChecker implements Cancelable
      * @param checkIndex the check level (depth or level)
      * @return the array of initialized worker threads
      */
-    protected abstract IdThread[] startWorkers(AbstractChecker checker, int checkIndex);
+    protected abstract IWorker[] startWorkers(AbstractChecker checker, int checkIndex);
 
     /**
      * Hook to run some work before entering the worker loop

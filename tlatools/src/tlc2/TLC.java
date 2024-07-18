@@ -68,6 +68,17 @@ public class TLC
     private String mainFile;
     private String configFile;
     private String dumpFile;
+    /**
+	 * If true, the dumpFile will be written in dot format to be processed by
+	 * GraphViz.
+	 * <p>
+	 * Contrary to plain -dump, -dot will also write out transitions from state
+	 * s to s' if s' is already known. Thus, the resulting graph shows all
+	 * successors of s instead of just s's unexplored ones.
+	 * <p>
+	 * Off/False by default.
+	 */
+    private boolean asDot;
     private String fromChkpt;
 
     private int fpIndex;
@@ -105,6 +116,7 @@ public class TLC
         mainFile = null;
         configFile = null;
         dumpFile = null;
+        asDot = false;
         fromChkpt = null;
         resolver = null;
 
@@ -136,7 +148,7 @@ public class TLC
      *  o -recover path: recover from the checkpoint at path
      *    Defaults to scratch run if not specified
      *  o -bound: The upper limit for sets effectively limiting the number of init states
-     *    (@see http://bugzilla.tlaplus.net/show_bug.cgi?id=264)
+     *    (@see Bug #264 in general/bugzilla/index.html)
      *    Defaults to 1000000 if not specified
      *  o -metadir path: store metadata in the directory at path
      *    Defaults to specdir/states if not specified
@@ -146,7 +158,8 @@ public class TLC
      *    Defaults to 1
      *  o -dfid num: use depth-first iterative deepening with initial depth num
      *  o -cleanup: clean up the states directory
-     *  o -dump file: dump all the states into file
+     *  o -dump [dot] file: dump all the states into file. If "dot" as sub-parameter
+     *                      is given, the output will be in dot notation.
      *  o -difftrace: when printing trace, show only
      *                the differences between successive states
      *    Defaults to printing full state descriptions if not specified
@@ -185,12 +198,15 @@ public class TLC
         // handle parameters
         if (tlc.handleParameters(args))
         {
-        	final MailSender ms = new MailSender(tlc.mainFile);
+        	final MailSender ms = new MailSender();
         	if (MODEL_PART_OF_JAR) {
         		tlc.setResolver(new InJarFilenameToStream(ModelInJar.PATH));
         	} else {
         		tlc.setResolver(new SimpleFilenameToStream());
         	}
+        	ms.setModelName(tlc.getModelName());
+        	ms.setSpecName(tlc.getSpecName());
+
             // call the actual processing method
             tlc.process();
 
@@ -298,14 +314,24 @@ public class TLC
                 }
             } else if (args[index].equals("-dump"))
             {
+            	String suffix = ".dump";
+            	
                 index++;
+                if (index < args.length && args[index].equals("dot"))
+                {
+                    asDot = true;
+                    suffix = ".dot";
+                    index++;
+                }
                 if (index < args.length)
                 {
                     dumpFile = args[index];
+					// Require a $suffix file extension unless already given. It
+					// is not clear why this is enforced.
                     int len = dumpFile.length();
-                    if (!(dumpFile.startsWith(".dump", len - 5)))
+                    if (!(dumpFile.startsWith(suffix, len - suffix.length())))
                     {
-                        dumpFile = dumpFile + ".dump";
+                        dumpFile = dumpFile + suffix;
                     }
                     index++;
                 } else
@@ -682,15 +708,15 @@ public class TLC
         
         if (TLCGlobals.debug) 
         {
-            StringBuffer buffer = new StringBuffer("TLC argumens:");
-            for (int i=0; i < args.length; i++)
-            {
-                buffer.append(args[i]);
-                if (i < args.length - 1) 
-                {
-                    buffer.append(" ");
-                }
-            }
+		StringBuffer buffer = new StringBuffer("TLC arguments:");
+		for (int i=0; i < args.length; i++)
+		{
+		    buffer.append(args[i]);
+		    if (i < args.length - 1) 
+		    {
+		        buffer.append(" ");
+		    }
+		}
             buffer.append("\n");
             DebugPrinter.print(buffer.toString());
         }
@@ -699,7 +725,7 @@ public class TLC
         printWelcome();
         
         return true;
-    }
+	}
     
     /**
      * The processing method
@@ -755,16 +781,17 @@ public class TLC
             } else
             {
                 // model checking
-                MP.printMessage(EC.TLC_MODE_MC);
+				MP.printMessage(EC.TLC_MODE_MC, new String[] { String.valueOf(TLCGlobals.getNumWorkers()),
+						TLCGlobals.getNumWorkers() == 1 ? "" : "s" });
                 
                 AbstractChecker mc = null;
                 if (TLCGlobals.DFIDMax == -1)
                 {
-                    mc = new ModelChecker(mainFile, configFile, dumpFile, deadlock, fromChkpt, resolver, specObj, fpSetConfiguration);
-                    modelCheckerMXWrapper = new ModelCheckerMXWrapper((ModelChecker) mc);
+                    mc = new ModelChecker(mainFile, configFile, dumpFile, asDot, deadlock, fromChkpt, resolver, specObj, fpSetConfiguration);
+                    modelCheckerMXWrapper = new ModelCheckerMXWrapper((ModelChecker) mc, this);
                 } else
                 {
-                    mc = new DFIDModelChecker(mainFile, configFile, dumpFile, deadlock, fromChkpt, true, resolver, specObj);
+                    mc = new DFIDModelChecker(mainFile, configFile, dumpFile, asDot, deadlock, fromChkpt, true, resolver, specObj);
                 }
                 TLCGlobals.mainChecker = mc;
 // The following statement moved to Spec.processSpec by LL on 10 March 2011               
@@ -901,7 +928,11 @@ public class TLC
         if (!this.welcomePrinted) 
         {
             this.welcomePrinted = true;
-            MP.printMessage(EC.TLC_VERSION, TLCGlobals.versionOfTLC);
+            if (TLCGlobals.getRevision() == null) {
+            	MP.printMessage(EC.TLC_VERSION, TLCGlobals.versionOfTLC);
+            } else {
+            	MP.printMessage(EC.TLC_VERSION, TLCGlobals.versionOfTLC + " (rev: " + TLCGlobals.getRevision() + ")");
+            }
         }
     }
     
@@ -917,4 +948,12 @@ public class TLC
     FPSetConfiguration getFPSetConfiguration() {
     	return fpSetConfiguration;
     }
+
+	public String getModelName() {
+		return System.getProperty(MailSender.MODEL_NAME, this.mainFile);
+	}
+	
+	public String getSpecName() {
+		return System.getProperty(MailSender.SPEC_NAME, this.mainFile);
+	}
 }

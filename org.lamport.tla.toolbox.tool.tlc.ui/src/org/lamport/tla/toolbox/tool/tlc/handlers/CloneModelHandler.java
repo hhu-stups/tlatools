@@ -1,73 +1,61 @@
+/*******************************************************************************
+ *
+ * Copyright (c) 2015 Microsoft Research. All rights reserved. 
+ * The MIT License (MIT)
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy 
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+ * of the Software, and to permit persons to whom the Software is furnished to do
+ * so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software. 
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+ * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+ * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Contributors:
+ *   Simon Zambrowski - initial API and implementation
+ ******************************************************************************/
 package org.lamport.tla.toolbox.tool.tlc.handlers;
 
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
-import org.eclipse.core.runtime.CoreException;
-import org.eclipse.debug.core.DebugPlugin;
-import org.eclipse.debug.core.ILaunchConfiguration;
-import org.eclipse.debug.core.ILaunchConfigurationType;
-import org.eclipse.debug.core.ILaunchConfigurationWorkingCopy;
-import org.eclipse.debug.core.ILaunchManager;
 import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationConstants;
-import org.lamport.tla.toolbox.tool.tlc.launch.TLCModelLaunchDelegate;
-import org.lamport.tla.toolbox.tool.tlc.util.ModelHelper;
+import org.lamport.tla.toolbox.tool.tlc.model.Model;
 
 /**
  * Clones the launch configuration
  */
-public class CloneModelHandler extends AbstractHandler implements IModelConfigurationConstants
-{
-    public static final String PARAM_MODEL_NAME = "toolbox.tool.tlc.commands.model.open.param.modelName";
-    public static final String PARAM_MODELCOPY_NAME = "toolbox.tool.tlc.commands.model.open.param.modelCloneName";
-    public static final String COMMAND_ID = "toolbox.tool.tlc.commands.model.clone";
+public class CloneModelHandler extends AbstractHandler implements IModelConfigurationConstants {
+	
+	public static final String PARAM_MODEL_NAME = "toolbox.tool.tlc.commands.model.open.param.modelName";
+	public static final String PARAM_MODELCOPY_NAME = "toolbox.tool.tlc.commands.model.open.param.modelCloneName";
+	public static final String COMMAND_ID = "toolbox.tool.tlc.commands.model.clone";
 
-    /**
-     * The constructor.
-     */
-    public CloneModelHandler()
-    {
-    }
+	public Object execute(final ExecutionEvent event) throws ExecutionException {
+		final String fullQualifiedModelName = event.getParameter(PARAM_MODEL_NAME);
+		final String modelCopyName = event.getParameter(PARAM_MODELCOPY_NAME);
+		if (fullQualifiedModelName == null) {
+			return null;
+		}
 
-    public Object execute(ExecutionEvent event) throws ExecutionException
-    {
-        // get the launch manager
-        ILaunchManager launchManager = DebugPlugin.getDefault().getLaunchManager();
-
-        // get the launch type (model check)
-        ILaunchConfigurationType launchConfigurationType = launchManager
-                .getLaunchConfigurationType(TLCModelLaunchDelegate.LAUNCH_CONFIGURATION_TYPE);
-
-        String modelName = event.getParameter(PARAM_MODEL_NAME);
-        String modelCopyName = event.getParameter(PARAM_MODELCOPY_NAME);
-        if (modelName == null)
-        {
-            return null;
-        }
-
-        try
-        {
-            ILaunchConfiguration[] launchConfigurations = launchManager
-                    .getLaunchConfigurations(launchConfigurationType);
-            for (int i = 0; i < launchConfigurations.length; i++)
-            {
-                // skip launches from other specs (projects)
-                if (modelName.equals(launchConfigurations[i].getName()))
-                {
-                    ILaunchConfigurationWorkingCopy copy = launchConfigurations[i].copy(modelCopyName);
-                    copy.setAttribute(MODEL_NAME, ModelHelper.getModelName(copy.getFile()));
-                    copy.doSave();
-                    break;
-                }
-            }
-
-        } catch (CoreException e)
-        {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        }
-
-        return null;
-    }
-
+		final Model model = Model.getByName(fullQualifiedModelName);
+		if (model == null) {
+			throw new ExecutionException("Failed to find model by name " + fullQualifiedModelName);
+		}
+		
+		if (model.copy(modelCopyName) == null) {
+			throw new ExecutionException(
+					"Failed to create copy with name " + modelCopyName + " of model " + model.getName());
+		}
+		return null;
+	}
 }

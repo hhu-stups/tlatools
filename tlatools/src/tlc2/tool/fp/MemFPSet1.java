@@ -51,6 +51,7 @@ public final class MemFPSet1 extends FPSet {
   }
 
   public final void exit(boolean cleanup) throws IOException {
+    super.exit(cleanup);
     if (cleanup) {
       // Delete the metadata directory:
       File file = new File(this.metadir);
@@ -99,14 +100,10 @@ public final class MemFPSet1 extends FPSet {
     this.recover(this.filename);
   }
 
-  public final void prepareRecovery() throws IOException { /*SKIP*/ }
-
   public final void recoverFP(long fp) throws IOException {
     Assert.check(!this.set.put(fp), EC.TLC_FP_NOT_IN_SET);
   }
   
-  public final void completeRecovery() throws IOException { /*SKIP*/ }
-
   private final String chkptName(String fname, String ext) {
     return this.metadir + FileUtil.separator + fname + ".fp." + ext;
   }

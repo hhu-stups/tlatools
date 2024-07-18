@@ -2,15 +2,24 @@
 
 package tlc2.tool.distributed.management;
 
+import tlc2.tool.ModelChecker;
+import tlc2.tool.TLCState;
+
 /**
  * @author Markus Alexander Kuppe
  */
-/**
- * @author markus
- *
- */
 public interface TLCStatisticsMXBean {
 
+	/**
+	 * @return The version of TLC.
+	 */
+	String getVersion();
+	
+	/**
+	 * @return The code revision corresponding to this version of TLC.
+	 */
+	String getRevision();
+	
 	/**
 	 * @return The amount of states generated (non-distinct).
 	 *         {@link TLCStatisticsMXBean#getStatesGenerated()} >=
@@ -67,4 +76,20 @@ public interface TLCStatisticsMXBean {
 	 * Force new progress interval to check liveness
 	 */
 	void liveCheck();
+	
+	/**
+	 * The string representation of a {@link TLCState} the {@link ModelChecker}
+	 * has recently checked.
+	 */
+	String getCurrentState();
+	
+	/**
+	 * @return The name of the spec currently being checked by TLC.
+	 */
+	String getSpecName();
+	
+	/**
+	 * @return The name of the model curreclty being checked by TLC.
+	 */
+	String getModelName();
 }

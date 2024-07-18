@@ -1,6 +1,7 @@
 package org.lamport.tla.toolbox.spec.manager;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Hashtable;
 import java.util.Iterator;
@@ -267,22 +268,33 @@ public class WorkspaceSpecManager extends GenericSelectionProvider implements IS
      * @param spec
      * @param newName
      */
-    public void renameSpec(Spec spec, final String newName, final IProgressMonitor aMonitor)
+    public void renameSpec(final Spec oldSpec, final String newName, final IProgressMonitor aMonitor)
     {
-        this.lifecycleManager.sendEvent(new SpecRenameEvent(spec, newName));
-
         // remove from storage
-        specStorage.remove(spec.getName());
+        specStorage.remove(oldSpec.getName());
 
         // rename the underlying resource
-        IProject project = ResourceHelper.projectRename(spec.getProject(), newName, aMonitor);
+        final IProject project = ResourceHelper.projectRename(oldSpec.getProject(), newName, aMonitor);
         
         // create new project with updated name
-        spec = new Spec(project);
-        spec.setLastModified();
+        final Spec newSpec = new Spec(project);
+        newSpec.setLastModified();
 
         // add it to storage
-        addSpec(spec);
+        addSpec(newSpec);
+        
+        this.lifecycleManager.sendEvent(new SpecRenameEvent(oldSpec, newSpec));
+        
+        try {
+			// Renaming a spec constitutes various updates/changes in dependent
+			// bundles such as the TLC Model. A Model indirectly references the
+        	// old IProject through its ILaunchConfiguration. Thus, defer the
+        	// deletion of the old IProject _after_ dependent bundles had a 
+        	// chance to react to the renaming event.
+			oldSpec.getProject().delete(IResource.NONE, aMonitor);
+		} catch (CoreException shouldNotHappen) {
+			shouldNotHappen.printStackTrace();
+		}
     }
     
     /**
@@ -314,6 +326,12 @@ public class WorkspaceSpecManager extends GenericSelectionProvider implements IS
         this.lifecycleManager.sendEvent(new SpecEvent(spec, SpecEvent.TYPE_DELETE));
         ResourceHelper.deleteProject(spec.getProject(), aMonitor, isForget);
         specStorage.remove(spec.getName());
+        if (loadedSpec == spec) {
+			// If the spec being deleted is the current open one, unset the
+			// loadedSpec. Otherwise getMostRecentlyOpenedSpec will return the
+			// deleted one later if no other spec is opened in between.
+        	loadedSpec = null;
+        }
     }
 
     /**
@@ -411,6 +429,10 @@ public class WorkspaceSpecManager extends GenericSelectionProvider implements IS
     {
         return null;
     }
+
+	public Collection<Spec> getSpecs() {
+		return Collections.unmodifiableCollection(specStorage.values());
+	}
 
     /**
      * @return The {@link Spec} most recently opened or null if no specs are known

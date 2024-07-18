@@ -16,12 +16,14 @@ import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.tool.Action;
 import tlc2.tool.IStateFunctor;
+import tlc2.tool.ModelChecker;
 import tlc2.tool.StateVec;
 import tlc2.tool.TLCState;
 import tlc2.tool.Tool;
 import tlc2.util.BitVector;
 import tlc2.util.FP64;
 import tlc2.util.SetOfStates;
+import tlc2.util.IStateWriter.Visualization;
 import tlc2.util.statistics.DummyBucketStatistics;
 import tlc2.util.statistics.IBucketStatistics;
 import util.Assert;
@@ -36,10 +38,14 @@ public class LiveCheck implements ILiveCheck {
 	private final ILiveChecker[] checker;
 	
 	public LiveCheck(Tool tool, Action[] acts, String mdir, IBucketStatistics bucketStatistics) throws IOException {
-		this(tool, acts, Liveness.processLiveness(tool), mdir, bucketStatistics);
+		this(tool, acts, Liveness.processLiveness(tool), mdir, bucketStatistics, null);
+	}
+	
+	public LiveCheck(Tool tool, Action[] acts, String mdir, IBucketStatistics bucketStatistics, String dumpFile) throws IOException {
+		this(tool, acts, Liveness.processLiveness(tool), mdir, bucketStatistics, dumpFile);
 	}
 
-	public LiveCheck(Tool tool, Action[] acts, OrderOfSolution[] solutions, String mdir, IBucketStatistics bucketStatistics) throws IOException {
+	public LiveCheck(Tool tool, Action[] acts, OrderOfSolution[] solutions, String mdir, IBucketStatistics bucketStatistics, String dumpFile) throws IOException {
 		myTool = tool;
 		actions = acts;
 		metadir = mdir;
@@ -47,9 +53,9 @@ public class LiveCheck implements ILiveCheck {
 		checker = new ILiveChecker[solutions.length];
 		for (int soln = 0; soln < solutions.length; soln++) {
 			if (!solutions[soln].hasTableau()) {
-				checker[soln] = new LiveChecker(solutions[soln], soln, bucketStatistics);
+				checker[soln] = new LiveChecker(solutions[soln], soln, bucketStatistics, dumpFile == null ? new NoopLivenessStateWriter() : new DotLivenessStateWriter(dumpFile));
 			} else {
-				checker[soln] = new TableauLiveChecker(solutions[soln], soln, bucketStatistics);
+				checker[soln] = new TableauLiveChecker(solutions[soln], soln, bucketStatistics, dumpFile == null ? new NoopLivenessStateWriter() : new DotLivenessStateWriter(dumpFile));
 			}
 		}
 	}
@@ -144,6 +150,11 @@ public class LiveCheck implements ILiveCheck {
 	public boolean check(boolean forceCheck) throws Exception {
 		if (forceCheck) {
 			return check0(false);
+		}
+		if (Boolean.getBoolean(Liveness.class.getName() + ".finalCheckOnly")) {
+			// The user requested to only check liveness once, on the complete
+			// state graph.
+			return true;
 		}
 		for (int i = 0; i < checker.length; i++) {
 			// see note in doLiveCheck() above!
@@ -319,7 +330,7 @@ public class LiveCheck implements ILiveCheck {
 	 */
 	public void close() throws IOException {
 		for (int i = 0; i < checker.length; i++) {
-			checker[i].getDiskGraph().close();
+			checker[i].close();
 		}
 	}
 
@@ -384,11 +395,14 @@ public class LiveCheck implements ILiveCheck {
 	}
 	
 	static abstract class AbstractLiveChecker implements ILiveChecker {
-
+		
+		protected final ILivenessStateWriter writer;
+		
 		protected final OrderOfSolution oos;
 
-		public AbstractLiveChecker(OrderOfSolution oos) {
+		public AbstractLiveChecker(OrderOfSolution oos, ILivenessStateWriter writer) {
 			this.oos = oos;
+			this.writer = writer;
 		}
 
 		/* (non-Javadoc)
@@ -397,15 +411,25 @@ public class LiveCheck implements ILiveCheck {
 		public OrderOfSolution getSolution() {
 			return oos;
 		}
+
+		/* (non-Javadoc)
+		 * @see tlc2.tool.liveness.ILiveChecker#close()
+		 */
+		public void close() throws IOException {
+			if (!ModelChecker.VETO_CLEANUP) {
+				this.getDiskGraph().close();
+			}
+			this.writer.close();
+		}
 	}
 	
 	private class LiveChecker extends AbstractLiveChecker {
 
 		private final DiskGraph dgraph;
 
-		public LiveChecker(OrderOfSolution oos, int soln, IBucketStatistics bucketStatistics)
+		public LiveChecker(OrderOfSolution oos, int soln, IBucketStatistics bucketStatistics, ILivenessStateWriter writer)
 			throws IOException {
-			super(oos);
+			super(oos, writer);
 			this.dgraph = new DiskGraph(metadir, soln, bucketStatistics);
 		}
 
@@ -414,6 +438,7 @@ public class LiveCheck implements ILiveCheck {
 		 */
 		public void addInitState(TLCState state, long stateFP) {
 			dgraph.addInitNode(stateFP, -1);
+			writer.writeState(state);
 		}
 
 		/* (non-Javadoc)
@@ -430,7 +455,8 @@ public class LiveCheck implements ILiveCheck {
 				final int s = node0.succSize();
 				node0.setCheckState(checkStateResults);
 				for (int sidx = 0; sidx < succCnt; sidx++) {
-					final long successor = nextStates.next().fingerPrint();
+					final TLCState successorState = nextStates.next();
+					final long successor = successorState.fingerPrint();
 					// Only add the transition if:
 					// a) The successor itself has not been written to disk
 					//    TODO Why is an existing successor ignored?
@@ -456,6 +482,7 @@ public class LiveCheck implements ILiveCheck {
 					} else {
 						cnt++;
 					}
+					writer.writeState(s0, successorState, checkActionResults, sidx * alen, alen, ptr1 == -1);
 				}
 				nextStates.resetNext();
 				// In simulation mode (see Simulator), it's possible that this
@@ -463,11 +490,13 @@ public class LiveCheck implements ILiveCheck {
 				// but with changing successors caused by the random successor
 				// selection. If the successor is truly new (it has not been
 				// added before), the GraphNode instance has to be updated
-				// (creating a new record on disk). However, when the the
-				// successor parameter happens to pass known successors, there
-				// is no point in adding the GraphNode again. It is assumed that
-				// it wouldn't invalidate the result, but it wastes disk space.
-				if (s < node0.succSize()) {
+				// (creating a new record on disk). However, when the successor
+				// parameter happens to pass known successors only, there is no
+				// point in adding the GraphNode again. It would just waste disk
+				// space.
+				// The amount of successors is either 0 (no new successor has
+				// been added) or used to be less than it is now.
+				if ((s == 0 && s == node0.succSize()) || s < node0.succSize()) {
 					node0.realign(); // see node0.addTransition() hint
 					// Add a node for the current state. It gets added *after*
 					// all transitions have been added because addNode
@@ -492,9 +521,9 @@ public class LiveCheck implements ILiveCheck {
 
 		private final TableauDiskGraph dgraph;
 
-		public TableauLiveChecker(OrderOfSolution oos, int soln, IBucketStatistics statistics)
+		public TableauLiveChecker(OrderOfSolution oos, int soln, IBucketStatistics statistics, ILivenessStateWriter writer)
 				throws IOException {
-			super(oos);
+			super(oos, writer);
 			this.dgraph = new TableauDiskGraph(metadir, soln, statistics);
 		}
 
@@ -510,6 +539,7 @@ public class LiveCheck implements ILiveCheck {
 				if (tnode.isConsistent(state, myTool)) {
 					dgraph.addInitNode(stateFP, tnode.getIndex());
 					dgraph.recordNode(stateFP, tnode.getIndex());
+					writer.writeState(state, tnode);
 				}
 			}
 		}
@@ -592,6 +622,7 @@ public class LiveCheck implements ILiveCheck {
 									&& (ptr1 == -1 || !node0.transExists(successor, tnode1.getIndex()))) {
 								node0.addTransition(successor, tnode1.getIndex(), checkStateResults.length, alen,
 										checkActionResults, sidx * alen, allocationHint - cnt);
+								writer.writeState(s0, tnode0, s1, tnode1, checkActionResults, sidx * alen, alen, true);
 								// Record that we have seen <fp1,
 								// tnode1>. If fp1 is done, we have
 								// to compute the next states for <fp1,
@@ -610,7 +641,7 @@ public class LiveCheck implements ILiveCheck {
 					}
 					nextStates.resetNext();
 					// See same case in LiveChecker#addNextState
-					if (s < node0.succSize()) {
+					if ((s == 0 && s == node0.succSize()) || s < node0.succSize()) {
 						node0.realign(); // see node0.addTransition() hint
 						dgraph.addNode(node0);
 					} else {
@@ -686,6 +717,7 @@ public class LiveCheck implements ILiveCheck {
 							final int total = actions.length * nextCnt * tnode.nextSize();
 							if (tnode1.isConsistent(s1, myTool) && (ptr1 == -1 || !node.transExists(fp1, tidx1))) {
 								node.addTransition(fp1, tidx1, slen, alen, checkActionRes, 0, (total - cnt));
+								writer.writeState(s, tnode, s1, tnode1, checkActionRes, 0, alen, false, Visualization.DOTTED);
 								// Record that we have seen <fp1, tnode1>. If
 								// fp1 is done, we have to compute the next
 								// states for <fp1, tnode1>.

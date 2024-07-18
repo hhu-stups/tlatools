@@ -3,8 +3,6 @@ package org.lamport.tla.toolbox.tool.tlc.ui.test.threading;
 import java.io.File;
 import java.util.Set;
 
-import junit.framework.Assert;
-
 import org.aspectj.lang.JoinPoint;
 import org.eclipse.swt.widgets.MenuItem;
 import org.eclipse.swtbot.swt.finder.junit.SWTBotJunit4ClassRunner;
@@ -12,6 +10,7 @@ import org.eclipse.swtbot.swt.finder.matchers.WithText;
 import org.eclipse.swtbot.swt.finder.utils.SWTBotPreferences;
 import org.eclipse.swtbot.swt.finder.waits.Conditions;
 import org.eclipse.swtbot.swt.finder.widgets.SWTBotMenu;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -57,7 +56,7 @@ public class HandlerThreadingTest extends AbstractTest {
 	 * Adds a new spec to the toolbox, opens it and tests if parsing is done on
 	 * a non-UI thread
 	 * 
-	 * @see http://bugzilla.tlaplus.net/show_bug.cgi?id=103
+	 * @see Bug #103 in general/bugzilla/index.html
 	 */
 	@Test
 	public void parseSpecInNonUIThread() {

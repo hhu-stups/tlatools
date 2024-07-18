@@ -196,11 +196,23 @@ public class UIHelper {
 	 * @return the reference to the view
 	 */
 	public static IViewPart openViewNoFocus(final String viewId) {
+		return openViewNoFocus(viewId, null);
+	}
+	
+	/**
+	 * Opens a view but does *not* give it focus (useful for informational views
+	 * that should not distract the user's workflow (e.g. typing in the editor).
+	 * 
+	 * @param viewId
+	 * @param secondId Secondary view id
+	 * @return the reference to the view
+	 */
+	public static IViewPart openViewNoFocus(final String viewId, final String secondaryId) {
 		IViewPart view = null;
 		try {
 			IWorkbenchPage activePage = getActivePage();
 			if (activePage != null) {
-				view = activePage.showView(viewId, null, IWorkbenchPage.VIEW_VISIBLE);
+				view = activePage.showView(viewId, secondaryId, IWorkbenchPage.VIEW_VISIBLE);
 			}
 		} catch (PartInitException e) {
 			Activator.getDefault().logError("Error opening a view " + viewId, e);
@@ -363,9 +375,17 @@ public class UIHelper {
 	 * @throws PartInitException
 	 */
 	public static IEditorPart openEditorUnchecked(String editorId, IFile file) throws PartInitException {
-		return openEditorUnchecked(editorId, new FileEditorInput(file));
+		return openEditorUnchecked(editorId, new FileEditorInput(file), true);
+	}
+	
+	public static IEditorPart openEditorUnchecked(String editorId, IFile file, boolean activate) throws PartInitException {
+		return openEditorUnchecked(editorId, new FileEditorInput(file), activate);
 	}
 
+	public static IEditorPart openEditorUnchecked(String editorId, IEditorInput input) throws PartInitException {
+		return openEditorUnchecked(editorId, input, true);
+	}
+	
 	/**
 	 * Opens an editor in current workbench window
 	 * 
@@ -374,10 +394,10 @@ public class UIHelper {
 	 * @return the created or reopened IEditorPart
 	 * @throws PartInitException
 	 */
-	public static IEditorPart openEditorUnchecked(String editorId, IEditorInput input) throws PartInitException {
+	public static IEditorPart openEditorUnchecked(String editorId, IEditorInput input, boolean activate) throws PartInitException {
 		final IWorkbenchPage activePage = getActivePage();
 		if (activePage != null) {
-			final IEditorPart openEditor = activePage.openEditor(input, editorId);
+			final IEditorPart openEditor = activePage.openEditor(input, editorId, activate);
 
 			// Trigger re-evaluation of the handler enablement state by
 			// cycling the activepage. Cycling the active page causes an
@@ -491,17 +511,14 @@ public class UIHelper {
 			ParameterizedCommand pCommand = ParameterizedCommand.generateCommand(command, parameters);
 			return handlerService.executeCommand(pCommand, null);
 		} catch (NotDefinedException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+			Activator.getDefault().logError(e.getMessage(), e);
 		} catch (NotEnabledException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+			Activator.getDefault().logError(e.getMessage(), e);
 		} catch (NotHandledException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+			Activator.getDefault().logError(e.getMessage(), e);
 		} catch (ExecutionException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+			MessageDialog.openError(getShell(), "Failed to execute.", e.getMessage());
+			Activator.getDefault().logError(e.getMessage(), e);
 		}
 
 		return null;

@@ -620,6 +620,9 @@ public class MP
             b.append("Attempted to apply the operator overridden by the Java method"
                     + "\n%1%,\nbut it produced the following error:\n%2%");
             break;
+        case EC.TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE_LOADED:
+            b.append("Loading %1% operator override from %2% with signature: %3%.");
+            break;
         case EC.TLC_FEATURE_UNSUPPORTED:
             b.append("%1%");
             break;
@@ -745,7 +748,7 @@ public class MP
             b.append("Finished in %1% at (").append(SDF.format(new Date())).append(")");
             break;
         case EC.TLC_MODE_MC:
-            b.append("Running in Model-Checking mode.");
+            b.append("Running in Model-Checking mode with %1% worker%2%.");
             break;
         case EC.TLC_MODE_SIMU:
             b.append("Running Random Simulation with seed %1%.");

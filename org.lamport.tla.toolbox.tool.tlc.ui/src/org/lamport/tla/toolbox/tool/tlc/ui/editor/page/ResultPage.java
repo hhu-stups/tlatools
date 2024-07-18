@@ -21,7 +21,6 @@ import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.Job;
-import org.eclipse.debug.core.ILaunchConfiguration;
 import org.eclipse.jface.action.Action;
 import org.eclipse.jface.resource.JFaceResources;
 import org.eclipse.jface.text.Document;
@@ -64,6 +63,7 @@ import org.eclipse.ui.forms.widgets.Section;
 import org.eclipse.ui.forms.widgets.TableWrapData;
 import org.eclipse.ui.forms.widgets.TableWrapLayout;
 import org.eclipse.ui.progress.UIJob;
+import org.lamport.tla.toolbox.tool.tlc.model.Model;
 import org.lamport.tla.toolbox.tool.tlc.output.data.CoverageInformationItem;
 import org.lamport.tla.toolbox.tool.tlc.output.data.ITLCModelLaunchDataPresenter;
 import org.lamport.tla.toolbox.tool.tlc.output.data.StateSpaceInformationItem;
@@ -126,16 +126,10 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
 
         public void linkActivated(HyperlinkEvent e)
         {
-            if (getConfig() != null)
+            if (getModel() != null)
             {
-                try
-                {
-                    ModelHelper.setOriginalTraceShown(getConfig(), true);
-                } catch (CoreException e1)
-                {
-                    TLCUIActivator.getDefault().logError("Error setting the original trace to be shown.", e1);
-                }
-                TLCErrorView.updateErrorView(getConfig());
+            	getModel().setOriginalTraceShown(true);
+                TLCErrorView.updateErrorView(getModel());
             }
         }
     };
@@ -184,7 +178,16 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
 	                    ResultPage.this.expressionEvalResult.getTextWidget().setText(dataProvider.getCalcOutput());
 	                    break;
 	                case START_TIME:
-	                    ResultPage.this.startTimestampText.setText(new Date(dataProvider.getStartTimestamp()).toString());
+	                    final long startTimestamp = dataProvider.getStartTimestamp();
+	                    if (startTimestamp < 0) {
+							// Leave the starttime text empty on a negative
+							// timestamp. A negative one indicates that the
+							// model has never been checked. See Long.MIN_VALUE in
+	                    	// org.lamport.tla.toolbox.tool.tlc.output.data.TLCModelLaunchDataProvider.initialize()
+	                    	ResultPage.this.startTimestampText.setText("");
+	                    	break;
+	                    }
+						ResultPage.this.startTimestampText.setText(new Date(startTimestamp).toString());
 	                    ResultPage.this.startTime = dataProvider.getStartTime();
 	                    break;
 	                case END_TIME:
@@ -272,7 +275,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
 	                    ResultPage.this.errorStatusHyperLink.setForeground(color);
 						
 	                    // update the error view
-	                    TLCErrorView.updateErrorView(dataProvider.getConfig());
+	                    TLCErrorView.updateErrorView(dataProvider.getModel());
 	                    break;
 	                default:
 	                    break;
@@ -293,8 +296,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
 								final Hashtable<String, Object> marker = ModelHelper.createMarkerDescription(
 										"State space exploration incomplete", IMarker.SEVERITY_WARNING);
 								marker.put(ModelHelper.TLC_MODEL_ERROR_MARKER_ATTRIBUTE_PAGE, 2);
-								incompleteStateExploration = ModelHelper.installModelProblemMarker(getConfig().getFile(),
-										marker, ModelHelper.TLC_MODEL_ERROR_MARKER_TLC);
+								incompleteStateExploration = getModel().setMarker(marker, ModelHelper.TLC_MODEL_ERROR_MARKER_TLC);
 							}
 						} else {
 							if (incompleteStateExploration != null) {
@@ -326,21 +328,18 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
     public void loadData() throws CoreException
     {
 
-        TLCOutputSourceRegistry modelCheckSourceRegistry = TLCOutputSourceRegistry.getModelCheckSourceRegistry();
-		TLCModelLaunchDataProvider provider = modelCheckSourceRegistry.getProvider(getConfig());
-        if (provider != null)
-        {
-            provider.setPresenter(this);
-        } else
-        {
-							// no data provider
-							reinit();
-						}
+		TLCOutputSourceRegistry modelCheckSourceRegistry = TLCOutputSourceRegistry.getModelCheckSourceRegistry();
+		TLCModelLaunchDataProvider provider = modelCheckSourceRegistry.getProvider(getModel());
+		if (provider != null) {
+			provider.setPresenter(this);
+		} else {
+			// no data provider
+			reinit();
+		}
 
-						// constant expression
-        String expression = getConfig().getAttribute(MODEL_EXPRESSION_EVAL, EMPTY_STRING);
-						expressionEvalInput.setDocument(new Document(expression));
-					}
+		// constant expression
+		expressionEvalInput.setDocument(new Document(getModel().getEvalExpression()));
+	}
 
     /**
      * Reinitialize the fields
@@ -397,7 +396,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
 			JFaceResources.getFontRegistry().removeListener(fontChangeListener);
 
 			TLCModelLaunchDataProvider provider = TLCOutputSourceRegistry.getModelCheckSourceRegistry()
-					.getProvider(getConfig());
+					.getProvider(getModel());
 			if (provider != null) {
 				provider.setPresenter(null);
 			}
@@ -573,7 +572,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
         // This makes the widget unsaved when text is entered.
         expressionEvalInput.getTextWidget().addModifyListener(new DirtyMarkingListener(calculatorSectionPart, false));
 
-        getDataBindingManager().bindAttribute(MODEL_EXPRESSION_EVAL, expressionEvalInput, calculatorSectionPart);
+        getDataBindingManager().bindAttribute(Model.MODEL_EXPRESSION_EVAL, expressionEvalInput, calculatorSectionPart);
         getDataBindingManager().bindSection(calculatorSectionPart, SEC_EXPRESSION, getId());
 
         // -------------------------------------------------------------------
@@ -658,9 +657,8 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
 						final TLCOutputSourceRegistry modelCheckSourceRegistry = TLCOutputSourceRegistry
 								.getModelCheckSourceRegistry();
 						modelCheckSourceRegistry
-								.removeTLCStatusSource(new ILaunchConfiguration[] { getConfig() });
-						ModelHelper.createModelOutputLogFile(getConfig(),
-								new FileInputStream(new File(path)), monitor);
+								.removeTLCStatusSource(new Model[] { getModel() });
+						getModel().createModelOutputLogFile(new FileInputStream(new File(path)), monitor);
 						
 						// Once the output has been imported on the
 						// file/resource layer, update the UI.
@@ -686,6 +684,16 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
 			j.setRule(workspace.getRuleFactory().buildRule());
 			j.schedule();
 		}
+
+		/* (non-Javadoc)
+		 * @see org.eclipse.jface.action.Action#isEnabled()
+		 */
+		public boolean isEnabled() {
+			if (getModel().isLocked() || getModel().isRunning()) {
+				return false;
+			}
+			return super.isEnabled();
+		}
 	}
 
 
@@ -695,7 +703,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
     public void commit(boolean onSave)
     {
         String expression = this.expressionEvalInput.getDocument().get();
-        getConfig().setAttribute(MODEL_EXPRESSION_EVAL, expression);
+        getModel().unsavedSetEvalExpression(expression);
 
         super.commit(onSave);
     }
@@ -1272,7 +1280,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
      */
     private static String getGraphTitleSuffix(ResultPage resultPage)
     {
-        return "(" + ModelHelper.getModelName(resultPage.getConfig().getFile()) + ")";
+        return "(" + resultPage.getModel().getName() + ")";
     }
 
     private static String getGraphTitle(int columnNumber, ResultPage resultPage)

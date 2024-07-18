@@ -13,6 +13,7 @@ import tlc2.output.MP;
 import tlc2.tool.fp.dfid.FPIntSet;
 import tlc2.tool.fp.dfid.MemFPIntSet;
 import tlc2.tool.liveness.LiveException;
+import tlc2.util.IStateWriter;
 import tlc2.util.IdThread;
 import tlc2.util.LongVec;
 import tlc2.util.ObjLongTable;
@@ -36,17 +37,17 @@ public class DFIDModelChecker extends AbstractChecker
     public TLCState[] theInitStates; // the set of initial states
     public long[] theInitFPs; // ... and their fps
     public FPIntSet theFPSet; // the set of reachable states (SZ: note the type)
-    protected DFIDWorker[] workers; // the workers
+    private final AtomicLong numOfGenStates;
 
     /** 
      * Constructor for running DFID   
      * @param resolver 
      */
-    public DFIDModelChecker(String specFile, String configFile, String dumpFile, boolean deadlock, String fromChkpt,
+    public DFIDModelChecker(String specFile, String configFile, String dumpFile, boolean asDot, boolean deadlock, String fromChkpt,
             boolean preprocess, FilenameToStream resolver, SpecObj specObj) throws EvalException, IOException
     {
         // call the abstract constructor
-        super(specFile, configFile, dumpFile, deadlock, fromChkpt, preprocess, resolver, specObj);
+        super(specFile, configFile, dumpFile, asDot, deadlock, fromChkpt, preprocess, resolver, specObj);
 
         this.theInitStates = null;
         this.theInitFPs = null;
@@ -55,6 +56,7 @@ public class DFIDModelChecker extends AbstractChecker
 
         // Initialize all the workers:
         this.workers = new DFIDWorker[TLCGlobals.getNumWorkers()];
+        this.numOfGenStates = new AtomicLong(0);
     }
 
     /**
@@ -85,7 +87,7 @@ public class DFIDModelChecker extends AbstractChecker
             this.tool.setCallStack();
             try
             {
-                this.numOfGenStates = new AtomicLong(0);
+                this.numOfGenStates.set(0);
                 this.doInit(true);
             } catch (Throwable e1)
             {
@@ -173,7 +175,7 @@ public class DFIDModelChecker extends AbstractChecker
                 // Check if we should stop at this level:
                 for (int i = 0; i < this.workers.length; i++)
                 {
-                    if (this.workers[i].isTerminated())
+                    if (((DFIDWorker) this.workers[i]).isTerminated())
                     {
                         terminated = true;
                         break;
@@ -182,7 +184,7 @@ public class DFIDModelChecker extends AbstractChecker
                 boolean moreLevel = false;
                 for (int i = 0; i < this.workers.length; i++)
                 {
-                    if (this.workers[i].hasMoreLevel())
+                    if (((DFIDWorker) this.workers[i]).hasMoreLevel())
                     {
                         moreLevel = true;
                         break;
@@ -267,10 +269,7 @@ public class DFIDModelChecker extends AbstractChecker
                         this.theInitFPs[idx++] = fp;
 
                         // Write out the state if asked
-                        if (this.allStateWriter != null)
-                        {
-                            this.allStateWriter.writeState(curState);
-                        }
+                        this.allStateWriter.writeState(curState);
 
                         // build behavior graph for liveness checking
                         if (this.checkLiveness)
@@ -358,7 +357,7 @@ public class DFIDModelChecker extends AbstractChecker
             {
                 StateVec nextStates = this.tool.getNextStates(this.actions[i], curState);
                 int sz = nextStates.size();
-                this.incNumOfGenStates(sz);
+                this.numOfGenStates.getAndAdd(sz);
                 deadLocked = deadLocked && (sz == 0);
 
                 for (int j = 0; j < sz; j++)
@@ -390,10 +389,7 @@ public class DFIDModelChecker extends AbstractChecker
                         allSuccNonLeaf = allSuccNonLeaf && !FPIntSet.isLeaf(status);
 
                         // Write out the state when new and asked:
-                        if (status == FPIntSet.NEW && this.allStateWriter != null)
-                        {
-                            this.allStateWriter.writeState(succState);
-                        }
+                        this.allStateWriter.writeState(curState, succState, status == FPIntSet.NEW);
 
                         // Remember succState if it has not been completed at this level:
                         if (!FPIntSet.isCompleted(status))
@@ -527,9 +523,10 @@ public class DFIDModelChecker extends AbstractChecker
             // Finally, add curState into the behavior graph for liveness checking:
             if (this.checkLiveness && isLeaf)
             {
+            	final long curStateFP = curState.fingerPrint();
                 // Add a stuttering step for curState:
-                long curStateFP = curState.fingerPrint();
                 liveNextStates.put(curStateFP, curState);
+            	this.allStateWriter.writeState(curState, curState, true, IStateWriter.Visualization.STUTTERING);
                 // Add curState to the behavior graph:
                 liveCheck.addNextState(curState, curStateFP, liveNextStates);
 
@@ -584,7 +581,7 @@ public class DFIDModelChecker extends AbstractChecker
 
     private final void printTrace(int errorCode, String[] parameters, TLCState s1, TLCState s2)
     {
-        this.workers[IdThread.GetId()].printTrace(errorCode, parameters, s1, s2);
+        ((DFIDWorker) this.workers[IdThread.GetId()]).printTrace(errorCode, parameters, s1, s2);
     }
 
     /**
@@ -612,7 +609,7 @@ public class DFIDModelChecker extends AbstractChecker
     {
         for (int i = 0; i < this.workers.length; i++)
         {
-            this.workers[i].setStop(code);
+            ((DFIDWorker) this.workers[i]).setStop(code);
         }
     }
 
@@ -683,8 +680,7 @@ public class DFIDModelChecker extends AbstractChecker
         this.theFPSet.close();
         if (this.checkLiveness)
             liveCheck.close();
-        if (this.allStateWriter != null)
-            this.allStateWriter.close();
+        this.allStateWriter.close();
         // SZ Feb 23, 2009:
         // FileUtil.deleteDir(new File(this.metadir), success);
         FileUtil.deleteDir(this.metadir, success);
@@ -721,7 +717,7 @@ public class DFIDModelChecker extends AbstractChecker
     /**
      * Create workers
      */
-    protected IdThread[] startWorkers(AbstractChecker checker, int checkIndex)
+    protected IWorker[] startWorkers(AbstractChecker checker, int checkIndex)
     {
         for (int i = 0; i < this.workers.length; i++)
         {

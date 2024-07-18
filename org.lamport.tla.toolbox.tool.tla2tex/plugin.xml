@@ -62,5 +62,25 @@
             class="org.lamport.tla.toolbox.tool.tla2tex.preference.TLA2TeXPreferenceInitializer">
       </initializer>
    </extension>
+   <extension
+         point="org.eclipse.ui.views">
+      <view
+            allowMultiple="true"
+            class="org.lamport.tla.toolbox.tool.tla2tex.view.PDFBrowser"
+            icon="icons/document-pdf.png"
+            id="org.lamport.tla.toolbox.tool.tla2tex.PDFBrowser"
+            name="PDFBrowser"
+            restorable="false">
+      </view>
+   </extension>
+   <extension
+         point="org.eclipse.ui.bindings">
+      <key
+            commandId="toolbox.command.tla2tex.producePDF"
+            contextId="org.eclipse.ui.contexts.window"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+            sequence="M1+M3+P">
+      </key>
+   </extension>
 
 </plugin>

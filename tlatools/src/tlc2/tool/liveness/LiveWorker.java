@@ -671,16 +671,22 @@ public class LiveWorker extends IdThread {
 		// or promiseRes booleans is false.
 		for (int i = 0; i < aeslen; i++) {
 			if (!AEStateRes[i]) {
+//				writeDotViz(state, tidx, com, new java.io.File(liveCheck.getMetaDir() + java.io.File.separator
+//						+ "pValidSCC" + System.currentTimeMillis() + ".dot"));
 				return true;
 			}
 		}
 		for (int i = 0; i < aealen; i++) {
 			if (!AEActionRes[i]) {
+//				writeDotViz(state, tidx, com, new java.io.File(liveCheck.getMetaDir() + java.io.File.separator
+//						+ "pValidSCC" + System.currentTimeMillis() + ".dot"));
 				return true;
 			}
 		}
 		for (int i = 0; i < plen; i++) {
 			if (!promiseRes[i]) {
+//				writeDotViz(state, tidx, com, new java.io.File(liveCheck.getMetaDir() + java.io.File.separator
+//						+ "pValidSCC" + System.currentTimeMillis() + ".dot"));
 				return true;
 			}
 		}
@@ -748,7 +754,8 @@ public class LiveWorker extends IdThread {
 	 * @throws InterruptedException 
 	 */
 	private void printTrace(final long state, final int tidx, final TableauNodePtrTable nodeTbl) throws IOException, InterruptedException, ExecutionException {
-//		System.out.println(toDotViz(state, tidx, nodeTbl));
+//		writeDotViz(state, tidx, nodeTbl, new java.io.File(liveCheck.getMetaDir() + java.io.File.separator
+//				+ "pSatisfiableSCC_" + System.currentTimeMillis() + ".dot"));
 
 		MP.printError(EC.TLC_TEMPORAL_PROPERTY_VIOLATED);
 		MP.printError(EC.TLC_COUNTER_EXAMPLE);
@@ -1199,12 +1206,41 @@ public class LiveWorker extends IdThread {
 
 				final GraphNode curNode = this.dg.getNode(state1, tidx1, loc1);
 				sb.append(curNode.toDotViz((state1 == state && tidx1 == tidx), true, oos.getCheckState().length,
-						oos.getCheckAction().length));
+						oos.getCheckAction().length, tnpt));
 			}
 		}
 		
 		sb.append("}");
 		return sb.toString();
+	}
+	
+	/**
+	 * Write the output of {@link LiveWorker#toDotViz(long, int, TableauNodePtrTable)} to the given file.
+	 * @param state
+	 * @param tidx
+	 * @param tnpt
+	 * @param file
+	 */
+	public void writeDotViz(final long state, final int tidx, final TableauNodePtrTable tnpt, final java.io.File file) {
+		// Ignore trivial SCCs consisting of a single node.
+		if (tnpt.size() <= 1) {
+			return;
+		}
+		
+		try {
+			final java.io.BufferedWriter bwr = new java.io.BufferedWriter(new java.io.FileWriter(file));
+
+			// write contents of StringBuffer to a file
+			bwr.write(toDotViz(state, tidx, tnpt));
+
+			// flush the stream
+			bwr.flush();
+
+			// close the stream
+			bwr.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 	}
 	
   	/*

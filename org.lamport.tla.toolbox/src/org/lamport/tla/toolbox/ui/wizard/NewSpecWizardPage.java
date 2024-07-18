@@ -1,6 +1,7 @@
 package org.lamport.tla.toolbox.ui.wizard;
 
 import java.io.File;
+import java.io.IOException;
 
 import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.Path;
@@ -46,13 +47,17 @@ public class NewSpecWizardPage extends WizardPage
      * directory
      */
     private String lastBrowsedDirectory;
+    
+	private final String absolutePath;
 
     /**
+     * @param absolutePath 
      * @param pageName
      */
-    public NewSpecWizardPage()
+    public NewSpecWizardPage(String absolutePath)
     {
         super("newSpecWizardPage");
+		this.absolutePath = absolutePath;
         setTitle("New TLA+ Specification");
         setDescription("Creates a new TLA+ specification\nEnter a complete file name like c:\\jones\\specs\\foo.tla or click on Browse.");
     }
@@ -134,9 +139,13 @@ public class NewSpecWizardPage extends WizardPage
                 dialogChanged();
             }
         });
-
-        // disable the next/finish button
-        setPageComplete(false);
+        
+        if (absolutePath != null) {
+        	fileText.setText(absolutePath);
+        } else {
+        	// disable the next/finish button
+        	setPageComplete(false);
+        }
 
         UIHelper.setHelp(container, "NewSpecWizard");
 
@@ -239,7 +248,7 @@ public class NewSpecWizardPage extends WizardPage
                 reportError("Root file name should have a file-system path");
                 return;
                 // make sure module name does not violate valid spec name rules
-                // see http://bugzilla.tlaplus.net/show_bug.cgi?id=112
+                // see Bug #112 in general/bugzilla/index.html
             } else if(!ResourceHelper.isValidSpecName(ResourceHelper.getModuleNameChecked(rootfilePath, false))) {
             	// Give the user a hint what a valid spec name might be. E.g. if "Foo.tla" is given,
             	// a valid spec name is "Foo" (without the ".tla" file extension).
@@ -259,6 +268,24 @@ public class NewSpecWizardPage extends WizardPage
                 return;
             } else
             {
+				// NTFS (although case-sensitive) does not allow a path
+				// c:/foo/bar/Spec.tla when there exists a similar path
+				// c:/foo/Bar/Spec.tla. Because the Toolbox keeps
+				// converting a Spec's path from String > IPath (Eclipse) > File
+				// > String... lets force the user to use the pre-existing path
+				// to be consistent.
+				final File f = new File(rootfilePath);
+				if (f.getParentFile() != null && f.getParentFile().exists()) {
+					try {
+						final String canonicalPath = f.getCanonicalPath();
+						if (!rootfilePath.equals(canonicalPath)) {
+							rootfilePath = canonicalPath;
+						}
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
+				}            	
+            	
                 Spec existingSpec = Activator.getSpecManager().getSpecByRootModule(rootfilePath);
                 if (existingSpec != null)
                 {
@@ -296,7 +323,7 @@ public class NewSpecWizardPage extends WizardPage
                 Spec existingSpec = Activator.getSpecManager().getSpecByName(specName);
                 if (existingSpec != null)
                 {
-                    reportError("The specification with provided name already exists \nand uses "
+                    reportError("The specification with the provided name already exists \nand uses "
                             + existingSpec.getRootFilename() + " as root module.");
                     return;
                 }
@@ -345,6 +372,9 @@ public class NewSpecWizardPage extends WizardPage
         {
             // allow this
             reportWarning("Root file name does not exist. A new file will be created.");
+        } else if (rootfilePath != null && !rootfilePath.equals(getRootFilename())) {
+			reportWarning(String.format("Changed your path to its canonical form %s.", getRootFilename(),
+					rootfilePath));
         }
 
         // we should not enable the next/finish if both fields are virgin

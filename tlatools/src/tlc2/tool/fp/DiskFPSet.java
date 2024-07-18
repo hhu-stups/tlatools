@@ -9,7 +9,6 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.net.InetAddress;
 import java.rmi.RemoteException;
-import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
@@ -18,6 +17,7 @@ import java.util.logging.Logger;
 
 import javax.management.NotCompliantMBeanException;
 
+import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.tool.TLCTrace;
@@ -85,7 +85,7 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 	 * striped lock {@link DiskFPSet#rwLock} itself, which reduces the memory
 	 * available to the hash set.
 	 */
-	protected static final int LogLockCnt = Integer.getInteger(DiskFPSet.class.getName() + ".logLockCnt", 10);
+	protected static final int LogLockCnt = Integer.getInteger(DiskFPSet.class.getName() + ".logLockCnt", (31 - Integer.numberOfLeadingZeros(TLCGlobals.getNumWorkers()) + 8));
 	/**
 	 * protects n memory buckets
 	 */
@@ -161,7 +161,7 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 	static final int InitialBucketCapacity = (1 << LogMaxLoad);
 
 	/* Number of fingerprints per braf buffer. */
-	public static final int NumEntriesPerPage = 8192 / LongSize;
+	public static final int NumEntriesPerPage = 8192 / (int) LongSize;
 	
 	/**
 	 * This is (assumed to be) the auxiliary storage for a fingerprint that need
@@ -201,7 +201,16 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 	 */
 	protected DiskFPSet(final FPSetConfiguration fpSetConfig) throws RemoteException {
 		super(fpSetConfig);
-		this.lockCnt = 1 << LogLockCnt; //TODO come up with a more dynamic value for stripes that takes tblCapacity into account
+		// Ideally we use one lock per bucket because even with relatively high
+		// lock counts, we fall victim to the birthday paradox. However, locks
+		// ain't cheap, which is why we have to find the sweet spot. We
+		// determined the constant 8 empirically on Intel Xeon CPU E5-2670 v2 @
+		// 2.50GHz. This is based on the number of cores only. We ignore their
+		// speed. MultiThreadedMSBDiskFPSet is the most suitable performance
+		// test available for the job. It just inserts long values into the
+		// set. int is obviously going to be too small once 2^23 cores become
+		// commonplace.
+		this.lockCnt = 1 << LogLockCnt;
 		this.rwLock = Striped.readWriteLock(lockCnt);
 		
 		this.maxTblCnt = fpSetConfig.getMemoryInFingerprintCnt();
@@ -422,7 +431,7 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 			long l = System.currentTimeMillis() - timestamp;
 			flushTime += l;
 			
-			LOGGER.log(Level.FINE, "Flushed disk {0} {1}. tine, in {2} sec", new Object[] {
+			LOGGER.log(Level.FINE, "Flushed disk {0} {1}. time, in {2} sec", new Object[] {
 					((DiskFPSetMXWrapper) diskFPSetMXWrapper).getObjectName(), getGrowDiskMark(), l});
 		}
 		w.unlock();
@@ -731,6 +740,7 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 	 * @see tlc2.tool.fp.FPSet#exit(boolean)
 	 */
 	public void exit(boolean cleanup) throws IOException {
+		super.exit(cleanup);
 		if (cleanup) {
 			// Delete the metadata directory:
 			FileUtil.deleteDir(this.metadir, true);
@@ -867,79 +877,58 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 		// the fingerprints from the TLCTrace file. Not from its own .fp file. 
 	}
 
-	private long[] recoveryBuff = null;
-	private int recoveryIdx = -1;
-
-	/* (non-Javadoc)
-	 * @see tlc2.tool.fp.FPSet#prepareRecovery()
-	 */
-	public final void prepareRecovery() throws IOException {
-		// First close all "this.braf" and "this.brafPool" objects on currName:
-		for (int i = 0; i < this.braf.length; i++) {
-			this.braf[i].close();
-		}
-		for (int i = 0; i < this.brafPool.length; i++) {
-			this.brafPool[i].close();
-		}
-
-		recoveryBuff = new long[1 << 21];
-		recoveryIdx = 0;
-	}
-
 	/* (non-Javadoc)
 	 * @see tlc2.tool.fp.FPSet#recoverFP(long)
 	 */
 	public final void recoverFP(long fp) throws IOException {
-		recoveryBuff[recoveryIdx++] = (fp & 0x7FFFFFFFFFFFFFFFL);
-		if (recoveryIdx == recoveryBuff.length) {
-			Arrays.sort(recoveryBuff, 0, recoveryIdx);
-			flusher.mergeNewEntries(recoveryBuff, recoveryIdx);
-			recoveryIdx = 0;
+		// This implementation used to group n fingerprints into a sorted
+		// in-memory page. Pages were subsequently merged on-disk directly,
+		// creating the on-disk storage file for DiskFPSets.
+		//
+		// The new algorithm simply "replays" the fingerprints found in the
+		// trace file. It's biggest disadvantage is a performance penalty it
+		// pays because it doesn't group fingerprints. On the other hand, it has
+		// advantages over the old algorithm:
+		// 
+		// - Simplified logic/code
+		// - No need for a long[] recovery buffer
+		// - TLC runs with a warm in-memory fingerprint cache
+		// - With large amounts of available fingerprint set memory, the .fp
+		// file might actually never be written. This means that the FPSet never
+		// has to go to disk during contains/put which yields a better overall
+		// runtime performance.
+		// 
+		// TODO Use original on-disk merge if it is known that the fingerprints
+		// won't fit into memory anyway.
+		
+		// The code below is put(long) stripped from synchronization and
+		// statistics code to speed up recovery. Thus, recovery relys on
+		// exclusive access to the fingerprint set, which it has during
+		// recovery.
+		long fp0 = fp & 0x7FFFFFFFFFFFFFFFL;
+		boolean unique = !this.memInsert(fp0);
+		Assert.check(unique, EC.SYSTEM_CHECKPOINT_RECOVERY_CORRUPT);
+		if (needsDiskFlush()) {
+			this.flusher.flushTable();
 		}
 	}
-
-	/* (non-Javadoc)
-	 * @see tlc2.tool.fp.FPSet#completeRecovery()
-	 */
-	public final void completeRecovery() throws IOException {
-		Arrays.sort(recoveryBuff, 0, recoveryIdx);
-		flusher.mergeNewEntries(recoveryBuff, recoveryIdx);
-		recoveryBuff = null;
-		recoveryIdx = -1;
-
-		// Reopen a BufferedRAF for each thread
-		for (int i = 0; i < this.braf.length; i++) {
-			this.braf[i] = new BufferedRandomAccessFile(this.fpFilename,
-					"r");
-		}
-		for (int i = 0; i < this.brafPool.length; i++) {
-			this.brafPool[i] = new BufferedRandomAccessFile(
-					this.fpFilename, "r");
-		}
-		this.poolIndex = 0;
-	}
-
 	
 	/* (non-Javadoc)
 	 * @see tlc2.tool.fp.FPSet#recover()
 	 */
 	public final void recover() throws IOException {
-		this.prepareRecovery();
-
 		long recoverPtr = TLCTrace.getRecoverPtr();
-		@SuppressWarnings("resource")
-		RandomAccessFile braf = new BufferedRandomAccessFile(
+		final RandomAccessFile braf = new BufferedRandomAccessFile(
 				TLCTrace.getFilename(), "r");
 		while (braf.getFilePointer() < recoverPtr) {
 			// drop readLongNat
 			if (braf.readInt() < 0)
 				braf.readInt();
-
+			
 			long fp = braf.readLong();
 			this.recoverFP(fp);
 		}
-
-		this.completeRecovery();
+		braf.close();
 	}
 
 	private String getChkptName(String fname, String name) {
@@ -1109,6 +1098,13 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 	}
 	
 	/**
+	 * @return The (static) number of locks used to guard the set. 
+	 */
+	public int getLockCnt() {
+		return this.rwLock.size();
+	}
+	
+	/**
 	 * @return The technical maximum of readers/writers this {@link DiskFPSet}
 	 *         can handle. It doesn't show the actual numbers of active clients.
 	 *         This value is equivalent to the amount of
@@ -1116,23 +1112,6 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 	 */
 	public int getReaderWriterCnt() {
 		return this.braf.length + this.brafPool.length;
-	}
-	
-	/**
-	 * @return The amount of elements in the {@link DiskFPSet#collisionBucket}
-	 *         if the {@link DiskFPSet} has a collisionBucket. -1L otherwise.
-	 */
-	public long getCollisionBucketCnt() {
-		return -1L;
-	}
-	
-	/**
-	 * @return The proportional size of the collision bucket compared to the
-	 *         size of the set or <code>-1d</code> if implementation does not
-	 *         use a collision bucket. Domain is [0, 1].
-	 */
-	public double getCollisionRatio() {
-		return -1d;
 	}
 	
 	/**
@@ -1245,12 +1224,11 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 			// provide a way to re-use an existing RandomAccessFile object on
 			// a different file, this implementation must close all existing
 			// files and re-allocate new BufferedRandomAccessFile objects.
-
-			// close existing files (except brafPool[0])
 			for (int i = 0; i < braf.length; i++) {
-				braf[i].close();
+				// Seek readers to zero position.
+				braf[i].seek(0L);
 			}
-			for (int i = 1; i < brafPool.length; i++) {
+			for (int i = 0; i < brafPool.length; i++) {
 				brafPool[i].close();
 			}
 
@@ -1258,53 +1236,34 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 			File tmpFile = new File(tmpFilename);
 			tmpFile.delete();
 			RandomAccessFile tmpRAF = new BufferedRandomAccessFile(tmpFile, "rw");
-			RandomAccessFile raf = brafPool[0];
-			raf.seek(0);
 
 			// merge
-			mergeNewEntries(raf, tmpRAF);
-
+			mergeNewEntries(braf, tmpRAF);
+			
 			// clean up
-			raf.close();
+			for (int i = 0; i < braf.length; i++) {
+				// close existing files (except brafPool[0])
+				braf[i].close();
+			}
 			tmpRAF.close();
-			String realName = fpFilename;
-			File currFile = new File(realName);
-			currFile.delete();
-			boolean status = tmpFile.renameTo(currFile);
-			Assert.check(status, EC.SYSTEM_UNABLE_NOT_RENAME_FILE);
+			try {
+				FileUtil.replaceFile(tmpFilename, fpFilename);
+			} catch (IOException e) {
+				Assert.fail(EC.SYSTEM_UNABLE_NOT_RENAME_FILE);
+			}
 
 			// reopen a BufferedRAF for each thread
 			for (int i = 0; i < braf.length; i++) {
 				// Better way would be to provide method BRAF.open
-				braf[i] = new BufferedRandomAccessFile(realName, "r");
+				braf[i] = new BufferedRandomAccessFile(fpFilename, "r");
 			}
 			for (int i = 0; i < brafPool.length; i++) {
 				// Better way would be to provide method BRAF.open
-				brafPool[i] = new BufferedRandomAccessFile(realName, "r");
+				brafPool[i] = new BufferedRandomAccessFile(fpFilename, "r");
 			}
 			poolIndex = 0;
 		}
-
-		public final void mergeNewEntries(long[] buff, int buffLen)
-				throws IOException {
-			// create temporary file
-			File tmpFile = new File(tmpFilename);
-			tmpFile.delete();
-			RandomAccessFile tmpRAF = new BufferedRandomAccessFile(tmpFile, "rw");
-			File currFile = new File(fpFilename);
-			RandomAccessFile currRAF = new BufferedRandomAccessFile(currFile, "r");
-
-			// merge
-			this.mergeNewEntries(currRAF, tmpRAF);
-
-			// clean up
-			currRAF.close();
-			tmpRAF.close();
-			currFile.delete();
-			boolean status = tmpFile.renameTo(currFile);
-			Assert.check(status, EC.SYSTEM_UNABLE_NOT_RENAME_FILE);
-		}
 		
-		protected abstract void mergeNewEntries(RandomAccessFile inRAF, RandomAccessFile outRAF) throws IOException;
+		protected abstract void mergeNewEntries(RandomAccessFile[] inRAFs, RandomAccessFile outRAF) throws IOException;
 	}
 }

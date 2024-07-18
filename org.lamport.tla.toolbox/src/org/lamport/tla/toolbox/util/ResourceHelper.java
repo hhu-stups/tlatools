@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.io.InvalidClassException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
@@ -214,27 +215,19 @@ public class ResourceHelper
      * <br>Eg. calling <tt>getProject("for", "c:/bar/bar.tla")</tt>
      * will cause the creation of the project (iff this does not exist) with location
      * <tt>"c:/bar/foo.toolbox"</tt>
+     * @throws CoreException 
      * 
      */
-    public static IProject getProject(String name, String rootFilename, boolean createMissing, boolean importExisting, IProgressMonitor monitor)
+    public static IProject getProject(String name, String rootFilename, boolean createMissing, boolean importExisting, IProgressMonitor monitor) throws CoreException
     {
-        if (name == null)
-        {
-            return null;
-        }
-
+    	Assert.isNotNull(name);
+    	Assert.isNotNull(rootFilename);
+    	
         IProject project = getProject(name);
 
         // create a project
         if (!project.exists() && createMissing)
         {
-            try
-            {
-                if (rootFilename == null)
-                {
-                    return null;
-                }
-
                 String parentDirectory = getParentDirName(rootFilename);
 
                 Assert.isNotNull(parentDirectory);
@@ -354,11 +347,6 @@ public class ResourceHelper
                 {
                     relocateFiles(project, new Path(parentDirectory), monitor);
                 }
-
-            } catch (CoreException e)
-            {
-                Activator.getDefault().logError("Error creating the project " + name, e);
-            }
         }
 
         return project;
@@ -394,6 +382,32 @@ public class ResourceHelper
                 {
                     Activator.getDefault().logError("Error creating resource link to " + name, e);
                 }
+            }
+            if (file.exists())
+            {
+                return file;
+            } else
+            {
+                return null;
+            }
+        }
+        return file;
+    }
+
+    public static IFile getLinkedFileUnchecked(IContainer project, String name, boolean createNew) throws CoreException
+    {
+        if (name == null || project == null)
+        {
+            return null;
+        }
+        IPath location = new Path(name);
+        IFile file = project.getFile(new Path(location.lastSegment()));
+        if (createNew)
+        {
+            if (!file.isLinked())
+            {
+                    file.createLink(location, IResource.NONE, new NullProgressMonitor());
+                    return file;
             }
             if (file.exists())
             {
@@ -672,6 +686,30 @@ public class ResourceHelper
         }
     }
 
+	/**
+	 * Returns IFile handles to user module overrides. Let moduleFile be Foo.tla and its 
+	 * corresponding folder contain to files Foo.class and Foo.java, the IFile[] will
+	 * contain two handles to Foo.class and Foo.java.
+	 */
+	public static IFile[] getModuleOverrides(final IProject project, final IFile moduleFile) {
+		final int indexOfFileExtension = moduleFile.getFileExtension().length() + 1;
+		final String moduleName = moduleFile.getName().substring(0, moduleFile.getName().length() - indexOfFileExtension);
+
+		final List<IFile> res = new ArrayList<IFile>();
+		final String[] extensions = new String[] { ".class", ".java" };
+		for (final String extension : extensions) {
+			try {
+				IFile userModuleOverride = ResourceHelper.getLinkedFileUnchecked(project,
+						ResourceHelper.PARENT_ONE_PROJECT_LOC + moduleName + extension, true);
+				if (userModuleOverride != null && userModuleOverride.exists()) {
+					res.add(userModuleOverride);
+				}
+			} catch (CoreException ignoredOnPurpose) {
+			}
+		}
+		return res.toArray(new IFile[0]);
+	}
+
     /**
      * Determines if the given member is a TLA+ module
      * @param resource
@@ -907,10 +945,12 @@ public class ResourceHelper
     }
 
     /**
-     * Renames and moves the project
-     * @param project
-     * @param aNewName
-     */
+	 * Renames and moves the project, but does not delete the old project. It's
+	 * the callee's reponsibility.
+	 * 
+	 * @param project
+	 * @param aNewName
+	 */
     public static IProject projectRename(final IProject project, final String aNewName, final IProgressMonitor aMonitor)
     {
         try
@@ -926,7 +966,6 @@ public class ResourceHelper
         	project.refreshLocal(IResource.DEPTH_INFINITE, aMonitor);
             
         	project.copy(description, IResource.NONE | IResource.SHALLOW, aMonitor);
-            project.delete(IResource.NONE, aMonitor);
             
             return ResourcesPlugin.getWorkspace().getRoot().getProject(aNewName);
         } catch (CoreException e)
@@ -973,13 +1012,14 @@ public class ResourceHelper
     {
         try
         {
-        	if (isForget) {
-        		// This statement deletes the spec but not the .toolbox directory
-            	project.delete(IResource.NEVER_DELETE_PROJECT_CONTENT, aMonitor);
-        	} else {
-        	// This statement deletes the spec and the .toolbox directory
-            project.delete(true, aMonitor);
-        	}
+			if (isForget) {
+				// This statement deletes the spec but not the .toolbox
+				// directory
+				project.delete(IResource.NEVER_DELETE_PROJECT_CONTENT, aMonitor);
+			} else {
+				// This statement deletes the spec and the .toolbox directory
+				project.delete(true, aMonitor);
+			}
             
         } catch (CoreException e)
         {

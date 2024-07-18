@@ -1,6 +1,5 @@
 package org.lamport.tla.toolbox.ui.handler;
 
-import java.util.HashMap;
 import java.util.Iterator;
 
 import org.eclipse.core.commands.AbstractHandler;
@@ -12,7 +11,6 @@ import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.jface.dialogs.MessageDialog;
-import org.eclipse.jface.preference.IPreferenceStore;
 import org.eclipse.jface.viewers.ISelection;
 import org.eclipse.jface.viewers.IStructuredSelection;
 import org.eclipse.ui.IWorkbenchPage;
@@ -22,7 +20,6 @@ import org.lamport.tla.toolbox.spec.manager.WorkspaceSpecManager;
 import org.lamport.tla.toolbox.ui.navigator.ToolboxExplorer;
 import org.lamport.tla.toolbox.util.ToolboxJob;
 import org.lamport.tla.toolbox.util.UIHelper;
-import org.lamport.tla.toolbox.util.pref.PreferenceStoreHelper;
 
 /**
  * Forget specification.
@@ -73,7 +70,6 @@ import org.lamport.tla.toolbox.util.pref.PreferenceStoreHelper;
  * should be re-examined if additional features are added to that page.
  * 
   * @author Leslie Lamport
- * @version $Id$
  */
 public class ForgetSpecHandler extends AbstractHandler implements IHandler
 {
@@ -94,10 +90,15 @@ public class ForgetSpecHandler extends AbstractHandler implements IHandler
                     && !((IStructuredSelection) selection).isEmpty())
             {
                 
-                Iterator<Spec> selectionIterator = ((IStructuredSelection) selection).iterator();
+                Iterator<Object> selectionIterator = ((IStructuredSelection) selection).iterator();
                 while (selectionIterator.hasNext()) 
                 {
-                    final Spec spec = selectionIterator.next();
+                	Object next = selectionIterator.next();
+                	if (!(next instanceof Spec)) {
+                		// The selection can contain models and groups too.
+                		continue;
+                	}
+                    final Spec spec = (Spec) next;
                     boolean answer = MessageDialog.openQuestion(UIHelper.getShellProvider().getShell(), "Forget specification?",
                             "Do you really want to remove specification " + spec.getName() + " from the Toolbox's list of specs?");
                     if (answer)
@@ -105,7 +106,7 @@ public class ForgetSpecHandler extends AbstractHandler implements IHandler
                     	// close the spec handler (in the ui thread)
                     	final WorkspaceSpecManager specManager = Activator.getSpecManager();
                         if (specManager.isSpecLoaded(spec)) {
-                            UIHelper.runCommand(CloseSpecHandler.COMMAND_ID, new HashMap<String, String>());
+                        	new CloseSpecHandler().execute(event);
                         }
                     	
     					// use confirmed rename -> rename

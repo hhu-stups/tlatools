@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
+import java.util.Scanner;
 
 import javax.activation.DataHandler;
 import javax.activation.FileDataSource;
@@ -28,8 +29,15 @@ import javax.naming.directory.Attribute;
 import javax.naming.directory.Attributes;
 import javax.naming.directory.InitialDirContext;
 
+import model.ModelInJar;
+import tlc2.output.MP;
+
 // Requires Java >=6 due to javax.activation only part starting with 6
 public class MailSender {
+
+	public static final String MODEL_NAME = "modelName";
+	public static final String SPEC_NAME = "specName";
+	public static final String MAIL_ADDRESS = "result.mail.address";
 
 	/**
 	 * @param from "Foo bar <foo@bar.com>"
@@ -39,7 +47,7 @@ public class MailSender {
 	 * @param messages
 	 */
 	private static boolean send(final String from, final String to,
-			final String domain, final String subject, final File[] files) {
+			final String domain, final String subject, final String body, final File[] files) {
 		
 		final Properties properties = System.getProperties();
 		//properties.put("mail.debug", "true");
@@ -61,6 +69,14 @@ public class MailSender {
 				MimeBodyPart messageBodyPart = new MimeBodyPart();
 
 				final Multipart multipart = new MimeMultipart();
+				
+				// The main body part. Having a main body appears to have a very
+				// positive effect on the spam score compared to emails with
+				// just attachments. It is also visually more appealing to e.g.
+				// Outlook users who otherwise see an empty mail.
+				messageBodyPart = new MimeBodyPart();
+				messageBodyPart.setContent(body, "text/plain");
+				multipart.addBodyPart(messageBodyPart);
 
 				// attach file(s)
 				for (File file : files) {
@@ -100,16 +116,16 @@ public class MailSender {
 		// RFC 974
 		if (attr == null) {
 			list.add(new MXRecord(0, aDomain));
-		}
-
-		// split pref from hostname
-		for (int i = 0; i < attr.size(); i++) {
-			Object object = attr.get(i);
-			if (object != null && object instanceof String) {
-				String[] split = ((String) object).split("\\s+");
-				if (split != null && split.length == 2) {
-					Integer weight = Integer.parseInt(split[0]);
-					list.add(new MXRecord(weight, split[1]));
+		} else {
+			// split pref from hostname
+			for (int i = 0; i < attr.size(); i++) {
+				Object object = attr.get(i);
+				if (object != null && object instanceof String) {
+					String[] split = ((String) object).split("\\s+");
+					if (split != null && split.length == 2) {
+						Integer weight = Integer.parseInt(split[0]);
+						list.add(new MXRecord(weight, split[1]));
+					}
 				}
 			}
 		}
@@ -137,23 +153,22 @@ public class MailSender {
 	// if null, no Mail is going to be send
 	private final String mailto;
 	
-	private String mainFile;
+	private String modelName = "unknown model";
+	private String specName = "unknown spec";
 	private File err;
 	private File out;
 	private String from;
 	private String domain;
 
-	public MailSender(String aMainFile) throws FileNotFoundException, UnknownHostException
-			 {
-		mailto = System.getProperty("result.mail.address");
+	public MailSender() throws FileNotFoundException, UnknownHostException {
+		ModelInJar.loadProperties(); // Reads result.mail.address and so on.
+		mailto = System.getProperty(MAIL_ADDRESS);
 		if (mailto != null) {
 			domain = mailto.split("@")[1];
 			
 			from = "TLC - The friendly model checker <"
 					+ System.getProperty("user.name") + "@"
 					+ InetAddress.getLocalHost().getHostName() + ">";
-			
-			mainFile = aMainFile;
 			
 			// Record/Log output to later send it by email
 			final String tmpdir = System.getProperty("java.io.tmpdir");
@@ -164,26 +179,61 @@ public class MailSender {
 		}
 	}
 	
+	public MailSender(String mainFile) throws FileNotFoundException, UnknownHostException {
+		this();
+		setModelName(mainFile);
+	}
+	
+	public void setModelName(String modelName) {
+		this.modelName = modelName;
+	}
+
+	public void setSpecName(String specName) {
+		this.specName = specName;
+	}
+
 	public boolean send() {
 		return send(new ArrayList<File>());
 	}
 
 	public boolean send(List<File> files) {
 		if (mailto != null) {
+			files.add(0, out);
 			// Only add the err file if there is actually content 
-			files.add(out);
 			if (err.length() != 0L) {
-				files.add(err);
+				files.add(0, err);
 			}
 			// Try sending the mail with the model checking result to the receiver 
-			return send(from, mailto, domain, "Model Checking result for " + mainFile,
-					files.toArray(new File[files.size()]));
+			return send(from, mailto, domain, "Model Checking result for " + modelName + " with spec " + specName,
+					extractBody(out), files.toArray(new File[files.size()]));
 		} else {
 			// ignore, just signal everything is fine
 			return true;
 		}
 	}	
     
+	/**
+	 * @return The human readable lines in the log file. 
+	 */
+	private String extractBody(File out) {
+		StringBuffer result = new StringBuffer();
+		try {
+			final Scanner scanner = new Scanner(out);
+			while (scanner.hasNext()) {
+				final String line = scanner.nextLine();
+				if (line != null && !line.startsWith(MP.DELIM)) {
+					result.append(line);
+					result.append("\n");
+				}
+			}
+			scanner.close();
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+			result.append("Failed to find file " + out.getAbsolutePath()); 
+		}
+		return result.toString();
+	}
+
 	/**
 	 * A LogPrintStream writes the logging statements to a file _and_ to
 	 * System.out.
@@ -193,14 +243,6 @@ public class MailSender {
     	public LogPrintStream(File file) throws FileNotFoundException  {
     		super(new FileOutputStream(file));
 		}
-    	
-    	/* (non-Javadoc)
-    	 * @see java.io.PrintStream#print(java.lang.String)
-    	 */
-    	public void print(String str) {
-    		System.out.print(str);
-    		super.print(str);
-    	}
 
     	/* (non-Javadoc)
     	 * @see java.io.PrintStream#println(java.lang.String)

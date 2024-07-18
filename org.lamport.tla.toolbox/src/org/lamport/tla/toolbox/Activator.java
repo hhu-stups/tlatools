@@ -68,7 +68,7 @@ public class Activator extends AbstractTLCActivator
 		// (start/stop) methods. Initializing the WorkspaceSpecManager involves
 		// I/O though, which makes it a potentially long-running task.
         //
-        // @see https://bugzilla.tlaplus.net/show_bug.cgi?id=260
+        // @see Bug #260 in general/bugzilla/index.html
         final Job initializerJob = new WorkspaceJob("Initializing workspace...") {
 			/* (non-Javadoc)
 			 * @see org.eclipse.core.resources.WorkspaceJob#runInWorkspace(org.eclipse.core.runtime.IProgressMonitor)
@@ -99,6 +99,12 @@ public class Activator extends AbstractTLCActivator
 			}
         };
         initializerJob.setRule(workspace.getRuleFactory().buildRule());
+		// Give initializerJob a higher priority than regular (autobuild) jobs
+		// (e.g. TLAParsingBuilder/PCalDetectingBuilder) which belong to the
+		// same job family but have a lower priority. Some - again e.g.
+		// TLAParsingBuilder/PCalDetectingBuilder - require the initializerJob
+		// to be done.
+        initializerJob.setPriority(Job.LONG);
         initializerJob.schedule();
         
 		// Running plug-in tests with Eclipse 4.5, the foundation suspends the

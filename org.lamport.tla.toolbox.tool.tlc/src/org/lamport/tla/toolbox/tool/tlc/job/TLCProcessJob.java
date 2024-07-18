@@ -24,6 +24,7 @@ import org.lamport.tla.toolbox.spec.Spec;
 import org.lamport.tla.toolbox.tool.ToolboxHandle;
 import org.lamport.tla.toolbox.tool.tlc.TLCActivator;
 import org.lamport.tla.toolbox.tool.tlc.launch.TraceExplorerDelegate;
+import org.lamport.tla.toolbox.tool.tlc.model.Model;
 import org.lamport.tla.toolbox.tool.tlc.output.IProcessOutputSink;
 import org.lamport.tla.toolbox.tool.tlc.output.internal.BroadcastStreamListener;
 import org.lamport.tla.toolbox.util.ResourceHelper;
@@ -158,7 +159,7 @@ public class TLCProcessJob extends TLCJob
 
                 // register the broadcasting listener
 
-                String modelFileName = launch.getLaunchConfiguration().getFile().getName();
+                final Model model = launch.getLaunchConfiguration().getAdapter(Model.class);
 
                 /*
                  * If TLC is being run for model checking then the stream kind passed to
@@ -174,7 +175,7 @@ public class TLCProcessJob extends TLCJob
                     kind = IProcessOutputSink.TYPE_TRACE_EXPLORE;
                 }
 
-                listener = new BroadcastStreamListener(modelFileName, kind);
+                listener = new BroadcastStreamListener(model, kind);
 
                 process.getStreamsProxy().getOutputStreamMonitor().addListener(listener);
                 process.getStreamsProxy().getErrorStreamMonitor().addListener(listener);
@@ -204,6 +205,29 @@ public class TLCProcessJob extends TLCJob
 							}
 						}
 
+						// Wait for the process to terminate. Otherwise, it
+						// opens the door to a race condition in
+						// org.lamport.tla.toolbox.tool.tlc.model.Model such
+						// that isRunning returns true querying the Launch (which
+						// is directly connected to the Process instance), even
+						// after the outer TLCProcessJob's JobListener
+						// ...launch.TLCModelLaunchDelegate.TLCJobChangeListener
+						// has setRunning(false). 
+						int i = 0;
+						while (!process.isTerminated() || i++ >= 10) {
+							try {
+								Thread.sleep(100L);
+							} catch (InterruptedException e) {
+								e.printStackTrace();
+								return new Status(IStatus.ERROR, TLCActivator.PLUGIN_ID,
+										"Error waiting for process termianation.", e);
+							}
+						}
+						if (!process.isTerminated()) {
+							TLCActivator.logInfo(
+									"TLC process failed to terminate within expected time window. Expect Toolbox to show an incorrect model state.");
+						}
+						
 						// abnormal termination
 						tlcEndTime = System.currentTimeMillis();
 						return Status.CANCEL_STATUS;
@@ -344,4 +368,17 @@ public class TLCProcessJob extends TLCJob
         return tlcEndTime;
     }
 
+	/**
+	 * @return The processee's exit/return value or -1 if unknown.
+	 */
+    public int getExitValue() {
+    	if (this.process != null) {
+    		try {
+    			return this.process.getExitValue();
+    		} catch (DebugException shouldNotHappen) {
+    			shouldNotHappen.printStackTrace();
+    		}
+    	}
+    	return -1;
+    }
 }

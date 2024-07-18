@@ -10,6 +10,7 @@ import java.rmi.NoSuchObjectException;
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
 
+import tlc2.tool.distributed.fp.DistributedFPSet;
 import tlc2.tool.distributed.fp.FPSetRMI;
 import tlc2.util.BitVector;
 import tlc2.util.LongVec;
@@ -26,7 +27,7 @@ public abstract class FPSet extends UnicastRemoteObject implements FPSetRMI
 	/**
 	 * Size of a Java long in bytes
 	 */
-	protected static final int LongSize = 8;
+	protected static final long LongSize = 8;
 
 	/**
 	 * Counts the amount of states passed to the containsBlock method
@@ -81,7 +82,16 @@ public abstract class FPSet extends UnicastRemoteObject implements FPSetRMI
     /* (non-Javadoc)
      * @see tlc2.tool.distributed.fp.FPSetRMI#exit(boolean)
      */
-    public abstract void exit(boolean cleanup) throws IOException;
+    public void exit(boolean cleanup) throws IOException {
+		// If DistributedFPSet is running, signal termination and wake it up.
+		// This is necessary when a SecurityManager intercepts System.exit(int)
+		// calls which has the side effect that DistributedFPSet's reporting
+		// loop does not terminate and keeps going forever.
+		DistributedFPSet.shutdown();
+		synchronized (this) {
+			this.notify();
+		}
+    }
 
     /* (non-Javadoc)
      * @see tlc2.tool.distributed.fp.FPSetRMI#checkFPs()
@@ -104,10 +114,6 @@ public abstract class FPSet extends UnicastRemoteObject implements FPSetRMI
     public abstract void recover() throws IOException;
 
     public abstract void recoverFP(long fp) throws IOException;
-
-    public abstract void prepareRecovery() throws IOException;
-
-    public abstract void completeRecovery() throws IOException;
 
     /* The set of checkpoint methods for remote checkpointing. */
     /* (non-Javadoc)

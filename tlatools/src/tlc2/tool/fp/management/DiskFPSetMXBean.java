@@ -9,6 +9,16 @@ import tlc2.tool.fp.FPSet;
 public interface DiskFPSetMXBean {
 
 	/**
+	 * @return The version of TLC.
+	 */
+	String getVersion();
+	
+	/**
+	 * @return The code revision corresponding to this version of TLC.
+	 */
+	String getRevision();
+	
+	/**
 	 * @see DiskFPSet#getDiskHitCnt()
 	 */
 	long getDiskHitCnt();
@@ -90,19 +100,14 @@ public interface DiskFPSetMXBean {
 	long getFlushTime();
 	
 	/**
+	 * @see DiskFPSet#getLockCnt()
+	 */
+	int getLockCnt();
+	
+	/**
 	 * @see DiskFPSet#getReaderWriterCnt()
 	 */
 	int getReaderWriterCnt();
-	
-	/**
-	 * @see DiskFPSet#getCollisionBucketCnt()
-	 */
-	long getCollisionBucketCnt();
-	
-	/**
-	 * @see DiskFPSet#getCollisionRatio()
-	 */
-	double getCollisionRatio();
 	
 	/**
 	 * @see DiskFPSet#getLoadFactor()

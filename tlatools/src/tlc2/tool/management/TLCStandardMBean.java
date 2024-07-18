@@ -14,6 +14,8 @@ import javax.management.NotCompliantMBeanException;
 import javax.management.ObjectName;
 import javax.management.StandardMBean;
 
+import tlc2.TLCGlobals;
+
 /**
  * @author Markus Alexander Kuppe
  */
@@ -24,6 +26,17 @@ public abstract class TLCStandardMBean extends StandardMBean {
 	protected TLCStandardMBean(@SuppressWarnings("rawtypes") final Class mbeanInterface)
 			throws NotCompliantMBeanException {
 		super(mbeanInterface);
+	}
+
+	public String getVersion() {
+		return TLCGlobals.versionOfTLC;
+	}
+	
+	public String getRevision() {
+		if (TLCGlobals.getRevision() == null) {
+			return "N/A";
+		}
+		return TLCGlobals.getRevision();
 	}
 
 	/**
@@ -66,7 +79,9 @@ public abstract class TLCStandardMBean extends StandardMBean {
 	public boolean unregister() {
 		final MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
 		try {
-			mbs.unregisterMBean(mxbeanName);
+			if (mbs.isRegistered(mxbeanName)) {
+				mbs.unregisterMBean(mxbeanName);
+			}
 		} catch (MBeanRegistrationException e) {
 			e.printStackTrace();
 			return false;

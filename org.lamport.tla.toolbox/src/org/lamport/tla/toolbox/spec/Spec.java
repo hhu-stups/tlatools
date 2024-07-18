@@ -129,6 +129,13 @@ public class Spec implements IAdaptable {
         initProjectProperties();
     }
 
+    public Spec(IProject project, IFile rootFile) {
+    	Assert.isNotNull(project);
+        this.project = project;
+    	Assert.isNotNull(rootFile);
+    	this.rootFile = rootFile;
+    }
+
     /**
      * Factory method Creates a new specification, the underlying IProject link
      * the root file
@@ -154,9 +161,10 @@ public class Spec implements IAdaptable {
      *            complete path name, from which one could extract the path
      *            names of those files and then rewrite them as needed.
      * @param monitor
+     * @throws CoreException 
      */
     public static Spec createNewSpec(String name, String rootFilename,
-            boolean importExisting, IProgressMonitor monitor) {
+            boolean importExisting, IProgressMonitor monitor) throws CoreException {
         IProject project = ResourceHelper.getProject(name, rootFilename, true,
                 importExisting, monitor);
         PreferenceStoreHelper.storeRootFilename(project, rootFilename);
@@ -297,10 +305,9 @@ public class Spec implements IAdaptable {
     /**
      * @see org.eclipse.core.runtime.IAdaptable#getAdapter(java.lang.Class)
      */
-    @SuppressWarnings("unchecked")
-	public Object getAdapter(@SuppressWarnings("rawtypes") Class adapter) {
+	public <T> T getAdapter(Class<T> adapter) {
         // lookup the IAdapterManager service
-        IAdapterManager manager = Platform.getAdapterManager();
+        final IAdapterManager manager = Platform.getAdapterManager();
         // forward the request to IAdapterManager service
         return manager.getAdapter(this, adapter);
     }

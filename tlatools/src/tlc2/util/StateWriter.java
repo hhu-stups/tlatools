@@ -9,12 +9,11 @@ import util.FileUtil;
 /**
  * State writer 
  * @author Simon Zambrovski
- * @version $Id$
  */
-public class StateWriter
+public class StateWriter implements IStateWriter
 {
-    private PrintWriter writer;
-    private int stateNum;
+    protected final PrintWriter writer;
+    protected int stateNum;
 
     public StateWriter(String fname) throws IOException
     {
@@ -23,6 +22,9 @@ public class StateWriter
         this.stateNum = 1;
     }
 
+    /* (non-Javadoc)
+	 * @see tlc2.util.IStateWriter#writeState(tlc2.tool.TLCState)
+	 */
     public synchronized void writeState(TLCState state)
     {
         this.writer.println("State " + this.stateNum + ":");
@@ -30,8 +32,49 @@ public class StateWriter
         this.stateNum++;
     }
 
-    public final void close()
+    /* (non-Javadoc)
+	 * @see tlc2.util.IStateWriter#writeState(tlc2.tool.TLCState, tlc2.tool.TLCState, boolean)
+	 */
+    public synchronized void writeState(final TLCState state, final TLCState successor, final boolean successorStateIsNew)
+    {
+    	if (successorStateIsNew) {
+    		this.writeState(state);
+    	}
+    }
+
+    /* (non-Javadoc)
+     * @see tlc2.util.IStateWriter#writeState(tlc2.tool.TLCState, tlc2.tool.TLCState, boolean, tlc2.util.IStateWriter.Visualization)
+     */
+    public void writeState(TLCState state, TLCState successor, final boolean successorStateIsNew, final Visualization visualization) {
+    	if (successorStateIsNew) {
+    		this.writeState(state);
+    	}
+    }
+    
+    /* (non-Javadoc)
+     * @see tlc2.util.IStateWriter#close()
+     */
+    public void close()
     {
         this.writer.close();
     }
+
+	/* (non-Javadoc)
+	 * @see tlc2.util.IStateWriter#writeState(tlc2.tool.TLCState, tlc2.tool.TLCState, tlc2.util.BitVector, int, int, boolean)
+	 */
+	public void writeState(TLCState state, TLCState successor, BitVector actionChecks, int from, int to, boolean successorStateIsNew) {
+    	if (successorStateIsNew) {
+    		this.writeState(state);
+    	}
+	}
+
+	/* (non-Javadoc)
+	 * @see tlc2.util.IStateWriter#writeState(tlc2.tool.TLCState, tlc2.tool.TLCState, tlc2.util.BitVector, int, int, boolean, tlc2.util.IStateWriter.Visualization)
+	 */
+	public void writeState(TLCState state, TLCState successor, BitVector actionChecks, int from, int to, boolean successorStateIsNew,
+			Visualization visulation) {
+    	if (successorStateIsNew) {
+    		this.writeState(state);
+    	}
+	}
 }

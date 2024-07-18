@@ -8,6 +8,7 @@ package tlc2.tool;
 import java.io.Serializable;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.net.URL;
 import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.Hashtable;
@@ -17,6 +18,7 @@ import java.util.Set;
 import tla2sany.drivers.FrontEndException;
 import tla2sany.drivers.SANY;
 import tla2sany.modanalyzer.SpecObj;
+import tla2sany.semantic.APSubstInNode;
 import tla2sany.semantic.AssumeNode;
 import tla2sany.semantic.DecimalNode;
 import tla2sany.semantic.ExprNode;
@@ -36,11 +38,11 @@ import tla2sany.semantic.SemanticNode;
 import tla2sany.semantic.StringNode;
 import tla2sany.semantic.Subst;
 import tla2sany.semantic.SubstInNode;
-import tla2sany.semantic.APSubstInNode;
 import tla2sany.semantic.SymbolNode;
 import tla2sany.semantic.TheoremNode;
 import tla2sany.semantic.ThmOrAssumpDefNode;
 import tlc2.TLCGlobals;
+import tlc2.module.BuiltInModuleHelper;
 import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.util.Context;
@@ -94,10 +96,10 @@ public class Spec implements ValueConstants, ToolGlobals, Serializable
     protected String[] impliedActNames; // ... and their names
     protected ExprNode[] modelConstraints; // Model constraints
     protected ExprNode[] actionConstraints; // Action constraints
-    protected ExprNode[] assumptions; // Assumptions
+    protected ExprNode[] assumptions; // Assumpt	ions
     protected boolean[] assumptionIsAxiom; // assumptionIsAxiom[i] is true iff assumptions[i]
                                            // is an AXIOM.  Added 26 May 2010 by LL
-    private FilenameToStream resolver; // takes car of path to stream resoltion
+    private final FilenameToStream resolver; // takes care of path to stream resolution
 
     public Spec(String specDir, String file, FilenameToStream resolver)
     {
@@ -109,7 +111,7 @@ public class Spec implements ValueConstants, ToolGlobals, Serializable
         this.moduleTbl = null;
         this.variablesNodes = null;
         this.defns = new Defns();
-        this.tlaClass = new TLAClass("tlc2.module");
+        this.tlaClass = new TLAClass("tlc2.module", resolver);
         this.initPredVec = new Vect(5);
         this.nextPred = null;
         this.temporals = null;
@@ -362,6 +364,11 @@ public class Spec implements ValueConstants, ToolGlobals, Serializable
                         boolean isConstant = (acnt == 0) && Modifier.isFinal(mdf);
                         Value val = isConstant ? mv.apply(EmptyArgs, EvalControl.Clear) : mv;
                         javaDefs.put(uname, val);
+                        
+                        if (!BuiltInModuleHelper.isBuiltInModule(userModule)) {
+            			   final URL resource = userModule.getResource(userModule.getSimpleName() + ".class");
+                           MP.printMessage(EC.TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE_LOADED, new String[] {uname.toString(), resource.toExternalForm(), mv.toString()});
+                        }
                     }
                 }
                 // Adds/overrides new definitions:

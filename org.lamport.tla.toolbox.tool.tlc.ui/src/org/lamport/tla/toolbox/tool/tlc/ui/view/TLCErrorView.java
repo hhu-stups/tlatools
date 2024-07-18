@@ -3,13 +3,13 @@ package org.lamport.tla.toolbox.tool.tlc.ui.view;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Vector;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 import org.eclipse.core.runtime.Assert;
-import org.eclipse.core.runtime.CoreException;
 import org.eclipse.debug.core.ILaunchConfiguration;
-import org.eclipse.debug.core.ILaunchConfigurationWorkingCopy;
 import org.eclipse.jface.action.Action;
 import org.eclipse.jface.dialogs.Dialog;
 import org.eclipse.jface.dialogs.IDialogSettings;
@@ -58,8 +58,8 @@ import org.eclipse.ui.forms.widgets.FormToolkit;
 import org.eclipse.ui.forms.widgets.Section;
 import org.eclipse.ui.part.ViewPart;
 import org.lamport.tla.toolbox.Activator;
-import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationConstants;
 import org.lamport.tla.toolbox.tool.tlc.model.Formula;
+import org.lamport.tla.toolbox.tool.tlc.model.Model;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCError;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCFcnElementVariableValue;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCFunctionVariableValue;
@@ -86,6 +86,7 @@ import org.lamport.tla.toolbox.util.FontPreferenceChangeListener;
 import org.lamport.tla.toolbox.util.IHelpConstants;
 import org.lamport.tla.toolbox.util.UIHelper;
 
+import tla2sany.st.Location;
 import tlc2.output.MP;
 
 /**
@@ -128,11 +129,7 @@ public class TLCErrorView extends ViewPart
     private SourceViewer errorViewer;
     private TreeViewer variableViewer;
     private SourceViewer valueViewer;
-    /**
-     * a handle on the underlying configuration file representing the
-     * model for which errors are currently being displayed in this view
-     */
-    private ILaunchConfiguration configFileHandle;
+    private Model model;
     private TraceExplorerComposite traceExplorerComposite;
 
     // listener on changes to the tlc output font preference
@@ -318,7 +315,7 @@ public class TLCErrorView extends ViewPart
 
             public void mouseDown(MouseEvent e)
             {
-                TLCUIHelper.openTLCLocationHyperlink(text, e, getCurrentConfigFileHandle());
+                TLCUIHelper.openTLCLocationHyperlink(text, e, model);
             }
 
             public void mouseDoubleClick(MouseEvent e)
@@ -465,6 +462,37 @@ public class TLCErrorView extends ViewPart
         variableViewer.getTree().addMouseListener(new ActionClickListener(variableViewer));
         variableViewer.getTree().addKeyListener(new ActionClickListener(variableViewer));
 
+// This is working but I'm not sure we need it. ActionClickListener
+// has a keystroke to collapse the viewer.        
+//        // Add a right click context menu to expand and collapse all variables. 
+//		final MenuManager contextMenu = new MenuManager("#ViewerMenu"); //$NON-NLS-1$
+//		contextMenu.setRemoveAllWhenShown(true);
+//		contextMenu.addMenuListener(new IMenuListener() {
+//			@Override
+//			public void menuAboutToShow(IMenuManager mgr) {
+//				mgr.add(new Action("&Collapse All") {
+//					public void run() {
+//						variableViewer.collapseAll();
+//					}
+//				});
+//				mgr.add(new Action("Expand to &default level") {
+//					public void run() {
+//						// expandAll() followed by expandToLevel(2) requires us
+//						// to collapse the viewer first.
+//						variableViewer.collapseAll();
+//						variableViewer.expandToLevel(2);
+//					}
+//				});
+//				mgr.add(new Action("&Expand All") {
+//					public void run() {
+//						variableViewer.expandAll();
+//					}
+//				});
+//			}
+//		});
+//		final Menu menu = contextMenu.createContextMenu(variableViewer.getControl());
+//		variableViewer.getControl().setMenu(menu);
+//
         variableViewer.addSelectionChangedListener(new ISelectionChangedListener() {
 
             public void selectionChanged(SelectionChangedEvent event)
@@ -623,88 +651,68 @@ public class TLCErrorView extends ViewPart
         }
     }
 
+	public void updateErrorView() {
+		updateErrorView(this.model);
+	}
+
     /**
      * Display the errors in the view, or hides the view if no errors
      * Displays data from the most recent trace explorer run for config
      * iff {@link ModelHelper#isOriginalTraceShown(ILaunchConfiguration)} is false.
      * 
-     * @param config TODO
      * @param errors
      *            a list of {@link TLCError}
      */
-    public static void updateErrorView(ILaunchConfiguration config) {
-    	updateErrorView(config, true);
+    public static void updateErrorView(Model model) {
+    	System.out.println(model);
+    	updateErrorView(model, true);
     }
 
-    public static void updateErrorView(ILaunchConfiguration config, boolean openErrorView)
+    public static void updateErrorView(Model model, boolean openErrorView)
     {
-
-        try
+        if (model == null)
         {
-            if (config == null)
-            {
-                return;
-            }
-            boolean isTraceExplorerUpdate;
-            isTraceExplorerUpdate = !ModelHelper.isOriginalTraceShown(config);
-
-            TLCModelLaunchDataProvider provider = null;
-            if (isTraceExplorerUpdate)
-            {
-                provider = TLCOutputSourceRegistry.getTraceExploreSourceRegistry().getProvider(config);
-            } else
-            {
-                provider = TLCOutputSourceRegistry.getModelCheckSourceRegistry().getProvider(config);
-            }
-
-            if (provider == null)
-            {
-                return;
-            }
-            updateErrorView(provider, config, openErrorView);
-        } catch (CoreException e)
-        {
-            TLCUIActivator.getDefault().logError("Error determining if trace explorer expressions should be shown", e);
+            return;
         }
+        boolean isTraceExplorerUpdate;
+        isTraceExplorerUpdate = !model.isOriginalTraceShown();
+
+        TLCModelLaunchDataProvider provider = null;
+        if (isTraceExplorerUpdate)
+        {
+            provider = TLCOutputSourceRegistry.getTraceExploreSourceRegistry().getProvider(model);
+        } else
+        {
+            provider = TLCOutputSourceRegistry.getModelCheckSourceRegistry().getProvider(model);
+        }
+
+        if (provider == null)
+        {
+            return;
+        }
+        updateErrorView(provider, model, openErrorView);
     }
     
-	public static void updateErrorView(final TLCModelLaunchDataProvider provider, final ILaunchConfiguration config,
+	public static void updateErrorView(final TLCModelLaunchDataProvider provider, final Model model,
 			boolean openErrorView) {
-		try {
-            TLCErrorView errorView;
-			if (provider.getErrors().size() > 0 && openErrorView == true) {
-           		errorView = (TLCErrorView) UIHelper.openView(TLCErrorView.ID);
-			} else {
-                errorView = (TLCErrorView) UIHelper.findView(TLCErrorView.ID);
-            }
-			if (errorView != null) {
-                /*
-                 * We need a handle on the actual underlying configuration file handle
-                 * in order to retrieve the expressions that should be put in the trace
-                 * explorer table. Working copies of the configuration file may not have
-                 * all of the expressions that should appear. The filling of the trace
-                 * explorer table occurs in the fill() method.
-                 */
-				if (config.isWorkingCopy()) {
-                    errorView.configFileHandle = ((ILaunchConfigurationWorkingCopy) config).getOriginal();
-				} else {
-                    errorView.configFileHandle = config;
-                }
-
-				final List<String> serializedInput = errorView.configFileHandle
-						.getAttribute(IModelConfigurationConstants.TRACE_EXPLORE_EXPRESSIONS, new Vector<String>());
-                // fill the name and the errors
-				errorView.fill(ModelHelper.getModelName(provider.getConfig().getFile()), provider.getErrors(),
-						serializedInput);
-
-				if (provider.getErrors().size() == 0) {
-                    errorView.hide();
-                }
-            }
-		} catch (CoreException e) {
-            TLCUIActivator.getDefault().logError("Error determining if trace explorer expressions should be shown", e);
+        TLCErrorView errorView;
+		if (provider.getErrors().size() > 0 && openErrorView == true) {
+       		errorView = (TLCErrorView) UIHelper.openView(TLCErrorView.ID);
+		} else {
+            errorView = (TLCErrorView) UIHelper.findView(TLCErrorView.ID);
         }
+		if (errorView != null) {
+            errorView.model= model;
 
+            final List<String> serializedInput = model.getTraceExplorerExpressions();
+            // fill the name and the errors
+			errorView.fill(provider.getModel().getName(), provider.getErrors(),
+					serializedInput);
+
+			if (provider.getErrors().size() == 0) {
+                errorView.hide();
+            }
+        }
     }
 
     /**
@@ -879,11 +887,20 @@ public class TLCErrorView extends ViewPart
            			predecessor.diff(child);
            		}
 				viewer.replace(parent, viewerIndex, child);
-				if (child.getVariablesAsList().size() > 0) {
-					viewer.setHasChildren(child, true);
-				}
+				// Always setHashChildren even if child has no children: This is
+				// a virtual table here meaning that it reduces the number of
+				// table items at the OS level by recycling them (the OS only
+				// creates a many items that fit into the visible area). If an
+				// item showing a regular state, is later recycled by a "back to
+				// state" or "stuttering" indicator (neither has children),
+				// the OS still incorrectly assumes the item has children. This
+				// crashes hard on Linux and results in erratic behavior on
+				// Windows and Mac.
+				viewer.setHasChildren(child, child.getVariablesAsList().size() > 0);
 				// Lazily expand the children
-				viewer.expandToLevel(child, 1);
+				if (child.isExpandable()){
+					viewer.expandToLevel(child, 1);
+				}
 			} else if (parent instanceof TLCState) {
 				final TLCState state = (TLCState) parent;
                 if ((state.isStuttering() || state.isBackToState())) {
@@ -893,9 +910,7 @@ public class TLCErrorView extends ViewPart
                 	if (variablesAsList.size() > viewerIndex) {
                 		final TLCVariable child = variablesAsList.get(viewerIndex);
                 		viewer.replace(parent, viewerIndex, child);
-                		if (child.getChildCount() > 0) {
-                			viewer.setHasChildren(child, true);
-                		}
+        				viewer.setHasChildren(child, child.getChildCount() > 0);
                 	}
                 }
 			} else if (parent instanceof TLCVariable
@@ -903,31 +918,23 @@ public class TLCErrorView extends ViewPart
 				final TLCMultiVariableValue multiValue = (TLCMultiVariableValue) ((TLCVariable) parent).getValue();
 				final TLCVariableValue child = multiValue.asList().get(viewerIndex);
 				viewer.replace(parent, viewerIndex, child);
-				if (child.getChildCount() > 0) {
-					viewer.setHasChildren(child, true);
-				}
+				viewer.setHasChildren(child, child.getChildCount() > 0);
 			} else if (parent instanceof TLCVariable) {
 				final TLCVariable variable = (TLCVariable) parent;
 				final TLCVariableValue child = variable.getValue();
 				viewer.replace(parent, viewerIndex, child);
-				if (child.getChildCount() > 0) {
-					viewer.setChildCount(child, child.getChildCount());
-				}
+				viewer.setChildCount(child, child.getChildCount());
 			} else if (parent instanceof TLCMultiVariableValue) {
 				final TLCMultiVariableValue multiValue = (TLCMultiVariableValue) parent;
 				final TLCVariableValue child = multiValue.asList().get(viewerIndex);
 				viewer.replace(parent, viewerIndex, child);
-				if (child.getChildCount() > 0) {
-					viewer.setHasChildren(child, true);
-				}
+				viewer.setHasChildren(child, child.getChildCount() > 0);
 			} else if (parent instanceof TLCVariableValue
 					&& ((TLCVariableValue) parent).getValue() instanceof TLCMultiVariableValue) {
 				final TLCMultiVariableValue multiValue = (TLCMultiVariableValue) ((TLCVariableValue) parent).getValue();
 				final TLCVariableValue child = multiValue.asList().get(viewerIndex);
 				viewer.replace(parent, viewerIndex, child);
-				if (child.getChildCount() > 0) {
-					viewer.setHasChildren(child, true);
-				}
+				viewer.setHasChildren(child, child.getChildCount() > 0);
 			} else {
 				throw new IllegalArgumentException();
 			}
@@ -1140,13 +1147,17 @@ public class TLCErrorView extends ViewPart
             return null;
         }
 
+		private static final Map<String, Color> location2color = new ConcurrentHashMap<String, Color>();
+		//TODO Convert to Toolbox preference once this features proves useful.
+		private static final boolean coloring = Boolean.getBoolean(TLCErrorView.class.getName() + ".coloring");
+
         /**
          * The following method sets the background color of a row or column of
          * the table. It highlights the entire row for an added or deleted item.
          * For a changed value, only the value is highlighted.
          */
 		private Color getBackground(Object element, int column) {
-			if (element instanceof TLCVariable) {
+            if (element instanceof TLCVariable) {
 				final TLCVariable var = (TLCVariable) element;
 				if (var.isChanged() && column == VALUE) {
 					return TLCUIActivator.getDefault().getChangedColor();
@@ -1162,6 +1173,21 @@ public class TLCErrorView extends ViewPart
 				} else if (value.isDeleted()) {
 					return TLCUIActivator.getDefault().getDeletedColor();
 				}
+			} else if (coloring && element instanceof TLCState) {
+				// Assign a color to each location to make actions in the error
+				// viewer easier distinguishable.
+				final TLCState state = (TLCState) element;
+				Location moduleLocation = state.getModuleLocation();
+				if (moduleLocation == null) {
+					return null;
+				}
+				Color c = location2color.get(moduleLocation.toString());
+				if (c == null) {
+					int color = SWT.COLOR_WHITE + (2 * location2color.size());
+					c = TLCUIActivator.getColor(color);
+					location2color.put(state.getModuleLocation().toString(), c);
+				}
+				return c;
 			}
 			return null;
 		}
@@ -1240,16 +1266,9 @@ public class TLCErrorView extends ViewPart
         return (TLCError) variableViewer.getInput();
     }
 
-    /**
-     * Returns a handle on the underlying configuration file for which
-     * errors are being shown by this view. Can return null.
-     * 
-     * @return
-     */
-    public ILaunchConfiguration getCurrentConfigFileHandle()
-    {
-        return configFileHandle;
-    }
+	public Model getModel() {
+		return model;
+	}
 
     private class HelpAction extends Action
     {
@@ -1306,4 +1325,8 @@ public class TLCErrorView extends ViewPart
             valueViewer.setDocument(EMPTY_DOCUMENT());
         }
     }
+
+	public void setOriginalTraceShown(boolean b) {
+		this.model.setOriginalTraceShown(b);
+	}
 }

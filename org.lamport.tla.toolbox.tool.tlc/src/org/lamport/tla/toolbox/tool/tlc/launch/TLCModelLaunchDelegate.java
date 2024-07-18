@@ -31,8 +31,11 @@ import org.eclipse.core.runtime.jobs.ISchedulingRule;
 import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.core.runtime.jobs.JobChangeAdapter;
 import org.eclipse.core.runtime.jobs.MultiRule;
+import org.eclipse.debug.core.DebugException;
 import org.eclipse.debug.core.ILaunch;
 import org.eclipse.debug.core.ILaunchConfiguration;
+import org.eclipse.debug.core.model.IProcess;
+import org.eclipse.debug.core.model.IStreamsProxy;
 import org.eclipse.debug.core.model.LaunchConfigurationDelegate;
 import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.text.FindReplaceDocumentAdapter;
@@ -49,9 +52,10 @@ import org.lamport.tla.toolbox.tool.tlc.job.DistributedTLCJob;
 import org.lamport.tla.toolbox.tool.tlc.job.ITLCJobStatus;
 import org.lamport.tla.toolbox.tool.tlc.job.TLCJobFactory;
 import org.lamport.tla.toolbox.tool.tlc.job.TLCProcessJob;
+import org.lamport.tla.toolbox.tool.tlc.model.Model;
+import org.lamport.tla.toolbox.tool.tlc.model.ModelWriter;
 import org.lamport.tla.toolbox.tool.tlc.model.TypedSet;
 import org.lamport.tla.toolbox.tool.tlc.util.ModelHelper;
-import org.lamport.tla.toolbox.tool.tlc.util.ModelWriter;
 import org.lamport.tla.toolbox.util.AdapterFactory;
 import org.lamport.tla.toolbox.util.ResourceHelper;
 import org.lamport.tla.toolbox.util.TLAMarkerInformationHolder;
@@ -76,7 +80,6 @@ import tlc2.TLCGlobals;
  * Some of them run on any launch type, others only in the modelcheck mode
  * 
  * @author Simon Zambrovski
- * @version $Id$
  * Modified on 10 Sep 2009 to add No Spec TLC launch option.
  */
 @SuppressWarnings("restriction")
@@ -130,6 +133,27 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
         {
             return false;
         }
+        
+        // check and lock the model
+        final Model model = config.getAdapter(Model.class);
+        synchronized (config)
+        {
+            // read out the running attribute
+            if (/*model.isRunning() || */model.isLocked())
+            {
+                // previous run has not been completed
+                // exit
+                throw new CoreException(
+                        new Status(
+                                IStatus.ERROR,
+                                TLCActivator.PLUGIN_ID,
+                                "The running attribute for "
+                                        + modelName
+                                        + " has been set to true or that model is locked. "
+                                        + "Another TLC is possible running on the same model, has been terminated non-gracefully "
+                                        + "or you tried to run TLC on a locked model. Running TLC on a locked model is not possible."));
+            }
+        }
 
         try
         {
@@ -169,6 +193,8 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
     public boolean buildForLaunch(ILaunchConfiguration config, String mode, IProgressMonitor monitor)
             throws CoreException
     {
+    	final Model model = config.getAdapter(Model.class);
+    	
         // generate the model here
         int STEP = 100;
 
@@ -219,7 +245,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
                 } else
                 {
                     final boolean recover = config.getAttribute(LAUNCH_RECOVER, LAUNCH_RECOVER_DEFAULT);
-                    final IResource[] checkpoints = ModelHelper.getCheckpoints(config, false);
+                    final IResource[] checkpoints = config.getAdapter(Model.class).getCheckpoints(false);
 
                     ISchedulingRule deleteRule = ResourceHelper.getDeleteRule(members);
 
@@ -292,7 +318,10 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
                 throw new CoreException(new Status(IStatus.ERROR, TLCActivator.PLUGIN_ID, "Error copying "
                         + specRootFilename + " into " + targetFolderPath.toOSString()));
             }
-
+            
+            // Copy the spec's root file userModule override if any.
+            copyUserModuleOverride(monitor, 2, project, targetFolderPath, specRootFile);
+            
             // get the list of dependent modules
             List extendedModules = ToolboxHandle.getExtendedModules(specRootFile.getName());
 
@@ -308,10 +337,11 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
                     moduleFile = ResourceHelper.getLinkedFile(project, module, false);
                     if (moduleFile != null)
                     {
-                    	try {
-                        moduleFile.copy(targetFolderPath.append(moduleFile.getProjectRelativePath()), IResource.DERIVED
-                                | IResource.FORCE, new SubProgressMonitor(monitor, STEP / extendedModules.size()));
-                    	} catch (ResourceException re) {
+						try {
+	                        moduleFile.copy(targetFolderPath.append(moduleFile.getProjectRelativePath()), IResource.DERIVED
+	                                | IResource.FORCE, new SubProgressMonitor(monitor, STEP / extendedModules.size()));
+							copyUserModuleOverride(monitor, STEP / extendedModules.size(), project, targetFolderPath, moduleFile);
+						} catch (ResourceException re) {
                     		// Trying to copy the file to the targetFolderPath produces an exception.
                     		// The most common cause is a dangling linked file in the .project metadata 
                     		// of the Toolbox project. Usually, a dangling link is the effect of copying
@@ -443,8 +473,8 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             }
 
             // calculator expression
-            writer.addConstantExpressionEvaluation(config.getAttribute(MODEL_EXPRESSION_EVAL, EMPTY_STRING),
-                    MODEL_EXPRESSION_EVAL);
+           
+            writer.addConstantExpressionEvaluation(model.getEvalExpression(), Model.MODEL_EXPRESSION_EVAL);
 
             switch (specType) {
             case MODEL_BEHAVIOR_TYPE_NO_SPEC:
@@ -513,6 +543,28 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
         return false;
     }
 
+	// Copy userModule overrides (see tlc2.tool.Spec.processSpec(SpecObj)) if
+	// any. An override is an Java implementation of a user defined module. By
+	// convention, the Java class file name has to be aligned with the module
+	// name (i.e. Bits.tla -> Bits.class). For completeness, also copy the
+	// Java source file from which the user manually compiled the class file.
+	private void copyUserModuleOverride(IProgressMonitor monitor, int ticks, IProject project, IPath targetFolderPath,
+			IFile tlaFile) throws CoreException {
+		final IFile[] userModuleOverrides = ResourceHelper.getModuleOverrides(project, tlaFile);
+		for (IFile userModuleOverride : userModuleOverrides) {
+			try {
+				userModuleOverride.copy(targetFolderPath.append(userModuleOverride.getProjectRelativePath()),
+						IResource.DERIVED | IResource.FORCE, new SubProgressMonitor(monitor, ticks));
+			} catch (CoreException e) {
+				// If the file could not be copied, the link is obviously stale
+				// and has to be removed to not create any problems in the
+				// future. A link gets stale if e.g. the user removed the module
+				// override manually in the file system.
+				userModuleOverride.delete(true, monitor);
+			}
+		}
+	}
+
     /**
      * Launch the module parser on the root module and handle the errors
      *   
@@ -525,6 +577,8 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
     {
         monitor.beginTask("Verifying model files", 4);
 
+        final Model model = configuration.getAdapter(Model.class);
+        
         IProject project = ResourceHelper.getProject(specName);
         IFolder launchDir = project.getFolder(modelName);
         IFile rootModule = launchDir.getFile(ModelHelper.FILE_TLA);
@@ -538,7 +592,8 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 
         monitor.worked(1);
         // remove existing markers
-        ModelHelper.removeModelProblemMarkers(configuration, ModelHelper.TLC_MODEL_ERROR_MARKER_SANY);
+        
+        model.removeMarkers(Model.TLC_MODEL_ERROR_MARKER_SANY);
         monitor.worked(1);
 
         if (!detectedErrors.isEmpty())
@@ -574,12 +629,11 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 
                         // find the error cause and install the error marker on the corresponding
                         // field
-                        Hashtable props = ModelHelper.createMarkerDescription(configuration, document, searchAdapter,
+                        Hashtable props = ModelHelper.createMarkerDescription(document, searchAdapter,
                                 message, severity, coordinates);
                         if (props != null)
                         {
-                            ModelHelper.installModelProblemMarker(configuration.getFile(), props,
-                                    ModelHelper.TLC_MODEL_ERROR_MARKER_SANY);
+                        	model.setMarker(props, Model.TLC_MODEL_ERROR_MARKER_SANY);
                         }
 
                     } else
@@ -649,35 +703,13 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
                     "Error accessing the spec project " + specName));
         }
 
-        // check and lock the model
-        synchronized (config)
-        {
-            // read out the running attribute
-            if (ModelHelper.isModelRunning(config) || ModelHelper.isModelLocked(config))
-            {
-                // previous run has not been completed
-                // exit
-                throw new CoreException(
-                        new Status(
-                                IStatus.ERROR,
-                                TLCActivator.PLUGIN_ID,
-                                "The running attribute for "
-                                        + modelName
-                                        + " has been set to true or that model is locked."
-                                        + "Another TLC is possible running on the same model, or has been terminated non-gracefully"
-                                        + "or the user has tried to run TLC on a locked model. Running TLC on a locked model should not be possible."));
-            } else
-            {
-
-                // setup the running flag
-                // from this point any termination of the run must reset the
-                // flag
-                ModelHelper.setModelRunning(config, true);
-            }
-        }
+        // setup the running flag
+        // from this point any termination of the run must reset the
+        // flag
+        config.getAdapter(Model.class).setRunning(true);
 
         // set the model to have the original trace shown
-        ModelHelper.setOriginalTraceShown(config, true);
+        config.getAdapter(Model.class).setOriginalTraceShown(true);
 
         // number of workers
         int numberOfWorkers = config.getAttribute(LAUNCH_NUMBER_OF_WORKERS, LAUNCH_NUMBER_OF_WORKERS_DEFAULT);
@@ -710,6 +742,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
         		job = new DistributedTLCJob(specName, modelName, launch, numberOfWorkers);
                 job.setRule(mutexRule);
         	} else {
+        		numberOfWorkers = config.getAttribute(LAUNCH_DISTRIBUTED_NODES_COUNT, LAUNCH_DISTRIBUTED_NODES_COUNT_DEFAULT);
                 //final IProject iproject = ResourceHelper.getProject(specName);
                 final IFolder launchDir = project.getFolder(modelName);
                 final File file = launchDir.getRawLocation().makeAbsolute().toFile();
@@ -723,10 +756,20 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 				final IConfigurationElement[] elements = registry
 						.getConfigurationElementsFor("org.lamport.tla.toolx.tlc.job");
 				for (IConfigurationElement element : elements) {
+					final DummyProcess process = new DummyProcess(launch);
+					launch.addProcess(process);
 					final TLCJobFactory factory = (TLCJobFactory) element
 							.createExecutableExtension("clazz");
 					final Properties props = new Properties();
 					props.put(TLCJobFactory.MAIN_CLASS, tlc2.TLC.class.getName());
+					// Add model and spec name to properties to make the model
+					// checker run easily identifiable in the result email.
+			        final Model model = config.getAdapter(Model.class);
+					props.put(TLCJobFactory.MODEL_NAME, model.getName());
+					props.put(TLCJobFactory.SPEC_NAME, model.getSpec().getName());
+					if (numberOfWorkers > 1) {
+						props.put(TLCJobFactory.MAIN_CLASS, tlc2.tool.distributed.TLCServer.class.getName());
+					}
 					props.put(TLCJobFactory.MAIL_ADDRESS, config.getAttribute(
 							LAUNCH_DISTRIBUTED_RESULT_MAIL_ADDRESS, "tlc@localhost"));
 					
@@ -756,7 +799,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 					}
 
 					job = factory.getTLCJob(cloud, file, numberOfWorkers, props, tlcParams.toString());
-					job.addJobChangeListener(new WithStatusJobChangeListener(config));
+					job.addJobChangeListener(new WithStatusJobChangeListener(process, config.getAdapter(Model.class)));
 					break;
 				}
 				// Notify the user that something went wrong and ask him to report it. This code path
@@ -787,32 +830,89 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
         job.setUser(true);
 
         // setup the job change listener
-        TLCJobChangeListener tlcJobListener = new TLCJobChangeListener(config);
+        TLCJobChangeListener tlcJobListener = new TLCJobChangeListener(config.getAdapter(Model.class));
         job.addJobChangeListener(tlcJobListener);
         job.schedule();
     }
+    
+	// A DummyProcess instance has to be attached to the corresponding ILaunch
+	// when the Job launched neither creates an IProcess nor IDebugTarget. In
+    // this case the call to ILaunch#isTerminated will always evaluate to false
+    // regardless of the real job's state.
+	// Remember to call DummyProcess#setTerminated upon completion of the Job
+	// with e.g. a IJobChangeListener.
+	class DummyProcess implements IProcess {
+		private final ILaunch launch;
+		private boolean termiated = false;
+		
+		public DummyProcess(ILaunch aLaunch) {
+			this.launch = aLaunch;
+		}
+
+		public void setTerminated() {
+			this.termiated = true;
+		}
+		
+		public void terminate() throws DebugException {
+		}
+
+		public boolean isTerminated() {
+			return termiated;
+		}
+
+		public boolean canTerminate() {
+			return !termiated;
+		}
+
+		public <T> T getAdapter(Class<T> adapter) {
+			return null;
+		}
+
+		public String getAttribute(String key) {
+			return null;
+		}
+		
+		public void setAttribute(String key, String value) {
+		}
+
+		public IStreamsProxy getStreamsProxy() {
+			return null;
+		}
+
+		public ILaunch getLaunch() {
+			return launch;
+		}
+
+		public String getLabel() {
+			return getClass().getSimpleName();
+		}
+
+		public int getExitValue() throws DebugException {
+			return 0;
+		}
+	}
 
 	// This opens up a dialog at the end of the job showing the status message
     class WithStatusJobChangeListener extends SimpleJobChangeListener {
 
-		private final ILaunchConfiguration config;
+		private final Model model;
+		private final DummyProcess process;
 
-		public WithStatusJobChangeListener(ILaunchConfiguration config) {
-			this.config = config;
+		public WithStatusJobChangeListener(DummyProcess process, Model model) {
+			this.process = process;
+			this.model = model;
 		}
 
 		public void done(IJobChangeEvent event) {
 			super.done(event);
 	
+			
 			// TLC models seem to require some clean-up
-			try {
-				ModelHelper.setModelLocked(config, false);
-				ModelHelper.setModelRunning(config, false);
-				ModelHelper.recoverModel(config);
-			} catch (CoreException doesNotHappen) {
-				doesNotHappen.printStackTrace();
-				// Not supposed to happen
-			}
+			model.setLocked(false);
+			model.setRunning(false);
+			model.recover();
+			
+			process.setTerminated();
 
 			final IStatus status = event.getJob().getResult();
 			final String message = status.getMessage();
@@ -847,89 +947,86 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
      */
     class TLCJobChangeListener extends SimpleJobChangeListener
     {
-        private ILaunchConfiguration config;
+        private Model model;
 
         /**
          * Constructs the change listener
-         * @param config the config to modify after the job completion
+         * @param model the config to modify after the job completion
          */
-        public TLCJobChangeListener(ILaunchConfiguration config)
+        public TLCJobChangeListener(Model model)
         {
-            this.config = config;
+            this.model = model;
         }
 
         public void done(IJobChangeEvent event)
         {
             super.done(event);
 
-            try
-            {
-                /*
-                 * After the job has completed, new check points
-                 * may have been created in the file system but
-                 * not yet recognized by the eclipse resource
-                 * framework. The following method
-                 * is called with the flag to refresh. This synch's
-                 * the resource framework with the new checkpoints (if any).
-                 * 
-                 * This refresh operation is wrapped in a job. The following
-                 * explains why. To read about jobs in general, check out:
-                 * http://www.eclipse.org/articles/Article-Concurrency/jobs-api.html.
-                 * 
-                 * The refresh operation is a long running job. This means
-                 * that it cannot be run within the running code of another
-                 * job whose scheduling rule does not encompass the scheduling rule
-                 * of the refresh operation. This method (done()) seems to be
-                 * called during the running of the TLC job. Therefore, simply
-                 * calling ModelHelper.getCheckpoints(config, true) results
-                 * in an exception because getCheckpoints calls the refresh
-                 * operation which has a scheduling rule that is not included
-                 * by the TLC job scheduling rule.
-                 * 
-                 * To solve this problem, we wrap the call to getCheckpoints()
-                 * in another job, set the scheduling rule to be a scheduling rule
-                 * for refreshing the model folder, and schedule that wrapping job
-                 * to be run later.
-                 */
-                IProject project = ResourceHelper.getProject(specName);
-                IFolder modelFolder = project.getFolder(modelName);
-                WorkspaceJob refreshJob = new WorkspaceJob("") {
+            /*
+             * After the job has completed, new check points
+             * may have been created in the file system but
+             * not yet recognized by the eclipse resource
+             * framework. The following method
+             * is called with the flag to refresh. This synch's
+             * the resource framework with the new checkpoints (if any).
+             * 
+             * This refresh operation is wrapped in a job. The following
+             * explains why. To read about jobs in general, check out:
+             * http://www.eclipse.org/articles/Article-Concurrency/jobs-api.html.
+             * 
+             * The refresh operation is a long running job. This means
+             * that it cannot be run within the running code of another
+             * job whose scheduling rule does not encompass the scheduling rule
+             * of the refresh operation. This method (done()) seems to be
+             * called during the running of the TLC job. Therefore, simply
+             * calling ModelHelper.getCheckpoints(config, true) results
+             * in an exception because getCheckpoints calls the refresh
+             * operation which has a scheduling rule that is not included
+             * by the TLC job scheduling rule.
+             * 
+             * To solve this problem, we wrap the call to getCheckpoints()
+             * in another job, set the scheduling rule to be a scheduling rule
+             * for refreshing the model folder, and schedule that wrapping job
+             * to be run later.
+             */
+            IProject project = ResourceHelper.getProject(specName);
+            IFolder modelFolder = project.getFolder(modelName);
+            WorkspaceJob refreshJob = new WorkspaceJob("") {
 
-                    public IStatus runInWorkspace(IProgressMonitor monitor) throws CoreException
-                    {
-                        ModelHelper.getCheckpoints(config, true);
-                        return Status.OK_STATUS;
-                    }
-                };
-                refreshJob.setRule(ResourcesPlugin.getWorkspace().getRuleFactory().refreshRule(modelFolder));
-                refreshJob.schedule();
-
-                // make the model modification in order to make it runnable again
-                if (event.getJob() instanceof TLCProcessJob) {
-                	Assert.isTrue(event.getJob() instanceof TLCProcessJob);
-                	Assert.isNotNull(event.getResult());
-                	TLCProcessJob tlcJob = (TLCProcessJob) event.getJob();
-                	if (event.getResult().isOK())
-                	{
-                		int autoLockTime = config.getAttribute(LAUNCH_AUTO_LOCK_MODEL_TIME,
-                				IModelConfigurationDefaults.MODEL_AUTO_LOCK_TIME_DEFAULT);
-                		// auto lock time is in minutes, getTLCStartTime() and getTLCEndTime()
-                		// are in milliseconds
-                		if (tlcJob.getTlcEndTime() - tlcJob.getTlcStartTime() > autoLockTime * 60 * 1000)
-                		{
-                			// length of job execution exceeded a certain length of time
-                			// should lock
-                			ModelHelper.setModelLocked(config, true);
-                		}
-                	}
+                public IStatus runInWorkspace(IProgressMonitor monitor) throws CoreException
+                {
+                	model.getCheckpoints(true);
+                    return Status.OK_STATUS;
                 }
+            };
+            refreshJob.setRule(ResourcesPlugin.getWorkspace().getRuleFactory().refreshRule(modelFolder));
+            refreshJob.schedule();
 
-                ModelHelper.setModelRunning(config, false);
-            } catch (CoreException e)
-            {
-                TLCActivator.logError("Error setting lock and running markers on the model", e);
+            // make the model modification in order to make it runnable again
+            if (event.getJob() instanceof TLCProcessJob) {
+            	Assert.isTrue(event.getJob() instanceof TLCProcessJob);
+            	Assert.isNotNull(event.getResult());
+            	TLCProcessJob tlcJob = (TLCProcessJob) event.getJob();
+            	if (event.getResult().isOK())
+            	{
+            		int autoLockTime = model.getAutoLockTime();
+            		// auto lock time is in minutes, getTLCStartTime() and getTLCEndTime()
+            		// are in milliseconds
+            		if (tlcJob.getTlcEndTime() - tlcJob.getTlcStartTime() > autoLockTime * 60 * 1000)
+            		{
+            			// length of job execution exceeded a certain length of time
+            			// should lock
+            			model.setLocked(true);
+            		}
+            	}
+				if (!Status.CANCEL_STATUS.equals(event.getJob().getResult()) && tlcJob.getExitValue() > 0) {
+					// if TLC crashed with exit value > 0 and the user did *not*
+					// click cancel, mark the job as crashed.
+					model.setStale();
+				}
             }
-        }
+            model.setRunning(false);
+       }
     }
 
     /**

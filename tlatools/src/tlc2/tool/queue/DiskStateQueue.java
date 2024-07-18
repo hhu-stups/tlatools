@@ -42,7 +42,7 @@ public class DiskStateQueue extends StateQueue {
 	protected StatePoolReader reader;
 	protected StatePoolWriter writer;
 	/**
-	 * The SPC takes care or deleting swap files on the lower end of the range
+	 * The SPC takes care of deleting swap files on the lower end of the range
 	 * (loPool, hiPool). It terminates, when the first checkpoint is written at
 	 * which point checkpointing itself takes care of removing obsolete swap
 	 * files.
@@ -96,6 +96,16 @@ public class DiskStateQueue extends StateQueue {
 			this.fillDeqBuffer();
 		}
 		return this.deqBuf[this.deqIndex++];
+	}
+	
+	/* (non-Javadoc)
+	 * @see tlc2.tool.queue.StateQueue#peekInner()
+	 */
+	TLCState peekInner() {
+		if (this.deqIndex == this.deqBuf.length) {
+			this.fillDeqBuffer();
+		}
+		return this.deqBuf[this.deqIndex];
 	}
 
 	private final void fillDeqBuffer() {

@@ -37,7 +37,8 @@ public class MSBDiskFPSet extends HeapBasedDiskFPSet {
 		// index. However, we cannot use the 32st bit, because it is used to
 		// indicate if a fp has been flushed to disk. Hence we use the first n
 		// bits starting from the second most significant bit.
-		this.moveBy = (31 - fpSetConfig.getPrefixBits()) - (logMaxMemCnt - LogMaxLoad);
+		Assert.check(fpSetConfig.getFpBits() > 0, EC.GENERAL);
+		this.moveBy = (32 - fpSetConfig.getFpBits()) - (logMaxMemCnt - LogMaxLoad);
 		this.mask = (capacity - 1) << moveBy;
 		
 		this.flusher = new MSBFlusher();
@@ -61,6 +62,9 @@ public class MSBDiskFPSet extends HeapBasedDiskFPSet {
 	protected long index(long fp, long aMask) {
 		// calculate hash value (just n most significant bits of fp) which is
 		// used as an index address
+		// 1) Right shift by 32 bits and cast to int (upper 32 bits are zeroed)
+		// 2) Zero the lower n bits according to mask
+		// 3) Right shift by moveBy (the bits which have previously been zeroed because of mask.
 		return ((int) (fp >>> 32) & aMask) >> moveBy;
 	}
 	
@@ -96,7 +100,7 @@ public class MSBDiskFPSet extends HeapBasedDiskFPSet {
 		/* (non-Javadoc)
 		 * @see tlc2.tool.fp.DiskFPSet#mergeNewEntries(long[], int, java.io.RandomAccessFile, java.io.RandomAccessFile)
 		 */
-		protected void mergeNewEntries(RandomAccessFile inRAF, RandomAccessFile outRAF) throws IOException {
+		protected void mergeNewEntries(RandomAccessFile[] inRAFs, RandomAccessFile outRAF) throws IOException {
 			final long buffLen = tblCnt.get();
 			final TLCIterator itr = new TLCIterator(tbl);
 
@@ -121,7 +125,7 @@ public class MSBDiskFPSet extends HeapBasedDiskFPSet {
 			boolean eof = false;
 			if (fileCnt > 0) {
 				try {
-					value = inRAF.readLong();
+					value = inRAFs[0].readLong();
 				} catch (EOFException e) {
 					eof = true;
 				}
@@ -136,7 +140,7 @@ public class MSBDiskFPSet extends HeapBasedDiskFPSet {
 				if ((value < fp || eol) && !eof) {
 					writeFP(outRAF, value);
 					try {
-						value = inRAF.readLong();
+						value = inRAFs[0].readLong();
 					} catch (EOFException e) {
 						eof = true;
 					}

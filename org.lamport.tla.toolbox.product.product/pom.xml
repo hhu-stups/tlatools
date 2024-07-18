@@ -14,6 +14,17 @@
   <!-- Release version goes here. -->
   <version>1.4.0-SNAPSHOT</version>
   <packaging>eclipse-repository</packaging>
+  
+  <properties>
+    <!-- Align product.version with the version in 
+         org.lamport.tla.toolbox.product.product.product
+         product.version. -->
+    <product.version>1.5.3</product.version>
+    <product.build>${maven.build.timestamp}</product.build>
+    <!-- Do not include non-code project in Sonar reporting. -->
+    <sonar.skip>true</sonar.skip>
+  </properties>
+  
   <build>
 	<plugins>
 		<!-- attach the .target file definition to is artifact so it can be referred 
@@ -75,7 +86,7 @@
                    over features. The version segment has to be manually increment
                    upon a release.  
                    see https://bugs.eclipse.org/bugs/show_bug.cgi?id=357503#c22 -->
-              <archiveFileName>TLAToolbox-1.5.2</archiveFileName>
+              <archiveFileName>TLAToolbox-${product.version}</archiveFileName>
               <rootFolder>toolbox</rootFolder>
 			   <!-- This causes the Toolbox to be packaged as a single Application Bundle 
 					on Mac. Applciation Bundles are the default packaging for Mac where the single 
@@ -85,7 +96,88 @@
           </products>
         </configuration>
       </plugin>
-
+      
+      <!-- Package Toolbox's Linux zip for Debian/Ubuntu -->
+		<plugin>
+			<artifactId>jdeb</artifactId>
+			<groupId>org.vafer</groupId>
+			<version>1.5</version>
+			<executions>
+				<execution>
+					<phase>package</phase>
+					<goals>
+						<goal>jdeb</goal>
+					</goals>
+					<configuration>
+					    <deb>${project.build.directory}/TLAToolbox-${product.version}-linux.gtk.amd64.deb</deb>
+						<snapshotExpand>true</snapshotExpand>
+						<verbose>false</verbose>
+						<dataSet>
+						    <data>
+						        <src>src/deb/usr/share/applications/tla+toolbox.desktop</src>
+						        <type>file</type>
+								<mapper>
+									<type>perm</type>
+									<prefix>/usr/share/applications/</prefix>
+									<user>root</user>
+									<group>root</group>
+								</mapper>
+						    </data>
+						    <data>
+						        <src>src/deb/usr/share/mime/packages/tla+toolbox.xml</src>
+						        <type>file</type>
+								<mapper>
+									<type>perm</type>
+									<prefix>/usr/share/mime/packages/</prefix>
+									<user>root</user>
+									<group>root</group>
+								</mapper>
+						    </data>
+						    <data>
+						        <src>src/deb/usr/share/icons/hicolor/32x32/apps/tla+toolbox.png</src>
+						        <type>file</type>
+								<mapper>
+									<type>perm</type>
+									<prefix>/usr/share/icons/hicolor/32x32/apps/</prefix>
+									<user>root</user>
+									<group>root</group>
+								</mapper>
+						    </data>
+						    <data>
+						        <src>src/deb/usr/share/icons/hicolor/48x48/apps/tla+toolbox.png</src>
+						        <type>file</type>
+								<mapper>
+									<type>perm</type>
+									<prefix>/usr/share/icons/hicolor/48x48/apps/</prefix>
+									<user>root</user>
+									<group>root</group>
+								</mapper>
+						    </data>
+							<data>
+								<src>${project.build.directory}/products/org.lamport.tla.toolbox.product.product/linux/gtk/x86_64/toolbox</src>
+								<type>directory</type>
+								<!-- Disable Toolbox's built-in update 
+                                     manager. Using the .deb archives
+                                     is mutually exclusive with the 
+                                     built-in updater.
+                                     
+                                     Technically, simply remove p2's
+                                     complete metadata from final
+                                     installation.
+                                 -->
+                  				<excludes>p2/</excludes>
+								<mapper>
+									<type>perm</type>
+									<prefix>/opt/TLA+Toolbox</prefix>
+									<user>root</user>
+									<group>root</group>
+								</mapper>
+							</data>
+						</dataSet>
+					</configuration>
+				</execution>
+			</executions>
+		</plugin>
     </plugins>
   </build>
 </project>

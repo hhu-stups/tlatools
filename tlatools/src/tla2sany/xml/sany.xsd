@@ -10,7 +10,8 @@
   <xs:element name="modules">
     <xs:complexType>
       <xs:sequence>
-        <xs:element ref="context"/> 
+        <xs:element name="RootModule" type="xs:string"/>
+        <xs:element ref="context"/>
         <xs:sequence maxOccurs="unbounded">
           <xs:element ref="ModuleNode"/>
         </xs:sequence>
@@ -35,6 +36,7 @@
                 <xs:group ref="OpDefNode"/>
                 <xs:element ref="TheoremNode"/>
                 <xs:element ref="AssumeNode"/>
+                <xs:element ref="APSubstInNode"/>
               </xs:choice>
             </xs:sequence>
           </xs:complexType>
@@ -304,6 +306,7 @@
     <xs:complexType>
       <xs:sequence>
         <xs:group ref="node"/>
+        <xs:element minOccurs="0" ref="uniquename"/>
         <xs:choice>
           <xs:group ref="ExprNode"/>
           <xs:element ref="AssumeProveNode"/>

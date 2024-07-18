@@ -132,7 +132,7 @@ public class SymmetryTableauLiveCheckTest {
 		EasyMock.expect(node0.getIndex()).andReturn(0).anyTimes();
 		EasyMock.replay(node0);
 
-		final TBGraph tbGraph = new TBGraph(null);
+		final TBGraph tbGraph = new TBGraph();
 		tbGraph.addElement(node0);
 		tbGraph.addElement(node1);
 		tbGraph.setInitCnt(1);
@@ -149,7 +149,7 @@ public class SymmetryTableauLiveCheckTest {
 		EasyMock.replay(oos);
 		
 		return new LiveCheck(EasyMock.createNiceMock(Tool.class), new Action[0],
-				new OrderOfSolution[] { oos }, System.getProperty("java.io.tmpdir"), new DummyBucketStatistics());
+				new OrderOfSolution[] { oos }, System.getProperty("java.io.tmpdir"), new DummyBucketStatistics(), null);
 	}
 	
 	@Test
@@ -333,7 +333,7 @@ public class SymmetryTableauLiveCheckTest {
 		EasyMock.expect(node0.nextAt(1)).andReturn(node1).anyTimes();
 		EasyMock.replay(node0);
 
-		final TBGraph tbGraph = new TBGraph(null);
+		final TBGraph tbGraph = new TBGraph();
 		tbGraph.addElement(node0);
 		tbGraph.addElement(node1);
 		tbGraph.addElement(node2);
@@ -368,6 +368,6 @@ public class SymmetryTableauLiveCheckTest {
 		EasyMock.expect(tool.isInActions((TLCState) EasyMock.anyObject(), (TLCState) EasyMock.anyObject())).andReturn(true).anyTimes();
 		EasyMock.replay(tool);
 		return new LiveCheck(tool, new Action[1],
-				new OrderOfSolution[] { oos }, "states", new DummyBucketStatistics());
+				new OrderOfSolution[] { oos }, "states", new DummyBucketStatistics(), null);
 	}
 }

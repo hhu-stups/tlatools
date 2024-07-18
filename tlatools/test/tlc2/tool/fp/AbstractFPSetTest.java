@@ -17,9 +17,11 @@ public abstract class AbstractFPSetTest {
 					+ System.currentTimeMillis();
 	protected static final String filename = "FPSetTestTest";
 	protected static final DecimalFormat df = new DecimalFormat("###,###.###");
+	protected static final DecimalFormat pf = new DecimalFormat("#.##");
 
 	protected long previousTimestamp;
 	protected long previousSize;
+	protected long startTimestamp;
 	protected Date endTimeStamp;
 
 	private File dir;
@@ -34,7 +36,7 @@ public abstract class AbstractFPSetTest {
 		dir = new File(tmpdir);
 		dir.mkdirs();
 		
-		previousTimestamp = System.currentTimeMillis();
+		previousTimestamp = startTimestamp = System.currentTimeMillis();
 		previousSize = 0L;
 		
 		System.out.println("Test started at " + new Date());
@@ -77,25 +79,46 @@ public abstract class AbstractFPSetTest {
 		if (fpSet instanceof FPSetStatistic) {
 			FPSetStatistic fpSetStats = (FPSetStatistic) fpSet;
 			long maxTblCnt = fpSetStats.getMaxTblCnt();
-			System.out.println("Maximum FPSet bucket count is: "
+			System.out.println("Maximum FPSet table count is: "
 					+ df.format(maxTblCnt) + " (approx: "
 					+ df.format(maxTblCnt * FPSet.LongSize >> 20) + " GiB)");
+			System.out.println("FPSet lock count is: " + fpSetStats.getLockCnt());
+			System.out.println("FPSet bucket count is: " + fpSetStats.getTblCapacity());
 		}
 
 		System.out.println("Testing " + fpSet.getClass().getCanonicalName());
 		return fpSet;
 	}
-
+	
 	// insertion speed
-	public void printInsertionSpeed(final long currentSize) {
-		final long currentTimestamp = System.currentTimeMillis();
+	public void printInsertionSpeed(final FPSet fpSet) {
 		// print every minute
-		final double factor = (currentTimestamp - previousTimestamp) / 60000d;
+		long now = System.currentTimeMillis();
+		final double factor = (now - previousTimestamp) / 60000d;
 		if (factor >= 1d) {
+			final long currentSize = fpSet.size();
 			long insertions = (long) ((currentSize - previousSize) * factor);
-			System.out.println(df.format(insertions) + " insertions/min");
-			previousTimestamp = currentTimestamp;
+			if (fpSet instanceof FPSetStatistic) {
+				FPSetStatistic fpSetStatistics = (FPSetStatistic) fpSet;
+				System.out.println(System.currentTimeMillis() + " s; " + df.format(insertions) + " insertions/min; " + pf.format(fpSetStatistics.getLoadFactor()) + " load factor");
+			} else {
+				System.out.println(System.currentTimeMillis() + " s (epoch); " + df.format(insertions) + " insertions/min");
+			}
+			previousTimestamp = now;
 			previousSize = currentSize;
+		}
+	}
+	
+	public void printInsertionSpeed(final FPSet fpSet, long start, long end) {
+		final long size = fpSet.size();
+		// Normalize insertions to minutes.
+		final long duration = Math.max(end - start, 1); //ms (avoid div-by-zero)
+		final long insertions = (long) ((size / duration) * 60000L);
+		if (fpSet instanceof FPSetStatistic) {
+			FPSetStatistic fpSetStatistics = (FPSetStatistic) fpSet;
+			System.out.println(System.currentTimeMillis() + " s; " + df.format(insertions) + " insertions/min; " + pf.format(fpSetStatistics.getLoadFactor()) + " load factor");
+		} else {
+			System.out.println(System.currentTimeMillis() + " s (epoch); " + df.format(insertions) + " insertions/min");
 		}
 	}
 }

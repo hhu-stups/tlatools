@@ -1,14 +1,14 @@
 package org.lamport.tla.toolbox.tool.tlc.handlers;
 
+import java.util.Map;
+
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
 import org.eclipse.core.resources.ResourcesPlugin;
-import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.OperationCanceledException;
 import org.eclipse.core.runtime.jobs.Job;
-import org.eclipse.debug.core.ILaunchConfiguration;
 import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.IEditorReference;
@@ -16,10 +16,13 @@ import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.IWorkbenchSite;
 import org.eclipse.ui.IWorkbenchWindow;
 import org.eclipse.ui.handlers.HandlerUtil;
+import org.lamport.tla.toolbox.tool.ToolboxHandle;
 import org.lamport.tla.toolbox.tool.tlc.launch.TLCModelLaunchDelegate;
+import org.lamport.tla.toolbox.tool.tlc.model.Model;
+import org.lamport.tla.toolbox.tool.tlc.model.TLCSpec;
 import org.lamport.tla.toolbox.tool.tlc.ui.editor.ModelEditor;
-import org.lamport.tla.toolbox.tool.tlc.util.ModelHelper;
 import org.lamport.tla.toolbox.ui.handler.OpenSpecHandler;
+import org.lamport.tla.toolbox.util.UIHelper;
 
 /**
  * Initiates a model checker run
@@ -32,18 +35,27 @@ public class StartLaunchHandler extends AbstractHandler {
 	private ModelEditor lastModelEditor;
 
 	public Object execute(ExecutionEvent event) throws ExecutionException {
-		final ModelEditor modelEditor = getModelEditor(event);
+		ModelEditor modelEditor = getModelEditor(event);
+		
+		// Iff no previously opened modeleditor is still around and iff the spec
+		// has only a single model, open its modeleditor and run it.
+		if (modelEditor == null) {
+			final TLCSpec spec = ToolboxHandle.getCurrentSpec().getAdapter(TLCSpec.class);
+			if (spec != null) {
+				final Map<String, Model> models = spec.getModels();
+				if (models.size() == 1) {
+					Model model = models.values().toArray(new Model[1])[0];
+					modelEditor = (ModelEditor) UIHelper.openEditor(ModelEditor.ID, model.getFile());
+				}
+			}
+		}
+		
 		if (modelEditor != null) {
 
-			final ILaunchConfiguration config = modelEditor.getConfig().getOriginal();
+			final Model model = modelEditor.getModel();
 
 			// 0) model check already running for the given model
-			try {
-				if (ModelHelper.isModelRunning(config)) {
-					return null;
-				}
-			} catch (CoreException e1) {
-				// why oh why does isModelRunning throw an exception?!
+			if (model.isRunning()) {
 				return null;
 			}
 
@@ -87,32 +99,24 @@ public class StartLaunchHandler extends AbstractHandler {
 			}
 
 			// 2) model might be locked
-			if (modelEditor.isModelLocked()) {
+			if (model.isLocked()) {
 				boolean unlock = MessageDialog
 						.openQuestion(shell, "Unlock model?",
 								"The current model is locked, but has to be unlocked prior to launching. Should the model be unlocked?");
 				if (unlock) {
-					try {
-						ModelHelper.setModelLocked(config, false);
-					} catch (CoreException e) {
-						throw new ExecutionException(e.getMessage(), e);
-					}
+					model.setLocked(false);
 				} else {
 					return null;
 				}
 			}
 
 			// 3) model might be stale
-			if (modelEditor.isModelStale()) {
+			if (model.isStale()) {
 				boolean unlock = MessageDialog
 						.openQuestion(shell, "Repair model?",
 								"The current model is stale and has to be repaird prior to launching. Should the model be repaired onw?");
 				if (unlock) {
-					try {
-						ModelHelper.recoverModel(config);
-					} catch (CoreException e) {
-						throw new ExecutionException(e.getMessage(), e);
-					}
+					model.recover();
 				} else {
 					return null;
 				}
@@ -158,6 +162,13 @@ public class StartLaunchHandler extends AbstractHandler {
 					}
 				}
 			}
+		}
+		// Validate that the lastModelEditor still belongs to the current
+		// open spec. E.g. lastModelEditor might still be around from when
+		// the user ran a it on spec X, but has switched to spec Y in the
+		// meantime. Closing the spec nulls the ModelEditor
+		if (lastModelEditor != null && lastModelEditor.isDisposed()) {
+			lastModelEditor = null;
 		}
 		
 		// If the previous two attempts to find a model editor have failed, lets

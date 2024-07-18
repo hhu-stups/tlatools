@@ -6,7 +6,6 @@
 package tlc2.tool;
 
 import java.io.IOException;
-import java.util.concurrent.atomic.AtomicLong;
 
 import tla2sany.modanalyzer.SpecObj;
 import tla2sany.semantic.ExprNode;
@@ -20,7 +19,7 @@ import tlc2.tool.fp.FPSetFactory;
 import tlc2.tool.liveness.LiveCheck;
 import tlc2.tool.queue.DiskStateQueue;
 import tlc2.tool.queue.IStateQueue;
-import tlc2.util.IdThread;
+import tlc2.util.IStateWriter;
 import tlc2.util.ObjLongTable;
 import tlc2.util.SetOfStates;
 import tlc2.util.statistics.BucketStatistics;
@@ -43,12 +42,12 @@ public class ModelChecker extends AbstractChecker
 	/**
 	 * If the state/ dir should be cleaned up after a successful model run
 	 */
-	private static final boolean VETO_CLEANUP = Boolean.getBoolean(ModelChecker.class.getName() + ".vetoCleanup");
+	public static final boolean VETO_CLEANUP = Boolean.getBoolean(ModelChecker.class.getName() + ".vetoCleanup");
 
+	private long numberOfInitialStates;
     public FPSet theFPSet; // the set of reachable states (SZ: note the type)
     public IStateQueue theStateQueue; // the state queue
     public TLCTrace trace; // the trace file
-    protected Worker[] workers; // the workers
     // used to calculate the spm metric
     public long distinctStatesPerMinute, statesPerMinute = 0L;
     protected long oldNumOfGenStates, oldFPSetSize = 0L;
@@ -73,11 +72,11 @@ public class ModelChecker extends AbstractChecker
      * @param specObj external SpecObj added to enable to work on existing specification 
      * Modified on 6 Apr 2010 by Yuan Yu to add fpMemSize parameter.
      */
-    public ModelChecker(String specFile, String configFile, String dumpFile, boolean deadlock, String fromChkpt,
+    public ModelChecker(String specFile, String configFile, String dumpFile, final boolean asDot, boolean deadlock, String fromChkpt,
             FilenameToStream resolver, SpecObj specObj, final FPSetConfiguration fpSetConfig) throws EvalException, IOException
     {
         // call the abstract constructor
-        super(specFile, configFile, dumpFile, deadlock, fromChkpt, true, resolver, specObj);
+        super(specFile, configFile, dumpFile, asDot, deadlock, fromChkpt, true, resolver, specObj);
 
         // SZ Feb 20, 2009: this is a selected alternative
         this.theStateQueue = new DiskStateQueue(this.metadir);
@@ -162,7 +161,7 @@ public class ModelChecker extends AbstractChecker
                 this.tool.setCallStack();
                 try
                 {
-                    this.numOfGenStates = new AtomicLong(0);
+                    numberOfInitialStates = 0;
                     // SZ Feb 23, 2009: ignore cancel on error reporting
                     this.doInit(true);
                 } catch (Throwable e1)
@@ -176,13 +175,14 @@ public class ModelChecker extends AbstractChecker
                 return;
             }
 
-            final String plural = (this.numOfGenStates.get() == 1) ? "" : "s";
-            if (this.numOfGenStates.get() == this.theFPSet.size())
+            long statesGenerated = getStatesGenerated();
+            final String plural = (statesGenerated == 1) ? "" : "s";
+            if (statesGenerated == this.theFPSet.size())
             {
-                MP.printMessage(EC.TLC_INIT_GENERATED1, new String[] { String.valueOf(this.numOfGenStates), plural });
+                MP.printMessage(EC.TLC_INIT_GENERATED1, new String[] { String.valueOf(statesGenerated), plural });
             } else
             {
-                MP.printMessage(EC.TLC_INIT_GENERATED2, new String[] { String.valueOf(this.numOfGenStates), plural,
+                MP.printMessage(EC.TLC_INIT_GENERATED2, new String[] { String.valueOf(statesGenerated), plural,
                         String.valueOf(this.theFPSet.size()) });
             }
         }
@@ -192,7 +192,7 @@ public class ModelChecker extends AbstractChecker
         if (this.actions.length == 0)
         {
         	if (this.theStateQueue.isEmpty()) {
-        		reportSuccess(this.theFPSet, this.numOfGenStates.get());
+        		reportSuccess(this.theFPSet, getStatesGenerated());
         		this.printSummary(true, startTime);
         	} else {
         		MP.printError(EC.TLC_STATES_AND_NO_NEXT_ACTION);
@@ -222,7 +222,7 @@ public class ModelChecker extends AbstractChecker
 					// and thus give the user some clues at what stage safety
 					// checking is.
             		MP.printMessage(EC.TLC_PROGRESS_STATS, new String[] { String.valueOf(this.trace.getLevelForReporting()),
-                            String.valueOf(this.numOfGenStates), String.valueOf(theFPSet.size()),
+                            String.valueOf(getStatesGenerated()), String.valueOf(theFPSet.size()),
                             String.valueOf(this.theStateQueue.size()) });
                 	
                     report("checking liveness");
@@ -237,14 +237,14 @@ public class ModelChecker extends AbstractChecker
 
                 // We get here because the checking has been completed.
                 success = true;
-                reportSuccess(this.theFPSet, this.numOfGenStates.get());
+                reportSuccess(this.theFPSet, getStatesGenerated());
             } else if (this.keepCallStack)
             {
                 // Replay the error with the error stack recorded:
                 this.tool.setCallStack();
                 try
                 {
-                    this.doNext(this.predErrState, new ObjLongTable(10));
+                    this.doNext(this.predErrState, new ObjLongTable(10), new Worker(4223, this));
                 } catch (Throwable e)
                 {
                     // Assert.printStack(e);
@@ -356,7 +356,7 @@ public class ModelChecker extends AbstractChecker
      * 
      * This method is called from the workers on every step
      */
-    public final boolean doNext(TLCState curState, ObjLongTable counts) throws Throwable
+    public final boolean doNext(TLCState curState, ObjLongTable counts, final Worker worker) throws Throwable
     {
         // SZ Feb 23, 2009: cancel the calculation
         if (this.cancellationFlag)
@@ -397,7 +397,7 @@ public class ModelChecker extends AbstractChecker
 				// removed, the functor pattern could be applied to doNext too.
 				StateVec nextStates = this.tool.getNextStates(this.actions[i], curState);
 				int sz = nextStates.size();
-				this.incNumOfGenStates(sz);
+				worker.incrementStatesGenerated(sz);
 				deadLocked = deadLocked && (sz == 0);
 
                 SUCCESSORS: for (int j = 0; j < sz; j++)
@@ -412,11 +412,7 @@ public class ModelChecker extends AbstractChecker
                     			MP.printError(EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT);
                     			this.trace.printTrace(curState, succState);
                     			this.theStateQueue.finishAll();
-                    			
-                    			synchronized (this)
-                    			{
-                    				this.notify();
-                    			}
+                    			this.notify();
                     		}
                     		return true;
                     	}
@@ -432,13 +428,10 @@ public class ModelChecker extends AbstractChecker
                     {
 						long fp = succState.fingerPrint();
 						seen = this.theFPSet.put(fp);
+                        // Write out succState when needed:
+                        this.allStateWriter.writeState(curState, succState, !seen);
                         if (!seen)
                         {
-							// Write out succState when needed:
-                            if (this.allStateWriter != null)
-                            {
-								this.allStateWriter.writeState(succState);
-							}
 							// Write succState to trace only if it satisfies the
 							// model constraints. Do not enqueue it yet, but wait
                             // for implied actions and invariants to be checked.
@@ -622,10 +615,13 @@ public class ModelChecker extends AbstractChecker
             // Finally, add curState into the behavior graph for liveness checking:
             if (this.checkLiveness)
             {
+				final long curStateFP = curState.fingerPrint();
+
 				// Add the stuttering step:
-				long curStateFP = curState.fingerPrint();
 				liveNextStates.put(curStateFP, curState);
-				liveCheck.addNextState(curState, curStateFP, liveNextStates);
+            	this.allStateWriter.writeState(curState, curState, true, IStateWriter.Visualization.STUTTERING);
+
+            	liveCheck.addNextState(curState, curStateFP, liveNextStates);
 
 				// Poor man's version of a controller. If necessary, try e.g.
 				// PID controller instead.
@@ -789,12 +785,25 @@ public class ModelChecker extends AbstractChecker
             this.theFPSet.recover();
             if (this.checkLiveness)
             {
+				// Liveness checking requires the initial states to be
+				// available as part of behaviors. Initial states are not part
+				// of the checkpoint, but we can easily recreate them.
+				// See bug #22 "Recovering from a checkpoint silently breaks
+				// liveness checking" at
+				// https://github.com/tlaplus/tlaplus/issues/22
+            	this.tool.getInitStates(new IStateFunctor() {
+					public Object addElement(TLCState state) {
+						liveCheck.addInitState(state, state.fingerPrint());
+						return true;
+					}
+				});
                 liveCheck.recover();
             }
             MP.printMessage(EC.TLC_CHECKPOINT_RECOVER_END, new String[] { String.valueOf(this.theFPSet.size()),
                     String.valueOf(this.theStateQueue.size()) });
             recovered = true;
-            this.numOfGenStates.set(this.theFPSet.size());
+            // Not all states are true initial states, but who cares at this point?
+            numberOfInitialStates = this.theFPSet.size();
         }
         return recovered;
     }
@@ -803,14 +812,14 @@ public class ModelChecker extends AbstractChecker
     {
         this.theFPSet.close();
         this.trace.close();
-        if (this.checkLiveness)
-            liveCheck.close();
-        if (this.allStateWriter != null)
-            this.allStateWriter.close();
-        	if (!VETO_CLEANUP) {
-        		FileUtil.deleteDir(this.metadir, success);
-        	}
-		}
+        if (this.checkLiveness) {
+        	liveCheck.close();
+        }
+        this.allStateWriter.close();
+    	if (!VETO_CLEANUP) {
+    		FileUtil.deleteDir(this.metadir, success);
+    	}
+	}
 
     public final void printSummary(boolean success, final long startTime) throws IOException
     {
@@ -826,7 +835,7 @@ public class ModelChecker extends AbstractChecker
         	printProgresStats(startTime);
         }
 
-        MP.printMessage(EC.TLC_STATS, new String[] { String.valueOf(this.numOfGenStates),
+        MP.printMessage(EC.TLC_STATS, new String[] { String.valueOf(getStatesGenerated()),
                 String.valueOf(this.theFPSet.size()), String.valueOf(this.theStateQueue.size()) });
         if (success)
         {
@@ -847,14 +856,14 @@ public class ModelChecker extends AbstractChecker
         	oldFPSetSize = 0;
         	factor = (System.currentTimeMillis() - startTime) / 60000d;
         }
-		long l = numOfGenStates.get();
+		final long l = getStatesGenerated();
 		statesPerMinute = (long) ((l - oldNumOfGenStates) / factor);
         oldNumOfGenStates = l;
         distinctStatesPerMinute = (long) ((fpSetSize - oldFPSetSize) / factor);
         oldFPSetSize = fpSetSize;
         
 		MP.printMessage(EC.TLC_PROGRESS_STATS, new String[] { String.valueOf(this.trace.getLevelForReporting()),
-                String.valueOf(this.numOfGenStates), String.valueOf(fpSetSize),
+                String.valueOf(l), String.valueOf(fpSetSize),
                 String.valueOf(this.theStateQueue.size()), String.valueOf(statesPerMinute), String.valueOf(distinctStatesPerMinute) });
     }
 
@@ -1058,7 +1067,7 @@ public class ModelChecker extends AbstractChecker
     /**
      * Spawn the worker threads
      */
-    protected IdThread[] startWorkers(AbstractChecker checker, int checkIndex)
+    protected IWorker[] startWorkers(AbstractChecker checker, int checkIndex)
     {
         for (int i = 0; i < this.workers.length; i++)
         {
@@ -1132,7 +1141,11 @@ public class ModelChecker extends AbstractChecker
     }
 
     public long getStatesGenerated() {
-    	return numOfGenStates.get();
+    	long sum = numberOfInitialStates;
+    	for (final IWorker worker : workers) {
+			sum += ((Worker) worker).getStatesGenerated();
+		}
+    	return sum;
     }
     
 	/**
@@ -1158,7 +1171,7 @@ public class ModelChecker extends AbstractChecker
 		 * @see tlc2.tool.IStateFunctor#addElement(tlc2.tool.TLCState)
 		 */
 		public Object addElement(final TLCState curState) {
-			incNumOfGenStates(1);
+			numberOfInitialStates++;
 			
 			// getInitStates() does not support aborting init state generation
 			// once a violation has been found (that is why the return values of
@@ -1182,9 +1195,7 @@ public class ModelChecker extends AbstractChecker
 					long fp = curState.fingerPrint();
 					seen = theFPSet.put(fp);
 					if (!seen) {
-						if (allStateWriter != null) {
-							allStateWriter.writeState(curState);
-						}
+						allStateWriter.writeState(curState);
 						curState.uid = trace.writeState(fp);
 						theStateQueue.enqueue(curState);
 

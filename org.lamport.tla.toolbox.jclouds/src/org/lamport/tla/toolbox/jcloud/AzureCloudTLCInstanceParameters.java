@@ -33,29 +33,44 @@ import org.jclouds.ContextBuilder;
 
 public class AzureCloudTLCInstanceParameters extends CloudTLCInstanceParameters {
 
-	public AzureCloudTLCInstanceParameters(final String tlcParams) {
-        super(tlcParams.trim());
+	public AzureCloudTLCInstanceParameters(final String tlcParams, int numberOfWorkers) {
+        super(tlcParams.trim(), numberOfWorkers);
 	}
+	
+	// vm args
 
-	@Override
-	public String getJavaSystemProperties() {
-		return "-Dtlc2.tool.fp.FPSet.impl=tlc2.tool.fp.OffHeapDiskFPSet";
-	}
-
+	/* (non-Javadoc)
+	 * @see org.lamport.tla.toolbox.jcloud.CloudTLCInstanceParameters#getJavaVMArgs()
+	 */
 	@Override
 	public String getJavaVMArgs() {
+		if (numberOfWorkers == 1) {
+			return getJavaWorkerVMArgs();
+		}
+		return "-Xmx96G -Xms96G";
+	}
+	
+	/* (non-Javadoc)
+	 * @see org.lamport.tla.toolbox.jcloud.CloudTLCInstanceParameters#getJavaWorkerVMArgs()
+	 */
+	@Override
+	public String getJavaWorkerVMArgs() {
 		return "-Xmx32G -Xms32G -XX:MaxDirectMemorySize=64g";
 	}
-
+	
 	/* (non-Javadoc)
 	 * @see org.lamport.tla.toolbox.jcloud.CloudTLCInstanceParameters#getTLCParameters()
 	 */
 	@Override
 	public String getTLCParameters() {
-		if (tlcParams.length() > 0) {
-			return "-workers 16 " + tlcParams;
+		if (numberOfWorkers == 1) {
+			if (tlcParams.length() > 0) {
+				return "-workers 16 " + tlcParams;
+			}
+			return "-workers 16";
+		} else {
+			return "-coverage 0 -checkpoint 0";
 		}
-		return "-workers 16";
 	}
 
 	/* (non-Javadoc)
@@ -71,7 +86,8 @@ public class AzureCloudTLCInstanceParameters extends CloudTLCInstanceParameters 
 	 */
 	@Override
 	public String getImageId() {
-		return "b39f27a8b8c64d52b05eac6a62ebad85__Ubuntu-14_04_1-LTS-amd64-server-20150123-en-us-30GB";
+		// azure vm image list |grep "Canonical"
+		return "b39f27a8b8c64d52b05eac6a62ebad85__Ubuntu-14_04_4-LTS-amd64-server-20160222-en-us-30GB";
 	}
 
 	/* (non-Javadoc)

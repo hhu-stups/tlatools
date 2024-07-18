@@ -4,6 +4,7 @@ package tlc2.tool.fp.generator;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
 
 import org.junit.Assert;
 
@@ -14,17 +15,22 @@ public class BatchedFingerPrintGenerator extends FingerPrintGenerator {
 
 	private static final int batch = 1024;
 	
-	public BatchedFingerPrintGenerator(MultiThreadedFPSetTest test, int id, FPSet fpSet, CountDownLatch latch, long seed, long insertions) {
-		super(test, id, fpSet, latch, seed, insertions);
+	public BatchedFingerPrintGenerator(MultiThreadedFPSetTest test, int id, int numThreads, FPSet fpSet, CountDownLatch latch, long seed, long insertions, final CyclicBarrier barrier) {
+		super(test, id, numThreads, fpSet, latch, seed, insertions, barrier);
 	}
 	
 	/* (non-Javadoc)
 	 * @see java.lang.Runnable#run()
 	 */
 	public void run() {
+		waitForAllThreadsStarted();
+		
 		long predecessors[] = new long[batch];
 		boolean initialized = false;
-		while (fpSet.size() < insertions) {
+		// Reduce number of FPSet#size invocation by counting puts/collisions.
+		// FPSet#size can cause an FPSet to synchronize all its writers slowing
+		// down execution.
+		while (puts + collisions < perThreadInsertions || fpSet.size() < totalInsertions) {
 			try {
 				// Make sure set still contains predecessors
 				if (initialized) {
@@ -51,12 +57,6 @@ public class BatchedFingerPrintGenerator extends FingerPrintGenerator {
 						collisions++;
 					}
 				}
-
-				// First producer prints stats
-				if (id == 0) {
-					test.printInsertionSpeed(fpSet.size());
-				}
-
 			} catch (IOException e) {
 				e.printStackTrace();
 				Assert.fail("Unexpected");

@@ -152,6 +152,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 				}
 				return astToLive(tool, expr, con, level);
 			} catch (Exception e) {
+				// Catching Exception here seem dangerous
 				// Assert.printStack(e);
 				int level = Spec.getLevel(expr, con);
 				if (level > 2) {
@@ -178,6 +179,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 				}
 				return astToLive(tool, expr, con, level);
 			} catch (Exception e) {
+				// Catching Exception here seem dangerous
 				// Assert.printStack(e);
 				int level = Spec.getLevel(expr, con);
 				if (level > 2) {
@@ -230,6 +232,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 					}
 				}
 			} catch (Exception e) { /* SKIP */
+				// Swallowing Exception here seem dangerous
 			}
 			int level = expr.getLevel();
 			if (level > 2) {
@@ -292,8 +295,9 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		}
 		case OPCODE_leadto: {
 			// F ~> G equals [](F => <>G), however TLC does not have an
-			// implementation for logical implication. Thus, the rule of material
-			// implication is used to transform it into a disjunct.
+			// implementation for logical implication. Thus, the rule of
+			// material implication ("->") is used to transform it into a
+			// disjunct.
 			LiveExprNode lnLeft = astToLive(tool, (ExprNode) args[0], con);
 			LiveExprNode lnRight = astToLive(tool, (ExprNode) args[1], con);
 			// expand a ~> b into [](-a \/ <>b) 
@@ -324,150 +328,6 @@ public class Liveness implements ToolGlobals, ASTConstants {
 			return astToLive(tool, expr, con, level);
 		}
 		}
-	}
-
-	/**
-	 * Given a starting TBGraphNode, constructTableau constructs the tableau for
-	 * it. Read MP for details. It returns a list of all the nodes in the
-	 * tableau graph.
-	 */
-	private static TBGraph constructTableau(LiveExprNode tf, int idx) {
-		TBGraph allnodes = new TBGraph(tf);
-		TBPar initTerms = new TBPar(1);
-		initTerms.addElement(tf);
-		TBParVec pars = particleClosure(initTerms);
-
-		for (int i = 0; i < pars.size(); i++) {
-			TBGraphNode gn = new TBGraphNode(pars.parAt(i));
-			allnodes.addElement(gn);
-		}
-		allnodes.setInitCnt(allnodes.size());
-		// We now repeatedly compute the outlinks of each node:
-		for (int i = 0; i < allnodes.size(); i++) {
-			TBGraphNode gnSrc = (TBGraphNode) allnodes.elementAt(i);
-			TBPar imps = gnSrc.getPar().impliedSuccessors();
-			TBParVec succs = particleClosure(imps);
-			for (int j = 0; j < succs.size(); j++) {
-				TBPar par = succs.parAt(j);
-				TBGraphNode gnDst = findOrCreateNode(allnodes, par);
-				gnSrc.nexts.addElement(gnDst);
-			}
-		}
-		// Assign each node in the tableau an index.
-		for (int i = 0; i < allnodes.size(); i++) {
-			allnodes.getNode(i).setIndex(idx++);
-		}
-		return allnodes;
-	}
-
-	/**
-	 * The method findOrCreateNode, given a list of particles, either finds the
-	 * particle in that list, or creates a new one and puts it in the list. If
-	 * it does create a node, then it also sticks that node into allnodes.
-	 */
-	private static TBGraphNode findOrCreateNode(Vect allnodes, TBPar par) {
-		for (int i = 0; i < allnodes.size(); i++) {
-			TBGraphNode gn = (TBGraphNode) allnodes.elementAt(i);
-			if (par.equals(gn.getPar())) {
-				return gn;
-			}
-		}
-		TBGraphNode gn = new TBGraphNode(par);
-		allnodes.addElement(gn);
-		return gn;
-	}
-
-	/**
-	 * The method particleClosure, given a list of terms (initially just a
-	 * single term), returns a list of all particles containing those terms.
-	 * It's a recursive tree search.
-	 */
-	private static TBParVec particleClosure(TBPar terms) {
-		TBPar positive_closure = terms.positiveClosure();
-		Vect alphas = positive_closure.alphaTriples();
-		Vect betas = positive_closure.betaTriples();
-		return particleClosure(terms, alphas, betas);
-	}
-
-	private static TBParVec particleClosure(TBPar terms, Vect alphas, Vect betas) {
-		// if terms is not locally consistent, then terminate.
-		if (!terms.isLocallyConsistent()) {
-			return new TBParVec(0);
-		}
-		// if terms is not alpha-closed, then close it.
-		// first, try alpha expansion
-		TBPar terms1 = terms;
-		for (int i = 0; i < terms1.size(); i++) {
-			LiveExprNode ln = terms1.exprAt(i);
-			LiveExprNode k1 = null, k2 = null;
-			if (ln instanceof LNAll) {
-				k1 = ((LNAll) ln).getBody();
-				k2 = new LNNext(ln);
-			} else if (ln instanceof LNConj) {
-				k1 = ((LNConj) ln).getBody(0);
-				k2 = ((LNConj) ln).getBody(1);
-			}
-			if (k1 != null) {
-				if (terms1.member(k1)) {
-					if (!terms1.member(k2)) {
-						terms1 = terms1.append(k2);
-					}
-				} else if (terms1.member(k2)) {
-					terms1 = terms1.append(k1);
-				} else {
-					terms1 = terms1.append(k1, k2);
-				}
-			}
-		}
-		// second, try alpha^-1 expansion
-		boolean done;
-		do {
-			done = true;
-			for (int i = 0; i < alphas.size(); i++) {
-				TBTriple alpha = (TBTriple) alphas.elementAt(i);
-				if (terms1.member(alpha.getB()) && terms1.member(alpha.getC()) && !terms1.member(alpha.getA())) {
-					terms1.addElement(alpha.getA());
-					done = false;
-				}
-			}
-		} while (!done);
-		// finally, recurse only when locally consistent
-		if ((terms1.size() > terms.size()) && (!terms1.isLocallyConsistent())) {
-			return new TBParVec(0);
-		}
-		return particleClosureBeta(terms1, alphas, betas);
-	}
-
-	private static TBParVec particleClosureBeta(TBPar terms, Vect alphas, Vect betas) {
-		// try a beta expansion
-		for (int i = 0; i < terms.size(); i++) {
-			LiveExprNode ln = terms.exprAt(i);
-			LiveExprNode k1 = null, k2 = null;
-			if (ln instanceof LNEven) {
-				k1 = ((LNEven) ln).getBody();
-				k2 = new LNNext(ln);
-			} else if (ln instanceof LNDisj) {
-				k1 = ((LNDisj) ln).getBody(0);
-				k2 = ((LNDisj) ln).getBody(1);
-			}
-			if ((k1 != null) && !terms.member(k1) && !terms.member(k2)) {
-				TBParVec ps1 = particleClosure(terms.append(k1), alphas, betas);
-				TBParVec ps2 = particleClosure(terms.append(k2), alphas, betas);
-				return ps1.union(ps2);
-			}
-		}
-		// try a beta^-1 expansion
-		for (int i = 0; i < betas.size(); i++) {
-			TBTriple beta = (TBTriple) betas.elementAt(i);
-			if ((terms.member(beta.getB()) || terms.member(beta.getC())) && !terms.member(beta.getA())) {
-				return particleClosure(terms.append(beta.getA()), alphas, betas);
-			}
-		}
-		// if there are not any more expansions to do, return the terms
-		// we've got as the only particle in a list of particles.
-		TBParVec res = new TBParVec(1);
-		res.addElement(terms);
-		return res;
 	}
 
 	/**
@@ -512,13 +372,41 @@ public class Liveness implements ToolGlobals, ASTConstants {
 	 * manner in which things should ultimately be checked. This method returns
 	 * a handle, which can subsequently be passed to the other liveness things.
 	 *
-	 * Theory: we're looking for counterexamples to: spec /\ livespec => []inv
-	 * /\ livecheck i.e. (spec /\ livespec /\ <>-inv) \/ (spec /\ livespec /\
-	 * -livecheck) The first half of this disjunction (inv) is already checked
-	 * by the model checker on the fly. We're converting the second half into
-	 * normal form. We actually omit spec in what we produce. It will be left
-	 * implicit. So, the only job is to turn livespec /\ -livecheck: live1 /\
-	 * live2 ... /\ (-check1 \/ -check2 ...) into normal form.
+	 * Theory: we're looking for counterexamples to:
+	 * 
+	 * <pre>
+	 * spec /\ livespec => []inv /\ livecheck
+	 * </pre>
+	 * 
+	 * i.e.
+	 * 
+	 * <pre>
+	 * \/ (spec /\ livespec /\ <>-inv)
+	 * \/ (spec /\ livespec /\ -livecheck)
+	 * </pre>
+	 * 
+	 * <p>
+	 * The first half of this disjunction (inv) is already checked by the model
+	 * checker on the fly (@see
+	 * {@link ModelChecker#doNext(TLCState, tlc2.util.ObjLongTable)}).
+	 * <p>
+	 * We're converting the second half into <i>normal form</i>. We actually
+	 * omit spec in what we produce. It will be left implicit. So, the only job
+	 * is to turn:
+	 * 
+	 * <pre>
+	 * livespec /\ -livecheck
+	 * </pre>
+	 * 
+	 * into:
+	 * 
+	 * <pre>
+	 * live1 /\ live2 ... /\ (-check1 \/ -check2 ...)
+	 * </pre>
+	 * 
+	 * into <i>normal form</i>. livespec corresponds to the spec's
+	 * <i>fairness</i> formulae where check1, check2, ... are the actual
+	 * <i>liveness properties</i> to be checked.
 	 */
 	public static OrderOfSolution[] processLiveness(Tool tool) {
 		LiveExprNode lexpr = parseLiveness(tool);
@@ -609,7 +497,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 				final LiveExprNode tf1 = tf.makeBinary();
 				final TBPar promises = new TBPar(10);
 				tf1.extractPromises(promises);
-				oss[i] = new OrderOfSolution(constructTableau(tf1, 0), new LNEven[promises.size()], tool);
+				oss[i] = new OrderOfSolution(new TBGraph(tf1), new LNEven[promises.size()], tool);
 				for (int j = 0; j < promises.size(); j++) {
 					oss[i].getPromises()[j] = (LNEven) promises.exprAt(j);
 				}
@@ -680,7 +568,14 @@ public class Liveness implements ToolGlobals, ASTConstants {
 	 * tests. This method classifies an expression into <>[]act, []<>act,
 	 * []<>state, temporal formulas (without actions), or erroneous things.
 	 */
+	// TODO Explore the idea to syntactically rewrite an LNActions A into a
+	// ordinary predicate and the next state operator ()A in the tableau.
 	private static void classifyExpr(LiveExprNode ln, OSExprPem pem) {
+		// TLC is clever enough to optimize the case where some temporal formula
+		// can be handled WITHOUT a tableau. In this case, the state graph IS
+		// the behavior graph and thus the overall verification time is reduced.
+		// Additionally, the tableau generation does not support formulas 
+		// containing (nested) LNActions.
 		if (ln instanceof LNEven) {
 			LiveExprNode ln1 = ((LNEven) ln).getBody();
 			if (ln1 instanceof LNAll) {
@@ -708,6 +603,9 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		if (ln.containAction()) {
 			Assert.fail(EC.TLC_LIVE_WRONG_FORMULA_FORMAT);
 		}
+		// If we get here (because of a temporal formula), at tableau is
+		// consequently going to be created. This part corresponds to the
+		// ideas in the MP book.
 		pem.tfs.addElement(ln);
 	}
 

@@ -31,11 +31,12 @@ import java.util.Properties;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
 import org.jclouds.aws.ec2.reference.AWSEC2Constants;
+import org.jclouds.location.reference.LocationConstants;
 
 public class EC2CloudTLCInstanceParameters extends CloudTLCInstanceParameters {
 
-	public EC2CloudTLCInstanceParameters(final String tlcParams) {
-        super(tlcParams.trim());
+	public EC2CloudTLCInstanceParameters(final String tlcParams, int numberOfWorkers) {
+        super(tlcParams.trim(), numberOfWorkers);
 	}
 
 	private String getOwnerId() {
@@ -50,18 +51,21 @@ public class EC2CloudTLCInstanceParameters extends CloudTLCInstanceParameters {
 
 	@Override
 	public String getImageId() {
-		// Ubuntu 64bit 14.04.3 Trusty paravirtual/instance-store release
+		// Ubuntu 64bit 14.04.4 Trusty paravirtual/instance-store release
 		// https://cloud-images.ubuntu.com/releases/14.04/release/
 		// or http://cloud-images.ubuntu.com/locator/ec2/
 		// See http://aws.amazon.com/amazon-linux-ami/instance-type-matrix/
 		// for paravirtual vs. hvm
-		return "us-east-1/ami-0a7a3f60";
+		return getRegion() + "/ami-2ae6633c"; // "xenial,amd64,hvm:instance-store"
+	}
+
+	private String getRegion() {
+		return "us-east-1";
 	}
 
 	@Override
 	public String getHardwareId() {
-		// m2 only support paravirtual
-		return "m2.4xlarge";
+		return "c3.8xlarge";
 	}
 
 	@Override
@@ -98,7 +102,11 @@ public class EC2CloudTLCInstanceParameters extends CloudTLCInstanceParameters {
 	 */
 	@Override
 	public void mungeProperties(Properties properties) {
-		properties.setProperty(AWSEC2Constants.PROPERTY_EC2_AMI_QUERY,
-				getOwnerId());
+		properties.setProperty(AWSEC2Constants.PROPERTY_EC2_AMI_QUERY, getOwnerId());
+		// Confine jclouds to a single region. Since the Toolbox only supports a
+		// single region, there is no point in querying others. This has been
+		// added because I was seeing intermittent timeouts with other regions
+		// (i.e. South America).
+		properties.setProperty(LocationConstants.PROPERTY_REGIONS, getRegion());
 	}
 }
