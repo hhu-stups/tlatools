@@ -263,9 +263,9 @@ public class TLCTrace {
   public synchronized final void printTrace(final TLCState s1, final TLCState s2)
   throws IOException, WorkerException 
   {
-	  ArrayList<TLCStateInfo> trace = new ArrayList<TLCStateInfo>(); // collecting the whole error trace
-	  
-	  MP.printError(EC.TLC_BEHAVIOR_UP_TO_THIS_POINT);
+      ArrayList<TLCStateInfo> trace = new ArrayList<TLCStateInfo>(); // collecting the whole error trace
+
+      MP.printError(EC.TLC_BEHAVIOR_UP_TO_THIS_POINT);
       // Print the prefix leading to s1:
       long loc1 = s1.uid; 
       TLCState lastState = null;
@@ -309,7 +309,7 @@ public class TLCTrace {
       StatePrinter.printState(sinfo, lastState, ++idx);
       lastState = sinfo.state;
       trace.add(sinfo);
-      
+
       // Print s2:
       if (s2 != null) {
           sinfo = this.tool.getState(s2, s1);

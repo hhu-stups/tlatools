@@ -77,12 +77,12 @@ public abstract class AbstractChecker implements Cancelable
         specFile = specFile.substring(lastSep + 1);
 
         this.tool = new Tool(specDir, specFile, configFile, resolver);
-        
+
         this.specObj = this.tool.init(preprocess, spec);
         this.checkLiveness = !this.tool.livenessIsTrue();
 
         OutputCollector.setModuleNode(this.tool.rootModule);
-        
+
         // moved to file utilities
         this.metadir = FileUtil.makeMetaDir(specDir, fromChkpt);
         

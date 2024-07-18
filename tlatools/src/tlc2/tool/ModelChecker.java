@@ -274,7 +274,7 @@ public class ModelChecker extends AbstractChecker
             {
                 if ((!isAxiom[i]) && !this.tool.isValid(assumps[i]))
                 {
-                	OutputCollector.addViolatedAssumption(assumps[i]);
+                    OutputCollector.addViolatedAssumption(assumps[i]);
                     MP.printError(EC.TLC_ASSUMPTION_FALSE, assumps[i].toString());
                     //return false;
                     assumptionsAreTRUE = false;
@@ -282,7 +282,7 @@ public class ModelChecker extends AbstractChecker
             } catch (Exception e)
             {
                 // Assert.printStack(e);
-            	OutputCollector.addViolatedAssumption(assumps[i]);
+                OutputCollector.addViolatedAssumption(assumps[i]);
                 MP.printError(EC.TLC_ASSUMPTION_EVALUATION_ERROR,
                         new String[] { assumps[i].toString(), e.getMessage() });
                 //return false;
@@ -353,9 +353,9 @@ public class ModelChecker extends AbstractChecker
                         if (!this.tool.isValid(this.invariants[j], curState))
                         {
                             // We get here because of invariant violation:
-                        	MP.printError(EC.TLC_INVARIANT_VIOLATED_INITIAL, new String[] {
+                            MP.printError(EC.TLC_INVARIANT_VIOLATED_INITIAL, new String[] {
                                     this.tool.getInvNames()[j].toString(), curState.toString() });
-                        	if (!TLCGlobals.continuation)
+                            if (!TLCGlobals.continuation)
                                 return false;
                         }
                     }
