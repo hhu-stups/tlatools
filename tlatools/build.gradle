@@ -64,7 +64,7 @@ if (project.hasProperty('ossrhUsername') && project.hasProperty('ossrhPassword')
 	ext."signing.secretKeyRingFile" = rootProject.file("secring.gpg").absolutePath
 
 	signing {
-		 sign configurations.archives
+		sign configurations.archives
 	}
 
 	uploadArchives {
