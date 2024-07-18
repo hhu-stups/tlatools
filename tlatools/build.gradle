@@ -14,101 +14,97 @@ repositories {
 }
 
 dependencies {
-	compile files ('lib/javax.mail.jar')
-	testCompile files ('lib/easymock-3.3.1.jar', 'lib/jpf.jar', 'lib/junit-4.8.2.jar', 'lib/javax.mail.jar')
+	compile files('lib/javax.mail.jar')
+	testCompile files('lib/easymock-3.3.1.jar', 'lib/jpf.jar', 'lib/junit-4.8.2.jar', 'lib/javax.mail.jar')
 }
 
 sourceSets {
-    main {
-        java {
-            srcDir 'src'
-        }
-		resources{
+	main {
+		java {
 			srcDir 'src'
 		}
-
-
-    }
+		resources {
+			srcDir 'src'
+		}
+	}
 }
 
 task tlatools(dependsOn: build) << {
 	copy {
 		from('build/libs/')
 		into('build/tlatools')
-		include('tlatools-'+project.version+'.jar')
+		include('tlatools-' + project.version + '.jar')
 		rename('tlatools-(.+)', 'tlatools.jar')
 	}
 }
 
 if (project.hasProperty('ossrhUsername') && project.hasProperty('ossrhPassword')) {
+	println "Configuring deployment for ${ project.name }"
 
-println "Configuring deployment for ${ project.name }"
+	apply plugin: 'signing'
 
-apply plugin: 'signing'
+	task javadocJar(type: Jar) {
+		classifier = 'javadoc'
+		from javadoc
+	}
 
-task javadocJar(type: Jar) {
-	 classifier = 'javadoc'
-	 from javadoc
-}
+	task sourcesJar(type: Jar) {
+		classifier = 'sources'
+		from sourceSets.main.allSource
+	}
 
-task sourcesJar(type: Jar) {
-	 classifier = 'sources'
-	 from sourceSets.main.allSource
-}
+	artifacts {
+		archives javadocJar, sourcesJar
+	}
 
-artifacts {
-	 archives javadocJar, sourcesJar
-}
+	ext."signing.secretKeyRingFile" = rootProject.file("secring.gpg").absolutePath
 
-ext."signing.secretKeyRingFile" = rootProject.file("secring.gpg").absolutePath
+	signing {
+		 sign configurations.archives
+	}
 
-signing {
-	 sign configurations.archives
-}
+	uploadArchives {
+		repositories {
+			mavenDeployer {
+				beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
 
-uploadArchives {
- repositories {
-	 mavenDeployer {
-		 beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
+				repository(url: "https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
+					authentication(userName: ossrhUsername, password: ossrhPassword)
+				}
 
-		 repository(url: "https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
-			 authentication(userName: ossrhUsername, password: ossrhPassword)
-		 }
+				snapshotRepository(url: "https://oss.sonatype.org/content/repositories/snapshots/") {
+					authentication(userName: ossrhUsername, password: ossrhPassword)
+				}
 
-		 snapshotRepository(url: "https://oss.sonatype.org/content/repositories/snapshots/") {
-			 authentication(userName: ossrhUsername, password: ossrhPassword)
-		 }
+				pom.project {
+					name "TLA+ Tools"
+					packaging 'jar'
+					// optionally artifactId can be defined here
+					description 'Modified version of the TLA+ tools for usage in ProB'
+					url 'https://github.com/hhu-stups/tlatools'
 
-		 pom.project {
-			 name "TLA+ Tools"
-			 packaging 'jar'
-			 // optionally artifactId can be defined here
-			 description 'Modified version of the TLA+ tools for usage in ProB'
-			 url 'https://github.com/hhu-stups/tlatools'
+					licenses {
+						license {
+							name 'MIT License'
+							url 'http://research.microsoft.com/en-us/um/people/lamport/tla/license.html'
+						}
+					}
 
-			 licenses {
-				 license {
-					 name 'MIT License'
-					 url 'http://research.microsoft.com/en-us/um/people/lamport/tla/license.html'
-				 }
-			 }
+					scm {
+						connection 'scm:git:git://github.com/hhu-stups/tlatools.git'
+						developerConnection 'scm:git:git@github.com:hhu-stups/tlatools.git'
+						url 'https://github.com/hhu-stups/tlatools'
+					}
 
-			 scm {
-				 connection 'scm:git:git://github.com/hhu-stups/tlatools.git'
-				 developerConnection 'scm:git:git@github.com:hhu-stups/tlatools.git'
-				 url 'https://github.com/hhu-stups/tlatools'
-			 }
-
-
-			 developers {
-				 developer {
-					 id 'bendisposto'
-					 name 'Jens Bendisposto'
-					 email 'jens@bendisposto.de'
-				 }
-			 }
-		 }
-	 }
- }
-}
+					developers {
+						developer {
+							id 'bendisposto'
+							name 'Jens Bendisposto'
+							email 'jens@bendisposto.de'
+						}
+					}
+				}
+			}
+		}
+	}
 }
