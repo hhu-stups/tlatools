@@ -1,7 +1,5 @@
 # TLA+ Tools
 
-[![Build Status](https://travis-ci.org/hhu-stups/tlatools.svg)](https://travis-ci.org/hhu-stups/tlatools)
-
 Tools for TLA+ specifications and PlusCal algorithms, including the Toolbox, 
 an IDE for writing specifications and running tools to check them.
 
