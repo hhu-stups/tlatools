@@ -15,7 +15,6 @@ repositories {
 
 dependencies {
 	implementation(files('lib/javax.mail.jar'))
-	testImplementation(files('lib/easymock-3.3.1.jar', 'lib/jpf.jar', 'lib/junit-4.12.jar', 'lib/javax.mail.jar'))
 }
 
 sourceSets {
