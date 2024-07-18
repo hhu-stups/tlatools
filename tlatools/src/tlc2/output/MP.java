@@ -247,6 +247,13 @@ public class MP
         case EC.SYSTEM_ERROR_WRITING_POOL:
             b.append("when writing the disk (StatePoolWriter.run):\n%1%");
             break;
+		case EC.SYSTEM_ERROR_CLEANING_POOL:
+			if (messageClass == ERROR) {
+				b.append("Exception %2% cleaning up an obsolete disk files.\n%1%");
+			} else if (messageClass == WARNING) {
+				b.append("Failed to clean up an obsolete disk file. Please manually delete %1% if free disk space is low.");
+			}
+            break;
 
         case EC.SYSTEM_DISKGRAPH_ACCESS:
             b.append("DiskGraph.toString()");
@@ -380,6 +387,9 @@ public class MP
             break;
 
         // this is a TLC bug
+        case EC.TLC_STATES_AND_NO_NEXT_ACTION:
+            b.append("No next state actions defined to generate successor states from.");
+            break;
         case EC.TLC_FAILED_TO_RECOVER_NEXT:
             b.append("Failed to recover the next state from its fingerprint.");
             break;
@@ -404,9 +414,9 @@ public class MP
             if (TLCGlobals.tool) {
                 // format same as state printing for easier
                 // parsing by toolbox
-                b.append("%1%: Back to state.\n");
+                b.append("%1%: Back to state: %2%\n");
             } else {
-                b.append("Back to state %1%.\n");
+                b.append("Back to state %1%: %2%\n");
             }
             break;
 
@@ -610,6 +620,9 @@ public class MP
             b.append("Attempted to apply the operator overridden by the Java method"
                     + "\n%1%,\nbut it produced the following error:\n%2%");
             break;
+        case EC.TLC_FEATURE_UNSUPPORTED:
+            b.append("%1%");
+            break;
 
         /* Liveness errors */
         case EC.TLC_LIVE_BEGRAPH_FAILED_TO_CONSTRUCT:
@@ -729,7 +742,7 @@ public class MP
             b.append("Starting... (").append(SDF.format(new Date())).append(")");
             break;
         case EC.TLC_FINISHED:
-            b.append("Finished. (").append(SDF.format(new Date())).append(")");
+            b.append("Finished in %1% at (").append(SDF.format(new Date())).append(")");
             break;
         case EC.TLC_MODE_MC:
             b.append("Running in Model-Checking mode.");
@@ -744,7 +757,7 @@ public class MP
             b.append("Finished computing initial states: %1% distinct state%2% generated.");
             break;
         case EC.TLC_INIT_GENERATED2:
-            b.append("Finished computing initial states: %1% states generated, with %2% of them distinct.");
+            b.append("Finished computing initial states: %1% state%2% generated, with %3% of them distinct.");
             break;
         case EC.TLC_INIT_GENERATED3:
             b.append("Finished computing initial states: %1% states generated.\n"
@@ -754,10 +767,12 @@ public class MP
             b.append("Finished computing initial states: %1% states generated, with %2% of them distinct.");
             break;
         case EC.TLC_CHECKING_TEMPORAL_PROPS:
-			b.append("Checking temporal properties for the %1% state space with %2% distinct states at (")
+			b.append("Checking %3%temporal properties for the %1% state space with %2% total distinct states at (")
 					.append(SDF.format(new Date())).append(")");
             break;
-
+		case EC.TLC_CHECKING_TEMPORAL_PROPS_END:
+			b.append("Finished checking temporal properties in %1% at " + SDF.format(new Date()));
+	        break;
         case EC.TLC_SUCCESS:
             b.append("Model checking completed. No error has been found.\n"
                     + "  Estimates of the probability that TLC did not check all reachable states\n"
@@ -793,9 +808,14 @@ public class MP
             b.append("The number of states generated: %1%\nSimulation using seed %2% and aril %3%");
             break;
         case EC.TLC_PROGRESS_STATS:
-			b.append("Progress(%1%) at " + SDF.format(new Date()) + ": %2% states generated ("
-					+ df.format(Long.valueOf(parameters[4])) + " s/min), %3% distinct states found ("
-					+ df.format(Long.valueOf(parameters[5])) + " ds/min), %4% states left on queue.");
+        	if (parameters.length == 4) {
+				b.append("Progress(%1%) at " + SDF.format(new Date()) + ": %2% states generated, "
+						+ "%3% distinct states found, " + "%4% states left on queue.");
+        	} else {
+        		b.append("Progress(%1%) at " + SDF.format(new Date()) + ": %2% states generated ("
+        				+ df.format(Long.valueOf(parameters[4])) + " s/min), %3% distinct states found ("
+        				+ df.format(Long.valueOf(parameters[5])) + " ds/min), %4% states left on queue.");
+        	}
             break;
         case EC.TLC_PROGRESS_START_STATS_DFID:
             b.append("Starting level %1%: %2% states generated, %3% distinct states found.");
@@ -932,7 +952,11 @@ public class MP
             b.append("%1%:\n%2%");
             break;
         case EC.TLC_STATE_PRINT2:
-            b.append("%1%: %2%\n%3%");
+        	if (DO_DEBUG) {
+        		b.append("%1%: %2%\n%3%fp: %4%\n");
+        	} else {
+        		b.append("%1%: %2%\n%3%");
+        	}
             break;
         case EC.TLC_STATE_PRINT3:
             b.append("%1%: Stuttering");
@@ -1197,7 +1221,7 @@ public class MP
         } else {
             msg = msg + "\nThe error occurred when TLC was " + cause + ".";
         }
-        msg = msg + "\nThe exception was a " + throwable.getClass().getName();
+        msg = msg + "\nThe exception was a " + throwable.getClass().getName() + "\n";
         if (throwable.getMessage() != null) {
             msg = msg + ": " + throwable.getMessage();
             

@@ -1,3 +1,29 @@
+/*******************************************************************************
+ * Copyright (c) 2015 Microsoft Research. All rights reserved. 
+ *
+ * The MIT License (MIT)
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy 
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+ * of the Software, and to permit persons to whom the Software is furnished to do
+ * so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software. 
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+ * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+ * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Contributors:
+ *   Simon Zambrovski - initial API and implementation
+ ******************************************************************************/
+
 package org.lamport.tla.toolbox.tool.tlc.output.data;
 
 import java.util.ArrayList;
@@ -13,15 +39,21 @@ import org.eclipse.core.runtime.Assert;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
+import org.eclipse.debug.core.DebugPlugin;
 import org.eclipse.debug.core.ILaunchConfiguration;
+import org.eclipse.debug.core.ILaunchConfigurationListener;
+import org.eclipse.jface.dialogs.IDialogSettings;
 import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.Document;
+import org.eclipse.jface.text.DocumentRewriteSession;
+import org.eclipse.jface.text.DocumentRewriteSessionType;
 import org.eclipse.jface.text.FindReplaceDocumentAdapter;
 import org.eclipse.jface.text.IDocument;
 import org.eclipse.jface.text.IRegion;
 import org.eclipse.jface.text.ITypedRegion;
 import org.eclipse.ui.editors.text.FileDocumentProvider;
 import org.eclipse.ui.part.FileEditorInput;
+import org.lamport.tla.toolbox.Activator;
 import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationConstants;
 import org.lamport.tla.toolbox.tool.tlc.model.Formula;
 import org.lamport.tla.toolbox.tool.tlc.output.ITLCOutputListener;
@@ -41,10 +73,11 @@ import tlc2.output.MP;
 /**
  * Container for the data about the model launch
  * @author Simon Zambrovski
- * @version $Id$
  */
-public class TLCModelLaunchDataProvider implements ITLCOutputListener
+public class TLCModelLaunchDataProvider implements ITLCOutputListener, ILaunchConfigurationListener
 {
+	public static final String STATESORTORDER = "STATESORTORDER";
+
     public static final String NO_OUTPUT_AVAILABLE = "No user output is available";
 
     public static final String NO_ERRORS = "No errors";
@@ -54,6 +87,7 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
     public static final String RECOVERING = "Recovering from checkpoint";
     public static final String COMPUTING_REACHABLE = "Computing reachable states";
     public static final String CHECKPOINTING = "Checkpointing";
+    public static final String CHECKING_LIVENESS_FINAL = "Checking final liveness";
     public static final String CHECKING_LIVENESS = "Checking liveness";
     public static final String SERVER_RUNNING = "Master waiting for workers";
     public static final String SINGLE_WORKER_REGISTERED = " worker registered";
@@ -96,6 +130,10 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
     protected Document userOutput;
     // calc output
     protected String constantExprEvalOutput;
+    /**
+     * Sort order in which states are sorted in the variable viewer
+     */
+	private boolean stateSortDirection;
 
     // the model, which is represented by the current launch data provider
     private ILaunchConfiguration config;
@@ -126,6 +164,7 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
     public TLCModelLaunchDataProvider(ILaunchConfiguration config)
     {
         this.config = config;
+
         // init provider, but not connect it to the source!
         initialize();
 
@@ -159,6 +198,11 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
         userOutput = new Document(NO_OUTPUT_AVAILABLE);
         constantExprEvalOutput = "";
 
+		final IDialogSettings dialogSettings = Activator.getDefault().getDialogSettings();
+		stateSortDirection = dialogSettings.getBoolean(STATESORTORDER);
+
+        // Register as a LCL to cache the LaunchConfig's attributes upon save/commit.
+        DebugPlugin.getDefault().getLaunchManager().addLaunchConfigurationListener(this);
     }
 
     /**
@@ -249,7 +293,7 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
             case MP.STATE:
                 Assert.isNotNull(this.lastDetectedError,
                         "The state encountered without the error describing the reason for it. This is a bug.");
-                this.lastDetectedError.addState(TLCState.parseState(outputMessage, getModelName()));
+                this.lastDetectedError.addState(TLCState.parseState(outputMessage, getModelName()), stateSortDirection);
                 break;
             case MP.ERROR:
             case MP.TLCBUG:
@@ -291,6 +335,7 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
                     this.lastDetectedError = null;
                 }
 
+				// Order of case statements matters. There are no "break" statements because - by default - it should go to the document. 
                 switch (messageCode) {
                 // Progress information
                 case EC.TLC_VERSION:
@@ -338,11 +383,17 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
                     setDocumentText(this.progressOutput, outputMessage, true);
                     break;
                 case EC.TLC_CHECKING_TEMPORAL_PROPS:
-                    if (outputMessage.indexOf("complete") != 1)
-                    {
-                        this.setCurrentStatus(CHECKING_LIVENESS);
-                        informPresenter(ITLCModelLaunchDataPresenter.CURRENT_STATUS);
+                    if (outputMessage.contains("complete")) {
+                    	this.setCurrentStatus(CHECKING_LIVENESS_FINAL);
+                    } else {
+                    	this.setCurrentStatus(CHECKING_LIVENESS);
                     }
+                    informPresenter(ITLCModelLaunchDataPresenter.CURRENT_STATUS);
+                    setDocumentText(this.progressOutput, outputMessage, true);
+                    break;
+                case EC.TLC_CHECKING_TEMPORAL_PROPS_END:
+					this.setCurrentStatus(COMPUTING_REACHABLE);
+					informPresenter(ITLCModelLaunchDataPresenter.CURRENT_STATUS);
                     setDocumentText(this.progressOutput, outputMessage, true);
                     break;
                 case EC.TLC_CHECKPOINT_RECOVER_START:
@@ -372,8 +423,9 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
                 case EC.TLC_PROGRESS_STATS_DFID:
                 case EC.TLC_PROGRESS_SIMU:
                 case EC.TLC_PROGRESS_STATS:
-                    this.progressInformation.add(0, StateSpaceInformationItem.parse(outputMessage));
-                    informPresenter(ITLCModelLaunchDataPresenter.PROGRESS);
+                    if (addOrReplaceProgressInformation(StateSpaceInformationItem.parse(outputMessage))) {
+                    	informPresenter(ITLCModelLaunchDataPresenter.PROGRESS);
+                    }
                     break;
                 // Coverage information
                 case EC.TLC_COVERAGE_START:
@@ -488,10 +540,36 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
     }
 
     /**
+     * @param latest
+     * @return true iff the presenter should be updated
+     */
+    private boolean addOrReplaceProgressInformation(final StateSpaceInformationItem latest) {
+    	if (!this.progressInformation.isEmpty()) {
+    		final StateSpaceInformationItem head = this.progressInformation.get(0);
+    		if (head.equals(latest)) {
+    			this.progressInformation.set(0, latest);
+    			return false;
+    		} else {
+    			this.progressInformation.add(0, latest);
+    			if (this.progressInformation.size() > 1) {
+    				// Set the predecessor to not be the most recent
+    				// progress information.
+    				this.progressInformation.get(1).setMostRecent(false);
+    			}
+    			return true;
+    		}
+    	} else {
+    		this.progressInformation.add(latest);
+    		return true;
+    	}
+	}
+
+	/**
      * Destroy and disconnect
      */
     public void destroy()
     {
+        DebugPlugin.getDefault().getLaunchManager().removeLaunchConfigurationListener(this);
         TLCOutputSourceRegistry.getModelCheckSourceRegistry().disconnect(this);
     }
 
@@ -603,7 +681,8 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
                                 // some attributes are lists
                                 if (ModelHelper.isListAttribute(attributeName))
                                 {
-                                    List<String> attributeValue = (List<String>) config.getAttribute(attributeName, new ArrayList<String>());
+									final List<String> attributeValue = (List<String>) config
+											.getAttribute(attributeName, new ArrayList<String>(0));
                                     int attributeNumber = (attributeIndex != null) ? attributeIndex.intValue() : 0;
 
                                     if (IModelConfigurationConstants.MODEL_PARAMETER_CONSTANTS.equals(attributeName)
@@ -743,6 +822,9 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
         return topError;
     }
 
+    private static final String CR = "\n";
+    private static final String EMPTY = "";
+
     /**
      * Sets text to a document
      * @param document
@@ -751,42 +833,40 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
      * @throws BadLocationException
      * Has to be run from non-UI thread
      */
-    public static synchronized void setDocumentText(final IDocument document, final String message, final boolean append)
-    {
-        final String CR = "\n";
-        final String EMPTY = "";
+	public static synchronized void setDocumentText(final Document document, final String message,
+			final boolean append) {
 
-        UIHelper.runUIAsync(new Runnable() {
-
-            public void run()
-            {
-                try
-                {
-                    if (append)
-                    {
-                        if (document.getLength() == NO_OUTPUT_AVAILABLE.length())
-                        {
-                            String content = document.get(0, NO_OUTPUT_AVAILABLE.length());
-                            if (content != null && NO_OUTPUT_AVAILABLE.equals(content))
-                            {
-                                document.replace(0, document.getLength(), message
-                                        + ((message.endsWith(CR)) ? EMPTY : CR));
-                            }
-                        } else
-                        {
-                            document.replace(document.getLength(), 0, message + ((message.endsWith(CR)) ? EMPTY : CR));
-                        }
-                    } else
-                    {
-                        document.replace(0, document.getLength(), message + ((message.endsWith(CR)) ? EMPTY : CR));
-                    }
-                } catch (BadLocationException e)
-                {
-
-                }
-            }
-        });
-    }
+		UIHelper.runUIAsync(new Runnable() {
+			public void run() {
+				try {
+					DocumentRewriteSession rewriteSession;
+					if (append && !isDefaultLabel(document)) {
+						rewriteSession = document.startRewriteSession(DocumentRewriteSessionType.SEQUENTIAL);
+						// append to existing document (0 length is valid and means message is going to be appended)
+						document.replace(document.getLength(), 0, message + ((message.endsWith(CR)) ? EMPTY : CR));
+					} else {
+						rewriteSession = document.startRewriteSession(DocumentRewriteSessionType.STRICTLY_SEQUENTIAL);
+						// replace of complete document
+						document.replace(0, document.getLength(), message + ((message.endsWith(CR)) ? EMPTY : CR));
+					}
+					document.stopRewriteSession(rewriteSession);
+				} catch (BadLocationException ignored) {
+				}
+			}
+		});
+	}
+	
+	/**
+	 * @param document
+	 * @return true iff the current content of the document is
+	 *         {@link TLCModelLaunchDataProvider#NO_OUTPUT_AVAILABLE}
+	 * @throws BadLocationException
+	 */
+	private static boolean isDefaultLabel(final IDocument document) throws BadLocationException {
+		return document.getLength() == NO_OUTPUT_AVAILABLE.length()
+				&& document.get(0, NO_OUTPUT_AVAILABLE.length()) != null
+				&& NO_OUTPUT_AVAILABLE.equals(document.get(0, NO_OUTPUT_AVAILABLE.length()));
+	}
 
     /**
      *  Connects this provider to the tlc output source registry.
@@ -906,6 +986,11 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
         return currentStatus;
     }
 
+	public boolean isDone() {
+		assert currentStatus.equals("Not running");
+		return isDone;
+	}
+
     /**
      * @param fingerprintCollisionProbability the fingerprintCollisionProbability to set
      */
@@ -970,5 +1055,30 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
 		// defined here so subclasses can override which ain't backed by a real
 		// file (e.g. unit test)
 		return ModelHelper.getModelName(getConfig().getFile());
+	}
+	
+	/* org.eclipse.debug.core.ILaunchConfigurationListener */
+
+	/* (non-Javadoc)
+	 * @see org.eclipse.debug.core.ILaunchConfigurationListener#launchConfigurationAdded(org.eclipse.debug.core.ILaunchConfiguration)
+	 */
+	public void launchConfigurationAdded(final ILaunchConfiguration configuration) {
+		// Ignore
+	}
+
+	/* (non-Javadoc)
+	 * @see org.eclipse.debug.core.ILaunchConfigurationListener#launchConfigurationChanged(org.eclipse.debug.core.ILaunchConfiguration)
+	 */
+	public void launchConfigurationChanged(final ILaunchConfiguration configuration) {
+		// The moment the launch config is saved/committed, keep it.
+		this.config = configuration;
+	}
+
+	/* (non-Javadoc)
+	 * @see org.eclipse.debug.core.ILaunchConfigurationListener#launchConfigurationRemoved(org.eclipse.debug.core.ILaunchConfiguration)
+	 */
+	public void launchConfigurationRemoved(final ILaunchConfiguration configuration) {
+		// Ignore, should never happen during model checking because the ILC is locked.
+		this.config = null;
 	}
 }

@@ -1,8 +1,35 @@
+/*******************************************************************************
+ * Copyright (c) 2015 Microsoft Research. All rights reserved. 
+ *
+ * The MIT License (MIT)
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy 
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+ * of the Software, and to permit persons to whom the Software is furnished to do
+ * so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software. 
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+ * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+ * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Contributors:
+ *   Simon Zambrovski - initial API and implementation
+ ******************************************************************************/
+
 package org.lamport.tla.toolbox.tool.tlc.output.data;
 
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
-import java.util.Vector;
 
 import org.lamport.tla.toolbox.tool.tlc.ui.util.IModuleLocatable;
 
@@ -11,7 +38,6 @@ import tla2sany.st.Location;
 /**
  * Representation of the TLC state
  * @author Simon Zambrovski
- * @version $Id$
  */
 public class TLCState implements IModuleLocatable
 {
@@ -70,7 +96,10 @@ public class TLCState implements IModuleLocatable
             return STUTTERING_STATE(number, modelName);
         } else if (label.indexOf(BACK_TO_STATE) != -1)
         {
-            return BACK_TO_STATE(number, modelName);
+            final TLCState state = BACK_TO_STATE(number, modelName);
+            // See in MP.java case for EC.TLC_BACK_TO_STATE
+            state.setLocation(Location.parseLocation(label.substring(" Back to State: ".length(), label.length()))); 
+			return state;
         } else
         {
             TLCState state = new TLCState(number, modelName);
@@ -87,10 +116,9 @@ public class TLCState implements IModuleLocatable
      * @param variablesText
      * @return
      */
-    private static TLCVariable[] parseVariables(String variablesText)
-    {
+	private static List<TLCVariable> parseVariables(String variablesText) {
         String[] lines = variablesText.split(CR);
-        Vector vars = new Vector();
+		List<TLCVariable> vars = new ArrayList<TLCVariable>();
         int index;
 
         // buffer for accumulating the state variable
@@ -138,7 +166,22 @@ public class TLCState implements IModuleLocatable
             vars.add(var);
         }
 
-        return (TLCVariable[]) vars.toArray(new TLCVariable[vars.size()]);
+		Collections.sort(vars, new Comparator<TLCVariable>() {
+			public int compare(TLCVariable v1, TLCVariable v2) {
+				if (v1.isTraceExplorerVar() && v2.isTraceExplorerVar()) {
+					// both are variables. Compare the vars alphabetically.
+					return v1.getName().compareTo(v2.getName());
+				}
+				if (v1.isTraceExplorerVar()) {
+					return -1;
+				}
+				if (v2.isTraceExplorerVar()) {
+					return 1;
+				}
+				return v1.getName().compareTo(v2.getName());
+			}
+		});
+		return vars;
     }
 
     private int number;
@@ -146,7 +189,7 @@ public class TLCState implements IModuleLocatable
     private boolean isBackToState = false;
     private String label;
     private String variablesAsString;
-    private TLCVariable[] variables = new TLCVariable[0];
+	private List<TLCVariable> variables = new ArrayList<TLCVariable>(0);
     /**
      * Contains the location of the action
      * which caused this state
@@ -156,7 +199,8 @@ public class TLCState implements IModuleLocatable
      * The name of the model for which this
      * is a state.
      */
-    private String modelName;
+	private final String modelName;
+	private boolean wasDiffed= false;
 
     /**
      * 
@@ -178,6 +222,10 @@ public class TLCState implements IModuleLocatable
     {
         return isBackToState;
     }
+    
+    public boolean isInitialState() {
+    	return number == 1;
+    }
 
     public int getStateNumber()
     {
@@ -194,14 +242,12 @@ public class TLCState implements IModuleLocatable
         this.label = label;
     }
 
-    public final List getVariablesAsList()
-    {
-        return Arrays.asList(variables);
-    }
+	public final List<TLCVariable> getVariablesAsList() {
+		return this.variables;
+	}
 
-    public final TLCVariable[] getVariables()
-    {
-        return variables;
+	public final TLCVariable[] getVariables() {
+		return variables.toArray(new TLCVariable[variables.size()]);
     }
 
     public String toString()
@@ -243,9 +289,8 @@ public class TLCState implements IModuleLocatable
          *  does.
          */
         StringBuffer result = new StringBuffer();
-        for (int i = 0; i < variables.length; i++)
-        {
-            TLCVariable var = variables[i];
+		for (int i = 0; i < variables.size(); i++) {
+			TLCVariable var = variables.get(i);
             result.append("/\\ ");
             if (var.isTraceExplorerVar())
             {
@@ -275,4 +320,35 @@ public class TLCState implements IModuleLocatable
     {
         return modelName;
     }
+
+    /**
+     * Set the data structures that cause highlighting of changes in the
+     * error trace.
+     */
+	public void diff(final TLCState other) {
+		if (this == other || wasDiffed || other.isStuttering() || other.isBackToState()) {
+			// there are no variables in other
+			// because it is a stuttering or a back to state
+			// step
+			return;
+		}
+		wasDiffed = true;
+		final List<TLCVariable> predecessorVariables = this.getVariablesAsList();
+		final List<TLCVariable> secondVariables = other.getVariablesAsList();
+		for (int i = 0; i < predecessorVariables.size(); i++) {
+			final TLCVariableValue firstValue = predecessorVariables.get(i).getValue();
+			final TLCVariableValue secondValue = secondVariables.get(i).getValue();
+			firstValue.diff(secondValue);
+		}
+	}
+
+	public int getVariableCount(int level) {
+		if (level > 1) {
+			throw new UnsupportedOperationException("not yet implemented");
+		}
+		if (level == 1) {
+			return this.variables.size();
+		}
+		return 0;
+	}
 }

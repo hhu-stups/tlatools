@@ -1,5 +1,6 @@
 package org.lamport.tla.toolbox.tool.tlc.output.data;
 
+import java.text.NumberFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -24,8 +25,13 @@ public class StateSpaceInformationItem
     private long leftStates;
 	private long spm;
 	private long distinctSPM;
+	/**
+	 * True if this is the most recent/up-to-date SSII holding the newest
+	 * values.
+	 */
+	private boolean isMostRecent = true;
 
-    /**
+	/**
 	 * @param time
 	 * @param diameter
 	 * @param foundStates
@@ -47,6 +53,20 @@ public class StateSpaceInformationItem
 		this.distinctSPM = distinctSPM;
 	}
 
+    /**
+	 * @return the isMostRecent
+	 */
+	public boolean isMostRecent() {
+		return isMostRecent;
+	}
+
+	/**
+	 * @param isMostRecent the isMostRecent to set
+	 */
+	public void setMostRecent(boolean isMostRecent) {
+		this.isMostRecent = isMostRecent;
+	}
+	
 	public final Date getTime() {
 		return time;
 	}
@@ -136,17 +156,19 @@ public class StateSpaceInformationItem
 			final Date time = SDF.parse(outputMessage.substring(
 					i[1] + AT.length(), i[2]));
 
+			final NumberFormat nf = NumberFormat.getNumberInstance();
+			
 			final long diameter = Long.parseLong(outputMessage.substring(i[0]
 					+ OB.length(), i[1]));
 			final long foundStates = Long.parseLong(outputMessage.substring(
 					i[2] + COLON.length(), i[3]));
-			final long statesPerMinute = Long.parseLong(outputMessage
-					.substring(i[3] + GENERATED.length(), i[4]).replace(",", ""));
+			final long statesPerMinute = nf.parse(outputMessage
+					.substring(i[3] + GENERATED.length(), i[4]).replace(",", "")).longValue();
 
 			final long distinctStates = Long.parseLong(outputMessage.substring(
 					i[4] + SPM.length(), i[5]));
-			final long distinctStatesPerMinute = Long.parseLong(outputMessage
-					.substring(i[5] + DISTINCT.length(), i[6]).replace(",", ""));
+			final long distinctStatesPerMinute = nf.parse(outputMessage
+					.substring(i[5] + DISTINCT.length(), i[6]).replace(",", "")).longValue();
 
 			final long leftStates = Long.parseLong(outputMessage.substring(i[6]
 					+ DISTINCT_SPM.length(), i[7]));
@@ -209,4 +231,39 @@ public class StateSpaceInformationItem
 
 	public final static SimpleDateFormat SDF = new SimpleDateFormat(
 			"yyyy-MM-dd HH:mm:ss");
+
+	/* (non-Javadoc)
+	 * @see java.lang.Object#hashCode()
+	 */
+	public int hashCode() {
+		final int prime = 31;
+		int result = 1;
+		result = prime * result + (int) (diameter ^ (diameter >>> 32));
+		result = prime * result + (int) (distinctStates ^ (distinctStates >>> 32));
+		result = prime * result + (int) (foundStates ^ (foundStates >>> 32));
+		result = prime * result + (int) (leftStates ^ (leftStates >>> 32));
+		return result;
+	}
+
+	/* (non-Javadoc)
+	 * @see java.lang.Object#equals(java.lang.Object)
+	 */
+	public boolean equals(Object obj) {
+		if (this == obj)
+			return true;
+		if (obj == null)
+			return false;
+		if (getClass() != obj.getClass())
+			return false;
+		StateSpaceInformationItem other = (StateSpaceInformationItem) obj;
+		if (diameter != other.diameter)
+			return false;
+		if (distinctStates != other.distinctStates)
+			return false;
+		if (foundStates != other.foundStates)
+			return false;
+		if (leftStates != other.leftStates)
+			return false;
+		return true;
+	}
 }

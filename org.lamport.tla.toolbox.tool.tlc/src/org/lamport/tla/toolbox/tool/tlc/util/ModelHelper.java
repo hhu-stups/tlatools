@@ -1,9 +1,35 @@
+/*******************************************************************************
+ * Copyright (c) 2015 Microsoft Research. All rights reserved. 
+ *
+ * The MIT License (MIT)
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy 
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+ * of the Software, and to permit persons to whom the Software is furnished to do
+ * so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software. 
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+ * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+ * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Contributors:
+ *   Simon Zambrovski - initial API and implementation
+ ******************************************************************************/
 package org.lamport.tla.toolbox.tool.tlc.util;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Hashtable;
 import java.util.Iterator;
@@ -97,6 +123,11 @@ public class ModelHelper implements IModelConfigurationConstants, IModelConfigur
     public static final String TLC_MODEL_ERROR_MARKER_ATTRIBUTE_NAME = "attributeName";
     public static final String TLC_MODEL_ERROR_MARKER_ATTRIBUTE_IDX = "attributeIndex";
 
+	/**
+	 * The zero-based id of the BasicFormPage to show the error on.
+	 */
+	public static final String TLC_MODEL_ERROR_MARKER_ATTRIBUTE_PAGE = "basicFormPageId";
+
     /**
      * marker on .launch file with boolean attribute modelIsRunning 
      */
@@ -186,6 +217,9 @@ public class ModelHelper implements IModelConfigurationConstants, IModelConfigur
 
         return proposition;
     }
+    public static String getModelName(ILaunchConfiguration config) {
+    	return getModelName(config.getFile());
+    }
 
     /**
      * Transforms a model name to the name visible to the user 
@@ -268,7 +302,7 @@ public class ModelHelper implements IModelConfigurationConstants, IModelConfigur
     	final ILaunchConfiguration[] launchConfigurations = getAllLaunchConfigurations();
 		for (int i = 0; i < launchConfigurations.length; i++) {
 			final ILaunchConfiguration iLaunchConfiguration = launchConfigurations[i];
-			if (iLaunchConfiguration.getName().startsWith(aSpec.getName())) {
+			if (getSpecPrefix(iLaunchConfiguration).equals(aSpec.getName())) {
 				res.add(iLaunchConfiguration);
 			}
 		}
@@ -421,7 +455,18 @@ public class ModelHelper implements IModelConfigurationConstants, IModelConfigur
      * De-serialize assignment list. 
      * @see ModelHelper#serializeAssignmentList(List)
      */
-    public static List<Assignment> deserializeAssignmentList(List<String> serializedList)
+    public static List<Assignment> deserializeAssignmentList(final List<String> serializedList) {
+    	return deserializeAssignmentList(serializedList, false);
+    }
+    
+    /**
+     * De-serialize assignment list. 
+     * @param serializedList
+     * @param stripSymmetry Strips any symmetry definitions from assignments iff true
+     * @return The list of all {@link Assignment}
+     * @see ModelHelper#serializeAssignmentList(List)
+     */
+    public static List<Assignment> deserializeAssignmentList(final List<String> serializedList, final boolean stripSymmetry)
     {
         Vector<Assignment> result = new Vector<Assignment>(serializedList.size());
         Iterator<String> iter = serializedList.iterator();
@@ -448,7 +493,7 @@ public class ModelHelper implements IModelConfigurationConstants, IModelConfigur
                 assign.setModelValue(true);
 
                 // is symmetrical
-                if (fields.length > 4 && fields[4].equals("1"))
+                if (!stripSymmetry && fields.length > 4 && fields[4].equals("1"))
                 {
                     assign.setSymmetric(true);
                 }
@@ -1220,7 +1265,7 @@ public class ModelHelper implements IModelConfigurationConstants, IModelConfigur
 	 *		(key type : <code>String</code> value type : <code>String</code>, 
 	 *		<code>Integer</code>, or <code>Boolean</code>) or <code>null</code>
      */
-    public static IMarker installModelProblemMarker(IResource resource, @SuppressWarnings("rawtypes") Map properties, String markerType)
+    public static IMarker installModelProblemMarker(IResource resource, Map<String, Object> properties, String markerType)
     {
         Assert.isNotNull(resource);
         Assert.isTrue(resource.exists());
@@ -2141,4 +2186,78 @@ public class ModelHelper implements IModelConfigurationConstants, IModelConfigur
         }
         return null;
     }
+
+	public static String prettyPrintConstants(final ILaunchConfiguration config, String delim) throws CoreException {
+		return prettyPrintConstants(config, delim, false);
+	}
+	
+	public static String prettyPrintConstants(final ILaunchConfiguration config, String delim, boolean align) throws CoreException {
+		final List<Assignment> assignments = deserializeAssignmentList(
+				config.getAttribute(IModelConfigurationConstants.MODEL_PARAMETER_CONSTANTS, new ArrayList<String>()));
+		
+		// Sort the assignments: Basic assignments alphabetically first, Set
+		// model values including symmetric ones (alphabetically), Basic model
+		// values.
+		Collections.sort(assignments, new Comparator<Assignment>() {
+			public int compare(Assignment a1, Assignment a2) {
+				if (a1.isSimpleModelValue() && a2.isSimpleModelValue()) {
+					return a1.getLeft().compareTo(a2.getLeft());
+				} else if (a1.isSetOfModelValues() && a2.isSetOfModelValues()) {
+					return a1.getLeft().compareTo(a2.getLeft());
+				} else if (a1.isSimpleModelValue() && !a2.isModelValue()) {
+					return 1;
+				} else if (a1.isSimpleModelValue() && a2.isSetOfModelValues()) {
+					return 1;
+				} else if (a1.isSetOfModelValues() && !a2.isModelValue()) {
+					return 1;
+				} else if (a1.isSetOfModelValues() && a2.isSimpleModelValue()) {
+					return -1;
+				} else if (!a1.isModelValue() && a2.isModelValue()) {
+					return -1;
+				} else {
+					// Basic assignments
+					return a1.getLeft().compareTo(a2.getLeft());
+				}
+			}
+		});
+		
+		// Determine the longest label of the assignment's left hand side.
+		int longestLeft = 0;
+		for (int i = 0; i < assignments.size() && align; i++) {
+			final Assignment assignment = assignments.get(i);
+			if (!assignment.isSimpleModelValue()) {
+				longestLeft = Math.max(longestLeft, assignment.getLeft().length());
+			}
+		}
+
+		final StringBuffer buf = new StringBuffer();
+		for (int i = 0; i < assignments.size(); i++) {
+			final Assignment assignment = assignments.get(i);
+			if (assignment.isSimpleModelValue()) {
+				buf.append("Model values: ");
+				for (; i < assignments.size(); i++) {
+					buf.append(assignments.get(i).prettyPrint());
+					if (i < assignments.size() - 1) {
+						buf.append(", ");
+					}
+				}
+			} else if (align) {
+				final int length = longestLeft - assignment.getLeft().length();
+				final StringBuffer whitespaces = new StringBuffer(length);
+				for (int j = 0; j < length; j++) {
+					whitespaces.append(" ");
+				}
+				buf.append(assignment.prettyPrint(whitespaces.toString()));
+				if (i < assignments.size() - 1) {
+					buf.append(delim);
+				}
+			} else {
+				buf.append(assignment.prettyPrint());
+				if (i < assignments.size() - 1) {
+					buf.append(delim);
+				}
+			}
+		}
+		return buf.toString();
+	}
 }

@@ -26,6 +26,10 @@
 
 package tlc2.tool.liveness;
 
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import org.junit.Test;
 import tlc2.output.EC;
 
 public class Test056 extends ModelCheckerTestCase {
@@ -34,10 +38,12 @@ public class Test056 extends ModelCheckerTestCase {
 		super("test56");
 	}
 
+	@Test
 	public void testSpec() {
 		// ModelChecker has finished and generated the expected amount of states
 		assertTrue(recorder.recorded(EC.TLC_MODE_MC));
 		assertTrue(recorder.recorded(EC.TLC_FINISHED));
+		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recorded(EC.TLC_COMPUTING_INIT));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "2"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_INIT_GENERATED1, "3"));

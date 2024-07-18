@@ -28,7 +28,6 @@ import org.lamport.tla.toolbox.util.UIHelper;
  * A wizard page input of the specification name and the location of the root file
  * 
  * @author Simon Zambrovski
- * @version $Id$
  */
 public class NewSpecWizardPage extends WizardPage
 {
@@ -88,7 +87,7 @@ public class NewSpecWizardPage extends WizardPage
 
         // brows button
         Button button = new Button(container, SWT.PUSH);
-        button.setText("Browse...");
+        button.setText("&Browse...");
         button.addSelectionListener(new SelectionAdapter() {
             public synchronized void widgetSelected(SelectionEvent e)
             {
@@ -297,7 +296,7 @@ public class NewSpecWizardPage extends WizardPage
                 Spec existingSpec = Activator.getSpecManager().getSpecByName(specName);
                 if (existingSpec != null)
                 {
-                    reportError("The specification with provided name is already exists \nand uses "
+                    reportError("The specification with provided name already exists \nand uses "
                             + existingSpec.getRootFilename() + " as root module.");
                     return;
                 }
@@ -327,7 +326,7 @@ public class NewSpecWizardPage extends WizardPage
             if (!importExisting.getSelection())
             {
                 reportError("The " + getSpecName() + ".toolbox directory already exists at the provided location."
-                        + "\nPlease select a different specification name or  root-module file.");
+                        + "\nPlease select a different specification name or root-module file.");
                 return;
             }
             importExisting.setEnabled(true);

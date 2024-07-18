@@ -23,31 +23,33 @@
  * Contributors:
  *   Markus Alexander Kuppe - initial API and implementation
  ******************************************************************************/
-package org.lamport.tla.toolbox.ui.intro;
 
-import org.eclipse.swt.widgets.Composite;
-import org.eclipse.ui.intro.IIntroPart;
-import org.eclipse.ui.part.IntroPart;
-import org.lamport.tla.toolbox.ui.view.ToolboxWelcomeView;
+package tlc2.tool;
 
-public class ToolboxIntoPart extends IntroPart implements IIntroPart {
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
-	private Composite container;
+import org.junit.Test;
+import tlc2.output.EC;
+import tlc2.tool.liveness.ModelCheckerTestCase;
 
-	/**
-	 * @wbp.parser.entryPoint
-	 */
-	public void createPartControl(Composite container) {
-		this.container = container;
-		ToolboxWelcomeView.createControl(container);
+public class TSnapShotTest extends ModelCheckerTestCase {
+
+	public TSnapShotTest() {
+		super("MC", "TSnapShot");
 	}
+	
+	@Test
+	public void testSpec() {
+		assertTrue(recorder.recorded(EC.TLC_FINISHED));
+		assertFalse(recorder.recorded(EC.GENERAL));
+		assertFalse(recorder.recorded(EC.TLC_BUG));
 
-	public void standbyStateChanged(boolean standby) {
-		// do nothing for now (don't expect users to
-		// send welcome to standy)
+		assertTrue(recorder.recorded(EC.TLC_BEHAVIOR_UP_TO_THIS_POINT));
 	}
-
-	public void setFocus() {
-		container.setFocus();
+	
+	protected int getNumberOfThreads() {
+		// This bug only shows up with multiple threads.
+		return 4;
 	}
 }

@@ -74,7 +74,7 @@ import tla2sany.semantic.ModuleNode;
 public class ModelEditor extends FormEditor implements ModelHelper.IFileProvider
 {
 
-    /**
+	/**
      * Editor ID
      */
     public static final String ID = "org.lamport.tla.toolbox.tool.tlc.ui.editor.ModelEditor";
@@ -96,7 +96,7 @@ public class ModelEditor extends FormEditor implements ModelHelper.IFileProvider
      * It is used in the workspace root listener and is called once after the input is set and after the pages 
      * are added.
      */
-    private ValidateRunnable validateRunable = new ValidateRunnable();
+    private final ValidateRunnable validateRunable = new ValidateRunnable();
 
     private class ValidateRunnable implements Runnable
     {
@@ -454,7 +454,7 @@ public class ModelEditor extends FormEditor implements ModelHelper.IFileProvider
     /**
      * Instead of committing pages, forms and form-parts, we just commit pages 
      */
-    protected void commitPages(IProgressMonitor monitor, boolean onSave)
+    protected synchronized void commitPages(IProgressMonitor monitor, boolean onSave)
     {
         // TLCUIActivator.getDefault().logDebug("entering ModelEditor#commitPages(IProgressMonitor monitor, boolean onSave)");
         for (int i = 0; i < getPageCount(); i++)
@@ -799,6 +799,15 @@ public class ModelEditor extends FormEditor implements ModelHelper.IFileProvider
             IMarker[] modelProblemMarkers = ModelHelper.getModelProblemMarker(getConfig());
             DataBindingManager dm = getDataBindingManager();
 
+			// The loop is going to update the page's messages for potentially
+			// each marker (nested loop). Thus, turn auto update off during the
+			// loop for all pages (we don't yet know which marker gets displayed
+			// on which page).
+            for (int i = 0; i < this.pagesToAdd.length; i++) {
+				IMessageManager mm = this.pagesToAdd[i].getManagedForm().getMessageManager();
+            	mm.setAutoUpdate(false);
+            }
+            
             for (int j = 0; j < getPageCount(); j++)
             {
                 /*
@@ -835,24 +844,27 @@ public class ModelEditor extends FormEditor implements ModelHelper.IFileProvider
 
                         if (ModelHelper.EMPTY_STRING.equals(attributeName))
                         {
-                            String message = modelProblemMarkers[i].getAttribute(IMarker.MESSAGE,
+                            final String message = modelProblemMarkers[i].getAttribute(IMarker.MESSAGE,
                                     IModelConfigurationDefaults.EMPTY_STRING);
+							final int pageId = modelProblemMarkers[i]
+									.getAttribute(ModelHelper.TLC_MODEL_ERROR_MARKER_ATTRIBUTE_PAGE, -1);
                             // no attribute, this is a global error, not bound to a particular attribute
                             // install it on the first page
                             // if it is a global TLC error, then we call addGlobalTLCErrorMessage()
                             // to add a hyperlink to the TLC Error view
-                            if (bubbleType == IMessageProvider.WARNING)
-                            {
-                                this.pagesToAdd[0].addGlobalTLCErrorMessage("modelProblem_" + i);
-                                this.pagesToAdd[1].addGlobalTLCErrorMessage("modelProblem_" + i);
-                            } else
-                            {
-                                // else install as with other messages
-                                IMessageManager mm = this.pagesToAdd[0].getManagedForm().getMessageManager();
-                                mm.setAutoUpdate(false);
-                                mm.addMessage("modelProblem_" + i, message, null, bubbleType);
-                                mm.setAutoUpdate(true);
-                            }
+							if (pageId != -1 && bubbleType == IMessageProvider.WARNING
+									&& !IModelConfigurationDefaults.EMPTY_STRING.equals(message)) {
+								// Used by the ResultPage to display an error on
+								// incomplete state space exploration.
+								this.pagesToAdd[pageId].addGlobalTLCErrorMessage(ResultPage.RESULT_PAGE_PROBLEM, message);
+							} else if (bubbleType == IMessageProvider.WARNING) {
+								this.pagesToAdd[0].addGlobalTLCErrorMessage("modelProblem_" + i);
+								this.pagesToAdd[1].addGlobalTLCErrorMessage("modelProblem_" + i);
+							} else {
+								// else install as with other messages
+								IMessageManager mm = this.pagesToAdd[0].getManagedForm().getMessageManager();
+								mm.addMessage("modelProblem_" + i, message, null, bubbleType);
+							}
                         } else
                         {
                             // attribute found
@@ -871,7 +883,6 @@ public class ModelEditor extends FormEditor implements ModelHelper.IFileProvider
                             // the header of every page, so the if statement that is commented
                             // out is no longer relevant
                             IMessageManager mm = page.getManagedForm().getMessageManager();
-                            mm.setAutoUpdate(false);
                             String message = modelProblemMarkers[i].getAttribute(IMarker.MESSAGE,
                                     IModelConfigurationDefaults.EMPTY_STRING);
 
@@ -888,7 +899,6 @@ public class ModelEditor extends FormEditor implements ModelHelper.IFileProvider
                             }
                             // expand the section with an error
                             dm.expandSection(sectionId);
-                            mm.setAutoUpdate(true);
 
                             if (page.getId().equals(pageId) && errorPageIndex < j)
                             {
@@ -899,6 +909,13 @@ public class ModelEditor extends FormEditor implements ModelHelper.IFileProvider
                     }
                 }
             }
+            
+            // Once all markers have been processed, re-enable auto update again.
+            for (int i = 0; i < this.pagesToAdd.length; i++) {
+				final IMessageManager mm = this.pagesToAdd[i].getManagedForm().getMessageManager();
+            	mm.setAutoUpdate(true);
+            }
+            
             if (switchToErrorPage && errorPageIndex != -1 && currentPageIndex != errorPageIndex)
             {
                 // the page has a marker

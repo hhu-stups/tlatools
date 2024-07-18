@@ -26,6 +26,10 @@
 
 package tlc2.tool.liveness.simulation;
 
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import org.junit.Test;
 import tlc2.output.EC;
 import tlc2.tool.liveness.ModelCheckerTestCase;
 
@@ -35,10 +39,12 @@ public class StutteringTest extends ModelCheckerTestCase {
 		super("MC", "CodePlexBug08", new String[] { "-simulate" });
 	}
 
+	@Test
 	public void testSpec() {
 		// Simulation has finished and generated states
 		assertTrue(recorder.recorded(EC.TLC_FINISHED));
 		assertTrue(recorder.recorded(EC.TLC_STATS_SIMU));
+		assertFalse(recorder.recorded(EC.GENERAL));
 
 		// Assert it has found the temporal violation and also a counter example
 		assertTrue(recorder.recorded(EC.TLC_TEMPORAL_PROPERTY_VIOLATED));

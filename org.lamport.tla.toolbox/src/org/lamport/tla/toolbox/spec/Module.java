@@ -1,38 +1,66 @@
+/*******************************************************************************
+ * Copyright (c) 2015 Microsoft Research. All rights reserved. 
+ *
+ * The MIT License (MIT)
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy 
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+ * of the Software, and to permit persons to whom the Software is furnished to do
+ * so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software. 
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+ * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+ * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Contributors:
+ *   Simon Zambrowski - initial API and implementation
+ ******************************************************************************/
+
 package org.lamport.tla.toolbox.spec;
 
 import java.io.File;
 
+import org.eclipse.core.resources.IResource;
 import org.lamport.tla.toolbox.util.RCPNameToFileIStream;
 
 import tla2sany.semantic.ModuleNode;
 
 /**
  * Representation of a module
- * @author Simon Zambrovski
- * @version $Id$
  */
 public class Module
 {
-    private File file;
+    private final File file;
+    
     private ModuleNode node;
     private boolean isRoot = false;
+	private IResource resource;
 
     public Module(String absoluteFilename)
     {
         file = new File(absoluteFilename);
     }
 
-    /**
+    public Module(IResource resource) {
+    	this(resource.getLocation().toOSString());
+    	this.resource = resource;
+	}
+
+	/**
      * Retrieves absolute path of the module file
      * 
      * @return path of the module file
      */
     public String getAbsolutePath()
     {
-        if (file == null) 
-        {
-            return null;
-        }
         return file.getAbsolutePath();
     }
 
@@ -46,16 +74,27 @@ public class Module
         return file;
     }
 
+	/**
+	 * @return null or the Eclipse specific resource handle for this module. A
+	 *         IResource is the pendant to the non-Eclipse specific
+	 *         java.io.File.
+	 * 
+	 * @see {@link Module#getFile()}
+	 */
+    public IResource getResource() {
+    	return resource;
+    }
+
+	public void setResource(IResource aResource) {
+		this.resource = aResource;
+	}
+   
     /**
      * Retrieves the module name
      * @return the name of the module
      */
     public String getModuleName()
     {
-        if (file == null) 
-        {
-            return null;
-        }
         String filename = file.getName();
         if (filename.toLowerCase().indexOf(".tla") != -1)
         {
@@ -105,12 +144,5 @@ public class Module
     public void setRoot(boolean isRoot)
     {
         this.isRoot = isRoot;
-    }
-    
-    public void destroy()
-    {
-        this.file = null;
-        this.node = null;
-        this.isRoot = false;
     }
 }

@@ -11,6 +11,7 @@ import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.output.OutputCollector;
+import tlc2.tool.liveness.AddAndCheckLiveCheck;
 import tlc2.tool.liveness.ILiveCheck;
 import tlc2.tool.liveness.LiveCheck;
 import tlc2.tool.liveness.Liveness;
@@ -21,6 +22,7 @@ import tlc2.util.StateWriter;
 import tlc2.util.statistics.BucketStatistics;
 import tlc2.util.statistics.DummyBucketStatistics;
 import tlc2.util.statistics.IBucketStatistics;
+import tlc2.value.Value;
 import util.DebugPrinter;
 import util.FileUtil;
 import util.FilenameToStream;
@@ -32,6 +34,15 @@ import util.FilenameToStream;
  */
 public abstract class AbstractChecker implements Cancelable
 {
+	/**
+	 * True when unit tests explicitly request to use
+	 * {@link AddAndCheckLiveCheck} to run liveness checking after each
+	 * insertion into the behavior graph. This should only be true if you
+	 * exactly know what you are doing. If you don't and this is true, make sure
+	 * it's false.
+	 */
+	public static boolean LIVENESS_TESTING_IMPLEMENTATION = Boolean.getBoolean(ILiveCheck.class.getName() + ".testing");
+	
 	protected static final boolean LIVENESS_STATS = Boolean.getBoolean(Liveness.class.getPackage().getName() + ".statistics");
 	
     // SZ Mar 9, 2009: static modifier removed
@@ -52,7 +63,16 @@ public abstract class AbstractChecker implements Cancelable
     public Action[] actions;
     protected StateWriter allStateWriter;
     protected boolean cancellationFlag;
+    private IdThread[] workers;
 	protected final ILiveCheck liveCheck;
+
+	protected final ThreadLocal<Integer> threadLocal = new ThreadLocal<Integer>() {
+		protected Integer initialValue() {
+			return 1;
+		}
+	};
+
+	protected static final int INITIAL_CAPACITY = 16;
 
     /**
      * Constructor of the abstract model checker
@@ -113,7 +133,11 @@ public abstract class AbstractChecker implements Cancelable
 				stats = new BucketStatistics("Histogram vertex out-degree", LiveCheck.class.getPackage().getName(),
 						"DiskGraphsOutDegree");
 			}
-			this.liveCheck = new LiveCheck(this.tool, this.actions, this.metadir, stats);
+			if (LIVENESS_TESTING_IMPLEMENTATION) {
+				this.liveCheck = new AddAndCheckLiveCheck(this.tool, this.actions, this.metadir, stats);
+			} else {
+				this.liveCheck = new LiveCheck(this.tool, this.actions, this.metadir, stats);
+			}
             report("liveness checking initialized");
         } else {
         	this.liveCheck = new NoOpLiveCheck(this.tool, this.metadir);
@@ -136,7 +160,8 @@ public abstract class AbstractChecker implements Cancelable
      */
     public boolean setErrState(TLCState curState, TLCState succState, boolean keep)
     {
-        if (!TLCGlobals.continuation && this.done)
+       assert Thread.holdsLock(this) : "Caller thread has to hold monitor!";
+       if (!TLCGlobals.continuation && this.done)
             return false;
         this.predErrState = curState;
         this.errState = (succState == null) ? curState : succState;
@@ -151,8 +176,9 @@ public abstract class AbstractChecker implements Cancelable
      */
     protected void reportCoverage(IWorker[] workers)
     {
-        if (TLCGlobals.coverageInterval >= 0)
-        {
+		// Without actions (empty spec) there won't be any statistics anyway.
+		if (TLCGlobals.coverageInterval >= 0 && this.actions.length > 0)
+		{
             MP.printMessage(EC.TLC_COVERAGE_START);
             // First collecting all counts from all workers:
             ObjLongTable counts = this.tool.getPrimedLocs();
@@ -212,8 +238,7 @@ public abstract class AbstractChecker implements Cancelable
             return true;
         }
 
-        // Start all the workers:
-        IdThread[] workers = startWorkers(this, depth);
+        workers = startWorkers(this, depth);
 
         // Check progress periodically:
         // Comment added by LL on 9 April 2012.  The coverage is printed
@@ -292,6 +317,16 @@ public abstract class AbstractChecker implements Cancelable
         this.cancellationFlag = flag;
     }
     
+	public final void setAllValues(int idx, Value val) {
+		for (int i = 0; i < this.workers.length; i++) {
+			workers[i].setLocalValue(idx, val);
+		}
+	}
+
+	public final Value getValue(int i, int idx) {
+		return workers[i].getLocalValue(idx);
+	}
+
     /**
      * Debugging support
      * @param message

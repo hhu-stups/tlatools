@@ -65,23 +65,31 @@ public class DiskGraph extends AbstractDiskGraph {
 	}
 	
 	/* (non-Javadoc)
-	 * @see tlc2.tool.liveness.DiskGraph#putNode(tlc2.tool.liveness.GraphNode, long)
+	 * @see tlc2.tool.liveness.AbstractDiskGraph#putNode(tlc2.tool.liveness.GraphNode, long)
 	 */
 	protected void putNode(GraphNode node, long ptr) {
 		this.nodePtrTbl.put(node.stateFP, ptr);
 	}
 
 	/* (non-Javadoc)
-	 * @see tlc2.tool.liveness.DiskGraph#getLink(long, int)
+	 * @see tlc2.tool.liveness.AbstractDiskGraph#checkDuplicate(tlc2.tool.liveness.GraphNode)
+	 */
+	protected boolean checkDuplicate(final GraphNode node) {
+		return this.nodePtrTbl.get(node.stateFP) != -1;
+	}
+
+	/* (non-Javadoc)
+	 * @see tlc2.tool.liveness.AbstractDiskGraph#getLink(long, int)
 	 */
 	public long getLink(long state, int tidx) {
 		return this.nodePtrTbl.get(state);
 	}
 
 	/* (non-Javadoc)
-	 * @see tlc2.tool.liveness.DiskGraph#putLink(long, int, long)
+	 * @see tlc2.tool.liveness.AbstractDiskGraph#putLink(long, int, long)
 	 */
 	public long putLink(long state, int tidx, long link) {
+		assert MAX_PTR <= link && link < MAX_LINK; 
 		int loc = this.nodePtrTbl.getLoc(state);
 		long oldLink = this.nodePtrTbl.getByLoc(loc);
 		if (!isFilePointer(oldLink)) {
@@ -105,9 +113,7 @@ public class DiskGraph extends AbstractDiskGraph {
 		this.nodePtrRAF.seek(0);
 		while (this.nodePtrRAF.getFilePointer() < ptr) {
 			long fp = this.nodePtrRAF.readLong();
-			// SZ Jul 13, 2009: removed to kill the warning
-			// SZ Feb 20, 2009: variable never read locally
-			// int tidx =
+			// skip the tableau idx that is not used by DiskGraph.
 			this.nodePtrRAF.readInt();
 			long loc = this.nodePtrRAF.readLongNat();
 			this.nodePtrTbl.put(fp, loc);
@@ -168,9 +174,9 @@ public class DiskGraph extends AbstractDiskGraph {
 	}
 
 	/* (non-Javadoc)
-	 * @see tlc2.tool.liveness.DiskGraph#toDotViz()
+	 * @see tlc2.tool.liveness.AbstractDiskGraph#toDotViz(int, int)
 	 */
-	public final String toDotViz() {
+	public final String toDotViz(final int slen, final int alen) {
 
 		// The following code relies on gnodes not being null, thus safeguard
 		// against accidental invocations.
@@ -195,7 +201,7 @@ public class DiskGraph extends AbstractDiskGraph {
 				int tidx = nodePtrRAF.readInt();
 				long loc = nodePtrRAF.readLongNat();
 				GraphNode gnode = this.getNode(fp, tidx, loc);
-				sb.append(gnode.toDotViz(isInitState(gnode), false));
+				sb.append(gnode.toDotViz(isInitState(gnode), false, slen, alen));
 			}
 			sb.append("}");
 			this.nodeRAF.seek(nodePtr);

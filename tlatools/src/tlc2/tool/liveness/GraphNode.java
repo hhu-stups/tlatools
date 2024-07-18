@@ -6,11 +6,19 @@
 package tlc2.tool.liveness;
 
 import java.io.IOException;
+import java.util.HashSet;
+import java.util.Set;
 
 import tlc2.util.BitVector;
 import tlc2.util.BufferedRandomAccessFile;
 
 public class GraphNode extends AbstractGraphNode {
+	/**
+	 * The record size indicates the number of integers used by each transition
+	 * in the array of nnodes (2x32bit to keep the fp and 32bit to keep the tableau
+	 * idx).
+	 */
+	private static final int NNODE_RECORD_SIZE = 3;
 	/**
 	 * GraphNode is a node in the behaviour graph. We're going to only store
 	 * fingerprints of states, rather than actual states. So, as we encounter
@@ -77,34 +85,36 @@ public class GraphNode extends AbstractGraphNode {
 	}
 
 	public final long getStateFP(int i) {
-		long high = this.nnodes[3 * i];
-		long low = this.nnodes[3 * i + 1];
+		long high = this.nnodes[NNODE_RECORD_SIZE * i];
+		long low = this.nnodes[NNODE_RECORD_SIZE * i + 1];
 		return (high << 32) | (low & 0xFFFFFFFFL);
 	}
 
 	public final int getTidx(int i) {
-		return this.nnodes[3 * i + 2];
+		return this.nnodes[NNODE_RECORD_SIZE * i + 2];
 	}
 
 	public final int succSize() {
-		// offset being != -1 indicates that the nnodes array has been
+		// offset being != NO_FREE_SLOTS indicates that the nnodes array has been
 		// overallocated in preparation to batch-insert transitions but the
 		// transitions have not been added yet. In this case the nnodes.length /
-		// 3 is *not* the actual number of transitions, offset / 3 is!
-		if (this.offset != -1) {
-			return this.offset / 3;
+		// NNODE_RECORD_SIZE is *not* the actual number of transitions, offset / NNODE_RECORD_SIZE is!
+		if (this.offset != NO_FREE_SLOTS) {
+			return this.offset / NNODE_RECORD_SIZE;
 		}
-		return this.nnodes.length / 3;
+		return this.nnodes.length / NNODE_RECORD_SIZE;
 	}
 
 	/**
 	 * Points to the first available slot in {@link GraphNode#nnodes} iff free
-	 * slots are available. "-1" indicates no free slots are available.
+	 * slots are available. "NO_FREE_SLOTS" indicates no free slots are available.
 	 * 
 	 * @see GraphNode#allocate(int)
 	 */
-	private int offset = -1;
+	private int offset = NO_FREE_SLOTS;
 
+	private static final int NO_FREE_SLOTS = -1;
+	
 	/**
 	 * Allocates memory for subsequent
 	 * {@link GraphNode#addTransition(long, int, int, int, boolean[])} calls.
@@ -135,7 +145,7 @@ public class GraphNode extends AbstractGraphNode {
 	 */
 	private final void allocate(final int transitions) {
 		final int len = this.nnodes.length;
-		int[] newNodes = new int[len + (3 * transitions)];
+		int[] newNodes = new int[len + (NNODE_RECORD_SIZE * transitions)];
 		System.arraycopy(this.nnodes, 0, newNodes, 0, len);
 		this.nnodes = newNodes;
 
@@ -188,7 +198,7 @@ public class GraphNode extends AbstractGraphNode {
 				}
 			}
 		}
-		if (this.offset == -1) {
+		if (this.offset == NO_FREE_SLOTS) {
 			// Have to create a new slot regardless of 0 or negative hint, thus
 			// Math.max...
 			this.allocate(Math.max(allocationHint, 1));
@@ -196,9 +206,9 @@ public class GraphNode extends AbstractGraphNode {
 		this.nnodes[this.offset] = (int) (fp >>> 32);
 		this.nnodes[this.offset + 1] = (int) (fp & 0xFFFFFFFFL);
 		this.nnodes[this.offset + 2] = tidx;
-		this.offset = this.offset + 3;
+		this.offset = this.offset + NNODE_RECORD_SIZE;
 		if (this.offset == this.nnodes.length) {
-			this.offset = -1;
+			this.offset = NO_FREE_SLOTS;
 		}
 	}
 
@@ -213,14 +223,14 @@ public class GraphNode extends AbstractGraphNode {
 	 */
 	public int realign() {
 		int result = 0;
-		// It is a noop iff offset == -1
-		if (this.offset != -1) {
-			result = (this.nnodes.length - this.offset) / 3;
+		// It is a noop iff offset == NO_FREE_SLOTS
+		if (this.offset != NO_FREE_SLOTS) {
+			result = (this.nnodes.length - this.offset) / NNODE_RECORD_SIZE;
 			// shrink newNodes to correct size
 			int[] newNodes = new int[this.offset];
 			System.arraycopy(this.nnodes, 0, newNodes, 0, newNodes.length);
 			this.nnodes = newNodes;
-			this.offset = -1;
+			this.offset = NO_FREE_SLOTS;
 		}
 		return result;
 	}
@@ -240,19 +250,84 @@ public class GraphNode extends AbstractGraphNode {
 		// been
 		// reached. The free slot detection work with the allocation offset that
 		// points to the end of the filled slots (slots are filled in ascending
-		// order). If offset is marked invalid ("-1"), the nnodes buffer is
+		// order). If offset is marked invalid ("NO_FREE_SLOTS"), the nnodes buffer is
 		// completely occupied and has to be searched to the end.
-		if (this.offset != -1) {
+		if (this.offset != NO_FREE_SLOTS) {
 			len = offset;
 		}
 		int high = (int) (fp >>> 32);
 		int low = (int) (fp & 0xFFFFFFFFL);
-		for (int i = 0; i < len; i += 3) {
+		for (int i = 0; i < len; i += NNODE_RECORD_SIZE) {
 			if (this.nnodes[i] == high && this.nnodes[i + 1] == low && this.nnodes[i + 2] == tidx) {
 				return true;
 			}
 		}
 		return false;
+	}
+
+	public boolean checkInvariants(final int slen, final int alen) {
+		final Set<Transition> transitions = new HashSet<Transition>();
+		for (int i = 0; i < succSize(); i++) {
+			final Transition t = new Transition(getStateFP(i), getTidx(i), getCheckAction(slen, alen, i));
+			transitions.add(t);
+		}
+		return transitions.size() == succSize();
+	}
+	
+	public Set<Transition> getTransition() {
+		final Set<Transition> transitions = new HashSet<Transition>();
+		for (int i = 0; i < succSize(); i++) {
+			transitions.add(new Transition(getStateFP(i), getTidx(i), new BitVector(0)));
+		}
+		return transitions;
+	}
+	
+	public static class Transition {
+
+		private final long fp;
+		private final int tidx;
+		private final BitVector bv;
+
+		public Transition(long fp, int tidx, BitVector bv) {
+			this.fp = fp;
+			this.tidx = tidx;
+			this.bv = bv;
+		}
+
+		/* (non-Javadoc)
+		 * @see java.lang.Object#hashCode()
+		 */
+		public int hashCode() {
+			final int prime = 31;
+			int result = 1;
+			result = prime * result + ((bv == null) ? 0 : bv.hashCode());
+			result = prime * result + (int) (fp ^ (fp >>> 32));
+			result = prime * result + tidx;
+			return result;
+		}
+
+		/* (non-Javadoc)
+		 * @see java.lang.Object#equals(java.lang.Object)
+		 */
+		public boolean equals(Object obj) {
+			if (this == obj)
+				return true;
+			if (obj == null)
+				return false;
+			if (getClass() != obj.getClass())
+				return false;
+			Transition other = (Transition) obj;
+			if (bv == null) {
+				if (other.bv != null)
+					return false;
+			} else if (!bv.equals(other.bv))
+				return false;
+			if (fp != other.fp)
+				return false;
+			if (tidx != other.tidx)
+				return false;
+			return true;
+		}
 	}
 
 	/* Return the tableau graph node used by this. */
@@ -268,6 +343,7 @@ public class GraphNode extends AbstractGraphNode {
 	 * @throws IOException
 	 */
 	void write(final BufferedRandomAccessFile nodeRAF) throws IOException {
+		assert offset == NO_FREE_SLOTS; // assert that nnodes hasn't been overallocated.
 		// Write nnodes
 		final int cnt = nnodes.length;
 		nodeRAF.writeNat(cnt);
@@ -288,50 +364,64 @@ public class GraphNode extends AbstractGraphNode {
 		// Read checks
 		checks = new BitVector();
 		checks.read(nodeRAF);
+		
+		assert offset == NO_FREE_SLOTS;
 	}
 
 	public final String toString() {
 		StringBuffer buf = new StringBuffer();
 		buf.append("<" + this.stateFP + "," + this.tindex + "> --> ");
-		int size = this.nnodes.length;
-		if (size != 0) {
-			long high = this.nnodes[0];
-			long low = this.nnodes[1];
-			long fp = (high << 32) | (low & 0xFFFFFFFFL);
-			buf.append("<" + fp + "," + this.nnodes[2] + ">");
-		}
-		for (int i = 3; i < size; i += 3) {
+		for (int i = 0; i < succSize(); i++) {
+			buf.append("<" + getStateFP(i) + "," + getTidx(i) + ">");
 			buf.append(", ");
-			long high = this.nnodes[i];
-			long low = this.nnodes[i + 1];
-			long fp = (high << 32) | (low & 0xFFFFFFFFL);
-			buf.append("<" + fp + "," + this.nnodes[i + 2] + ">");
 		}
-		return buf.toString();
+		return buf.substring(0, buf.length() - ", ".length()); // chop off dangling ", "
 	}
 
-	public String toDotViz(final boolean isInitState, final boolean hasTableau) {
-		String id = (""+this.stateFP).substring(0,3);
+	public String toDotViz(final boolean isInitState, final boolean hasTableau, final int slen, final int alen) {
+		// The node's id including its tidx if any
+		String id = Long.toString(this.stateFP);
+		if (id.length() >=6) {
+			id = id.substring(0, 6);
+		}
 		if (hasTableau) {
 			id += "." + this.tindex;
 		}
 		
+		// marker if it is an init state
 		final StringBuffer buf = new StringBuffer();
 		if (isInitState) {
-			buf.append(id + " [style = filled]\n"); // node's label
+			buf.append("\"" + id + "\" [style = filled]\n"); // node's label
 		}
-		int size = this.nnodes.length;
-		for (int i = 0; i < size; i += 3) {
-			buf.append(id + " -> ");
-			long high = this.nnodes[i];
-			long low = this.nnodes[i + 1];
-			long fp = (high << 32) | (low & 0xFFFFFFFFL);
+		
+		// Each outgoing transition
+		for (int i = 0; i < succSize(); i++) {
+			String fp = Long.toString(getStateFP(i));
+			if (fp.length() >= 6) {
+				fp = fp.substring(0, 6);
+			}
+//			if (fp == this.stateFP) {
+//				// skip self loops if edge count to large for dotViz to handle.
+//				continue;
+//			}
+			buf.append("\"" + id + "\" -> ");
 			if (hasTableau) {
-				buf.append(("" + fp).substring(0, 3) + "." + this.nnodes[i + 2]);
+				final int tidx = getTidx(i);
+				buf.append(("\"" + fp) + "." + tidx + "\"");
 			} else {
 				//Omit tableau index when it's -1 (indicating no tableau)
-				buf.append(("" + fp).substring(0, 3));
+				buf.append(("\"" + fp) + "\"");
 			}
+			
+			buf.append(" [label=\"");
+			for (int j = 0; j < alen; j++) {
+				if (getCheckAction(slen, alen, i, j)) {
+					buf.append("t");
+				} else {
+					buf.append("f");
+				}
+			}
+			buf.append("\"];");
 			buf.append("\n");
 		}
 		return buf.toString();

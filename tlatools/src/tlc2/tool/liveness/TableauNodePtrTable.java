@@ -26,8 +26,62 @@
 
 package tlc2.tool.liveness;
 
+/**
+ * {@link TableauNodePtrTable} (and its sibling {@link NodePtrTable} for
+ * tableau-less liveness checking) is a - highly optimized - set of all nodes in
+ * the behavior graph {@link TableauDiskGraph}.
+ * <p>
+ * Each node in the behavior graph consists of the pair <<state, tidx>> (where
+ * state is a state's fingerprint) and auxiliary information. The auxiliary
+ * information is:
+ * <ul>
+ * <li>An offset into the second set (@see {@link AbstractDiskGraph#nodeRAF})
+ * which represents the arcs between the nodes (logically outgoing transitions).
+ * Technically this is a pointer location into the second disk file of
+ * {@link TableauDiskGraph}.</li>
+ * <li>The node's link number during Tarjan's SCC search.</li>
+ * <li>A flag if the node is done or not (see {@link TableauNodePtrTable#UNDONE}
+ * below).</li>
+ * <li>A flag that marks a node an initial node.</li>
+ * <li>A flag if the node has been seen before during error trace re-creation
+ * (see {@link LiveWorker#printTrace}.</li>
+ * </ul>
+ * <p>
+ * The last item indicates that this class is used in two scenarios. It's
+ * primary purpose is to be the backing store of the liveness/behavior disc
+ * graph. Additionally though, LiveWorker#printTrace independently instantiates
+ * a new {@link TableauNodePtrTable} to do its work.
+ * <p>
+ * To minimize {@link TableauNodePtrTable}'s space/memory requirements, the
+ * auxiliary information replace each other depending on the phase of liveness
+ * checking.<br>
+ * During model checking (safety checking) the auxiliary information is set to a
+ * pointer location (long) pointing into the arcs set and the high bits of the
+ * long are used to mark nodes as done or undone.<br>
+ * As soon as the SCC search starts, the pointer location is replaced by the SCC
+ * link number.<br>
+ * Once a liveness violation has been detected, the seen flag is set during the
+ * error trace path reconstruction.
+ * <p>
+ * Internally {@link TableauNodePtrTable} hashes the node's fingerprint to a
+ * bucket address. In case of hash collision, open addressing is used.
+ */
 public class TableauNodePtrTable {
 
+	/**
+	 * A node is marked UNDONE if it is:
+	 * <ul>
+	 * <li>An initial node <b>s0</b> and not yet visited again by
+	 * LiveChecker#addNextState(<b>s0</b>)</li>
+	 * <li>A previously unseen successor node <b>t</b> of a node <b>s</b> that
+	 * is added as an outgoing transition of <b>s</b> when <b>s</b> is being
+	 * added via LiveChecker#addNextState(<b>s</b> )</li>
+	 * </ul>
+	 * <p>
+	 * It logically markers the successor node <b>t</b> to be incomplete which
+	 * can only happen during liveness checking of a <b>partial</b> liveness
+	 * graph.
+	 */
 	public static final long UNDONE = 0xFFFFFFFE00000000L;
 	
 	private int count;
@@ -102,10 +156,10 @@ public class TableauNodePtrTable {
 				int cloc = getIdx(node, tidx);
 				if (cloc == -1) {
 					// The list of nodes does not contain the give tableau idx
-					// yet, thus add a new element. Technically, it means we
+					// yet, thus append a new element. Technically, it means we
 					// grow the nodes array by three and insert the tableau idx
 					// and its element.
-					this.nodes[loc] = addElem(node, tidx, elem);
+					this.nodes[loc] = appendElem(node, tidx, elem);
 				} else {
 					// Nodes already contains an entry for the given tableau.
 					// Update its element. The element is either a pointer
@@ -200,6 +254,7 @@ public class TableauNodePtrTable {
 		return node[3] != -2;
 	}
 
+	// Called by addNextState
 	public final int setDone(long k) {
 		if (this.count >= this.thresh) {
 			this.grow();
@@ -235,12 +290,22 @@ public class TableauNodePtrTable {
 		}
 	}
 	
+	/**
+	 * Clears the seen flag of all records set by static setSeen(..) calls
+	 * earlier.
+	 * <p>
+	 * Post-Condition: None of the records is marked seen.
+	 * 
+	 * @see TableauNodePtrTable#setSeen(int[])
+	 * @see TableauNodePtrTable#setSeen(int[], int)
+	 */
 	public final void resetElems() {
+		// Only called when the error trace is being printed. 
 		for (int i = 0; i < this.nodes.length; i++) {
 			int[] node = this.nodes[i];
 			if (node != null) {
 				for (int j = 3; j < node.length; j += getElemLength()) {
-					node[j] &= 0x7FFFFFFF;
+					node[j] &= 0x7FFFFFFF; // Clear the MSB set by setSeen(..)
 				}
 			}
 		}
@@ -288,7 +353,7 @@ public class TableauNodePtrTable {
 		return node;
 	}
 
-	protected int[] addElem(int[] node, int tidx, long elem) {
+	protected int[] appendElem(int[] node, int tidx, long elem) {
 		int len = node.length;
 		int[] newNode = new int[len + getElemLength()];
 		System.arraycopy(node, 0, newNode, 0, len);
@@ -345,47 +410,80 @@ public class TableauNodePtrTable {
 		return node[loc];
 	}
 
+	/*
+	 * Helper methods used by LiveWorker#printTrace(..) only. Note that
+	 * printTrace does not use the TNPT instance of the DiskGraph but its own
+	 * instance only containing a single SCC.
+	 */
+	public static final int END_MARKER = -1;
+	
 	public static int startLoc(int[] node) {
-		return (node.length > 2) ? 2 : -1;
+		return (node.length > 2) ? 2 : END_MARKER;
 	}
 
 	public static int nextLoc(int[] node, int curLoc) {
 		int loc = curLoc + 3;
-		return (loc < node.length) ? loc : -1;
+		return (loc < node.length) ? loc : END_MARKER;
 	}
 
+	/**
+	 * @param nodes
+	 * @return True, iff the record at tloc has been marked seen.
+	 * @see TableauNodePtrTable#setSeen(int[], int)
+	 */
 	public static boolean isSeen(int[] nodes, int tloc) {
 		return getElem(nodes, tloc) < 0;
 	}
 
+	/**
+	 * Marks the record at tloc seen.
+	 * 
+	 * @param nodes
+	 * @see TableauNodePtrTable#setSeen(int[])
+	 * @see TableauNodePtrTable#resetElems()
+	 */
 	public static void setSeen(int[] nodes, int tloc) {
 		long ptr = getElem(nodes, tloc);
-		putElem(nodes, (ptr | 0x8000000000000000L), tloc);
+		putElem(nodes, (ptr | 0x8000000000000000L), tloc); // Set the MSB
 	}
 
 	public static long getPtr(long ptr) {
 		return (ptr & 0x7FFFFFFFFFFFFFFFL);
 	}
 
+	/**
+	 * @see TableauNodePtrTable#setSeen(int[])
+	 * @param nodes
+	 * @return True, iff the record has been marked seen.
+	 */
 	public static boolean isSeen(int[] nodes) {
 		return nodes[3] < 0;
 	}
 
+	/**
+	 * Marks this record seen.
+	 * 
+	 * @param nodes
+	 * @see TableauNodePtrTable#resetElems()
+	 */
 	public static void setSeen(int[] nodes) {
-		nodes[3] |= 0x80000000;
+		nodes[3] |= 0x80000000; // Set the MSB
 	}
 
+	public static final int NO_PARENT = -1;
+	
 	public static int getParent(int[] nodes) {
 		return nodes[4];
 	}
 
 	public static void setParent(int[] nodes, int loc) {
+		assert loc >= NO_PARENT && loc <= AbstractDiskGraph.MAX_PTR;
 		nodes[4] = loc;
 	}
 
   	/*
 	 * The detailed formatter below can be activated in Eclipse's variable view
-	 * by choosing "New detailed formatter" from the MemIntQueue context menu.
+	 * by choosing "New detailed formatter" from the nodePtrTable's context menu.
 	 * Insert "TableauNodePtrTable.DetailedFormatter.toString(this);".
 	 */
   	public static class DetailedFormatter {
@@ -402,8 +500,11 @@ public class TableauNodePtrTable {
   					buf.append(" isDone: " + (node.length == 2 || (node.length > 2 && node[3] != -2)));
   					buf.append("\n");
   					
-  					// A node maintains n records. Each record logically contains information about a node's successor.
-  					// fingerprint
+					// A node maintains n records. Each record logically
+					// contains information - combined with the fingerprint -
+					// about the full tuple <<fp, tidx, loc>>.
+  					// Depending on the state of the record, the loc might
+  					// also be overwritten by the SCC link number. 
   					int j = 2;
   					for (; j < node.length - 1; j+=table.getElemLength()) { // don't miss the ptr at the end
   						buf.append("\t");
@@ -413,7 +514,11 @@ public class TableauNodePtrTable {
   						// element
   						final long elem = getElem(node, j);
   						if (AbstractDiskGraph.isFilePointer(elem)) {
-  							buf.append("  ptr: " + elem);
+  							if (table.isDone(fp)) {
+  								buf.append("  ptr: " + elem);
+  							} else {
+  								buf.append("  ptr: undone");
+  							}
   						} else if (AbstractDiskGraph.MAX_PTR == elem){
   							buf.append(" elem: Init State");
   						} else {

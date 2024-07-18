@@ -1,14 +1,41 @@
+/*******************************************************************************
+ * Copyright (c) 2015 Microsoft Research. All rights reserved. 
+ *
+ * The MIT License (MIT)
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy 
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+ * of the Software, and to permit persons to whom the Software is furnished to do
+ * so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software. 
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+ * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+ * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Contributors:
+ *   Dan Rickett - initial API and implementation
+ ******************************************************************************/
+
 package org.lamport.tla.toolbox.tool.tlc.traceexplorer;
 
-import java.util.List;
 import java.util.Vector;
 
-import org.eclipse.core.resources.IWorkspace;
-import org.eclipse.core.resources.IWorkspaceRunnable;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.resources.WorkspaceJob;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.NullProgressMonitor;
+import org.eclipse.core.runtime.Status;
+import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.debug.core.ILaunchConfiguration;
 import org.eclipse.debug.core.ILaunchConfigurationWorkingCopy;
 import org.eclipse.jface.dialogs.MessageDialog;
@@ -71,9 +98,6 @@ import org.lamport.tla.toolbox.util.UIHelper;
  * {@link TraceExplorerComposite#doExplore()} is called when the user clicks the explore button.
  * 
  * {@link TraceExplorerComposite#doRestore()} is called when the user clicks the explore button.
- * 
- * @author drickett
- *
  */
 public class TraceExplorerComposite
 {
@@ -331,7 +355,8 @@ public class TraceExplorerComposite
         // add a formula
         if (formula != null)
         {
-            Vector input = ((Vector) tableViewer.getInput());
+            @SuppressWarnings("unchecked")
+			Vector<Formula> input = ((Vector<Formula>) tableViewer.getInput());
             input.add(formula);
             tableViewer.setInput(input);
             if (tableViewer instanceof CheckboxTableViewer)
@@ -445,25 +470,27 @@ public class TraceExplorerComposite
 
             final ILaunchConfigurationWorkingCopy workingCopy = modelConfig.getWorkingCopy();
 
-            List trace = view.getTrace();
-
             // if the trace is empty, then do nothing
-            if (trace.size() > 0)
+            if (!view.getTrace().isTraceEmpty())
             {
                 // TraceExplorerHelper.serializeTrace(modelConfig);
             	
-            	// Wrap the launch in a WorkspaceRunnable to guarantee that the
+            	// Wrap the launch in a WorkspaceJob to guarantee that the
             	// operation is executed atomically from the workspace perspective.
-            	// If the runnable would be omitted, the launch can become interleaved with
+            	// If the job and rule would be omitted, the launch can become interleaved with
             	// workspace (autobuild) jobs triggered by IResourceChange events.
             	// The Toolbox's IResourceChangeListeners reacting to resource change events
             	// run the SANY parser and SANY does not support concurrent execution.
-            	final IWorkspace workspace = ResourcesPlugin.getWorkspace();
-            	workspace.run(new IWorkspaceRunnable() {
-					public void run(IProgressMonitor monitor) throws CoreException {
+            	final Job job = new WorkspaceJob("Exploring the trace...") {
+					public IStatus runInWorkspace(IProgressMonitor monitor) throws CoreException {
 						workingCopy.doSave().launch(TraceExplorerDelegate.MODE_TRACE_EXPLORE, monitor, true);
+						return Status.OK_STATUS;
 					}
-				}, new NullProgressMonitor());
+				};
+				// Lock the entire workspace.
+				job.setRule(ResourcesPlugin.getWorkspace().getRoot());
+				job.setUser(true);
+				job.schedule();
             }
 
         } catch (CoreException e)
@@ -508,7 +535,7 @@ public class TraceExplorerComposite
         }
         if (buttonExplore != null)
         {
-            buttonExplore.setEnabled(view.getTrace() != null && view.getTrace().size() > 0
+            buttonExplore.setEnabled(view.getTrace() != null && !view.getTrace().isTraceEmpty()
                     && tableViewer.getCheckedElements().length > 0);
         }
     }

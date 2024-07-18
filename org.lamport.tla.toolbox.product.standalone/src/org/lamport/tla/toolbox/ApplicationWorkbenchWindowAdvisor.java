@@ -15,13 +15,9 @@ import org.eclipse.ui.application.IActionBarConfigurer;
 import org.eclipse.ui.application.IWorkbenchWindowConfigurer;
 import org.eclipse.ui.application.WorkbenchWindowAdvisor;
 import org.eclipse.ui.internal.ide.EditorAreaDropAdapter;
-import org.lamport.tla.toolbox.ui.navigator.ToolboxExplorer;
-import org.lamport.tla.toolbox.ui.view.ProblemView;
 
 /**
  * Configuration of the main window
- * @version $Id$
- * @author zambrovski
  */
 public class ApplicationWorkbenchWindowAdvisor extends WorkbenchWindowAdvisor
 {
@@ -61,6 +57,11 @@ public class ApplicationWorkbenchWindowAdvisor extends WorkbenchWindowAdvisor
 		// @see http://bugzilla.tlaplus.net/show_bug.cgi?id=191
 		final List filters = new ArrayList();
 		filters.add("org.eclipse.compare");
+		// The following three preferences are shown because the Toolbox uses
+		// the local history feature provided by o.e.team.ui
+		filters.add("org.eclipse.team.ui");
+		filters.add("org.eclipse.ui.trace");
+		filters.add("org.eclipse.jsch.ui");
 
 		// Clean the preferences
 		final List elements = preferenceManager.getElements(PreferenceManager.POST_ORDER);
@@ -82,14 +83,11 @@ public class ApplicationWorkbenchWindowAdvisor extends WorkbenchWindowAdvisor
 				}
 			}
 		}
+		super.postWindowOpen();
 		
 		// At this point in time we can be certain that the UI is fully
 		// instantiated (views, editors, menus...). Thus, register
 		// listeners that connect the UI to the workspace resources.
-		ProblemView.ResourceListener.init();
-		ToolboxExplorer.ResourceListener.init();
-		
-		super.postWindowOpen();
+		ToolboxLifecycleParticipantManger.postWorkbenchWindowOpen();
 	}
-	
 }

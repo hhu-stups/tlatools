@@ -26,14 +26,14 @@
 
 package tlc2.tool.liveness.simulation;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+
 import java.io.IOException;
-import java.util.Enumeration;
 
 import org.easymock.EasyMock;
-
-import junit.framework.TestCase;
+import org.junit.Test;
 import tlc2.tool.Action;
-import tlc2.tool.StateVec;
 import tlc2.tool.TLCState;
 import tlc2.tool.Tool;
 import tlc2.tool.liveness.AbstractDiskGraph;
@@ -44,10 +44,10 @@ import tlc2.tool.liveness.OrderOfSolution;
 import tlc2.tool.liveness.TBGraph;
 import tlc2.tool.liveness.TBGraphNode;
 import tlc2.tool.queue.DummyTLCState;
-import tlc2.util.LongVec;
+import tlc2.util.SetOfStates;
 import tlc2.util.statistics.DummyBucketStatistics;
 
-public class LiveCheckTest extends TestCase {
+public class LiveCheckTest {
 
 	// Add identical state twice, which can happen in simulation mode when the
 	// trace is: <<100L, 200L, ..., 100L, 200L>> (as in a cycle that is
@@ -56,10 +56,12 @@ public class LiveCheckTest extends TestCase {
 	// change.
 	// Note that adding/updating the state would result in a larger
 	// on-disk file, but doesn't seem to invalidate the simulation validity.
+	@Test
 	public void testAddIdenticalNodeTwiceNoTableau() throws IOException {
 		addIdenticalNodeTwice(false, -1);
 	}
 
+	@Test
 	public void testAddIdenticalNodeTwiceWithTableau() throws IOException {
 		addIdenticalNodeTwice(true, 0);
 	}
@@ -79,20 +81,17 @@ public class LiveCheckTest extends TestCase {
 		final TLCState state = new DummyTLCState();
 		liveCheck.addInitState(state, 100L);
 
-		final StateVec stateVec = new StateVec(1);
-		stateVec.addElement(new DummyTLCState());
-
-		final LongVec longVec = new LongVec(1);
-		longVec.addElement(200L);
+		final SetOfStates setOfStates = new SetOfStates(1);
+		setOfStates.put(200L, new DummyTLCState(200L));
 		
 		// Add state 100L the first time, then add its successor
-		liveCheck.addNextState(state, 100L, stateVec, longVec);
-		liveCheck.addNextState(state, 200L, stateVec, longVec);
+		liveCheck.addNextState(state, 100L, setOfStates);
+		liveCheck.addNextState(state, 200L, setOfStates);
 		assertEquals(0, diskGraph.getPtr(100L, tableauId));
 
 		// Add state 100L again and check that it does *not* 
 		// end up in disk graph.
-		liveCheck.addNextState(state, 100L, stateVec, longVec);
+		liveCheck.addNextState(state, 100L, setOfStates);
 		assertEquals(0, diskGraph.getPtr(100L, tableauId));
 	}
 
@@ -109,29 +108,19 @@ public class LiveCheckTest extends TestCase {
 		return new LiveCheck(EasyMock.createNiceMock(Tool.class), new Action[0],
 				new OrderOfSolution[] { oos }, System.getProperty("java.io.tmpdir"), new DummyBucketStatistics());
 	}
-
+	
 	private ILiveCheck getLiveCheckWithTableau() throws IOException {
 		final TBGraphNode node = EasyMock.createMock(TBGraphNode.class);
 		EasyMock.expect(node.isConsistent((TLCState) EasyMock.anyObject(), (Tool) EasyMock.anyObject())).andReturn(true)
 				.anyTimes();
 		EasyMock.expect(node.nextSize()).andReturn(1).anyTimes();
 		EasyMock.expect(node.nextAt(0)).andReturn(node).anyTimes();
+		EasyMock.expect(node.getIndex()).andReturn(0).anyTimes();
 		EasyMock.replay(node);
 		
-		final TBGraph tbGraph = EasyMock.createNiceMock(TBGraph.class);
-		EasyMock.expect(tbGraph.elements()).andReturn(new Enumeration<TBGraphNode>() {
-			boolean has = true;
-			public boolean hasMoreElements() {
-				return has;
-			}
-			public TBGraphNode nextElement() {
-				has = false;
-				return node;
-			}
-		}).anyTimes();
-		EasyMock.expect(tbGraph.getInitCnt()).andReturn(1).anyTimes();
-		EasyMock.expect(tbGraph.getNode(EasyMock.anyInt())).andReturn(node).anyTimes();
-		EasyMock.replay(tbGraph);
+		final TBGraph tbGraph = new TBGraph(null);
+		tbGraph.addElement(node);
+		tbGraph.setInitCnt(1);
 		
 		// Configure OOS mock to react to the subsequent invocation. This is a
 		// essentially the list of calls being made on OOS during

@@ -20,7 +20,7 @@ public class TBGraphNode {
 	 */
 	private final TBPar par; // particle
 	public final Vect nexts; // outlinks
-	public int index; // unique id for this node
+	private int index; // unique id for this node
 	private final LiveExprNode[] statePreds; // state predicates in the particle
 
 	public static TBGraphNode dummyNode = new TBGraphNode();
@@ -54,6 +54,14 @@ public class TBGraphNode {
 		}
 	}
 
+	public int getIndex() {
+		return index;
+	}
+
+	public void setIndex(final int i) {
+		this.index = i;
+	}
+
 	public final TBPar getPar() {
 		return this.par;
 	}
@@ -76,7 +84,12 @@ public class TBGraphNode {
 		return false;
 	}
 
-	/* Checks if this particle node is consistent with a state. */
+	/**
+	 * Checks if this particle node is consistent with the given
+	 * {@link TLCState}. In other words, it checks if {@link TLCState}'s truth
+	 * values according to all state predicates of the tableau node. The state
+	 * predicates are deduced from the particles during tableau construction.
+	 */
 	public boolean isConsistent(TLCState state, Tool tool) {
 		for (int j = 0; j < this.statePreds.length; j++) {
 			if (!this.statePreds[j].eval(tool, state, null)) {

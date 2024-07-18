@@ -25,9 +25,38 @@ import util.ToolIO;
 * <pre>
 * CLASS trans                                                              *
 *                                                                          *
-*  BUGS:                                                                   *
-*     Accepts if (...) {...} ; else {...}                                  *
-*     Generates code as if the ";" were not there.                         *
+*  BUGS:                                                                   *   
+*    - Interprets                                                          *
+*                                                                          *
+*         if (...) call f(...) ; return                                    *
+*                                                                          *        
+*      as if it were                                                       *
+*                                                                          *     
+*         if (...) {call f(...) ; return }                                 *
+*                                                                          *
+*      See 2 Dec 2015 Tlaplus Google group post by Jaak Ristioja           *
+*                                                                          *     
+*    - Accepts if (...) {...} ; else {...}                                 *
+*      Generates code as if the ";" were not there.                        *
+*      
+*    - When the body of a macro contains a statement with(v \in ...)
+*      and v is a macro parameter, the argument is not being substituted
+*      for v.
+*      
+*    - I came across a  "TLAExpr.renormalize() found anchor has moved to left"
+*      error, apparently caused by a substitution of an expression longer
+*      than the macro parameter it is instantiating in some weird case.
+*                                                                          *
+*  POSSIBLE FEATURE:                                                       *
+*     Adds the pc variable if a label has a + or - modifier.  It's         *
+*     not needed for a + modifier (and all the other conditions            *
+*     for eliminating pc hold).  The solution is not to try to handle      *
+*     this case, but to add a "strongly fair process" construct, since     *
+*     the pc can be eliminated only when there's just a single label.      *
+*     This would be easy to implement if + modifiers are ignored or        *
+*     cause an error and - modifiers mean no fairness.  Then "strongly     *
+*     fair" would act like "fair" except that + modifiers do nothing       *
+*     and an SF instead of a WF is produced.                               *
 * -----------------------------------------------------------------        *
 * History:                                                                 *
 *   Version 1.0: Original release.                                         *

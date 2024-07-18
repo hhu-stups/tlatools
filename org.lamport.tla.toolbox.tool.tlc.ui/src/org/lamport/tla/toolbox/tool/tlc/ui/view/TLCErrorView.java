@@ -1,9 +1,7 @@
 package org.lamport.tla.toolbox.tool.tlc.ui.view;
 
+import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Vector;
 import java.util.regex.Pattern;
@@ -20,18 +18,17 @@ import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.Document;
 import org.eclipse.jface.text.IDocument;
 import org.eclipse.jface.text.source.SourceViewer;
+import org.eclipse.jface.viewers.CellLabelProvider;
+import org.eclipse.jface.viewers.ColumnViewerToolTipSupport;
+import org.eclipse.jface.viewers.ILazyTreeContentProvider;
+import org.eclipse.jface.viewers.ISelection;
 import org.eclipse.jface.viewers.ISelectionChangedListener;
 import org.eclipse.jface.viewers.IStructuredSelection;
-import org.eclipse.jface.viewers.ITableColorProvider;
-import org.eclipse.jface.viewers.ITableFontProvider;
-import org.eclipse.jface.viewers.ITableLabelProvider;
-import org.eclipse.jface.viewers.ITreeContentProvider;
-import org.eclipse.jface.viewers.LabelProvider;
 import org.eclipse.jface.viewers.SelectionChangedEvent;
 import org.eclipse.jface.viewers.TreeViewer;
+import org.eclipse.jface.viewers.TreeViewerColumn;
 import org.eclipse.jface.viewers.Viewer;
-import org.eclipse.jface.viewers.ViewerFilter;
-import org.eclipse.jface.viewers.ViewerSorter;
+import org.eclipse.jface.viewers.ViewerCell;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.SashForm;
 import org.eclipse.swt.custom.StyledText;
@@ -62,10 +59,12 @@ import org.eclipse.ui.forms.widgets.Section;
 import org.eclipse.ui.part.ViewPart;
 import org.lamport.tla.toolbox.Activator;
 import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationConstants;
+import org.lamport.tla.toolbox.tool.tlc.model.Formula;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCError;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCFcnElementVariableValue;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCFunctionVariableValue;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCModelLaunchDataProvider;
+import org.lamport.tla.toolbox.tool.tlc.output.data.TLCMultiVariableValue;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCNamedVariableValue;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCRecordVariableValue;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCSequenceVariableValue;
@@ -79,6 +78,7 @@ import org.lamport.tla.toolbox.tool.tlc.traceexplorer.TraceExplorerComposite;
 import org.lamport.tla.toolbox.tool.tlc.ui.TLCUIActivator;
 import org.lamport.tla.toolbox.tool.tlc.ui.preference.ITLCPreferenceConstants;
 import org.lamport.tla.toolbox.tool.tlc.ui.util.ActionClickListener;
+import org.lamport.tla.toolbox.tool.tlc.ui.util.ActionClickListener.LoaderTLCState;
 import org.lamport.tla.toolbox.tool.tlc.ui.util.FormHelper;
 import org.lamport.tla.toolbox.tool.tlc.ui.util.TLCUIHelper;
 import org.lamport.tla.toolbox.tool.tlc.util.ModelHelper;
@@ -93,17 +93,14 @@ import tlc2.output.MP;
  * explorer. This is the view of the error description.
  * 
  * @author Simon Zambrovski
- * @version $Id$
  */
-
 public class TLCErrorView extends ViewPart
 {
+	
 	private static final String INNER_WEIGHTS_KEY = "INNER_WEIGHTS_KEY";
 	private static final String OUTER_WEIGHTS_KEY = "OUTER_WEIGHTS_KEY";
 
 	public static final String ID = "toolbox.tool.tlc.view.TLCErrorView";
-
-    private static final String TOOLTIP = "Click on a row to see in viewer, double-click to go to action in spec.";
 
     /**
      * This is the pattern of an error message resulting from evaluating the constant
@@ -122,6 +119,8 @@ public class TLCErrorView extends ViewPart
     {
         return new Document("Select line in Error Trace to show its value here.");
     }
+    
+    private int numberOfStatesToShow;
 
     private FormToolkit toolkit;
     private Form form;
@@ -139,13 +138,18 @@ public class TLCErrorView extends ViewPart
     // listener on changes to the tlc output font preference
     private FontPreferenceChangeListener fontChangeListener;
 
+	public TLCErrorView() {
+		numberOfStatesToShow = TLCUIActivator.getDefault().getPreferenceStore()
+				.getInt(ITLCPreferenceConstants.I_TLC_TRACE_MAX_SHOW_ERRORS);
+	}
+    
     /**
      * Clears the view
      */
     public void clear()
     {
         errorViewer.setDocument(EMPTY_DOCUMENT());
-        setTraceInput(Collections.EMPTY_LIST);
+        setTraceInput(new TLCError());
         traceExplorerComposite.getTableViewer().setInput(new Vector<TLCState>());
         traceExplorerComposite.changeExploreEnablement(false);
         valueViewer.setInput(EMPTY_DOCUMENT());
@@ -161,33 +165,25 @@ public class TLCErrorView extends ViewPart
      * @param problems
      *            a list of {@link TLCError} objects representing the errors.
      */
-    protected void fill(String modelName, List<TLCError> problems)
+    protected void fill(String modelName, List<TLCError> problems, final List<String> serializedInput)
     {
-
-        try
-        {
-            /*
-             * Fill the trace explorer expression table 
-             * with expressions saved in the config.
-             * 
-             * Setting the input of the trace explorer composite
-             * table viewer to an empty vector is done to avoid adding duplicates.
-             * 
-             * FormHelper.setSerializedInput adds the elements from the config
-             * to the table viewer.
-             */
-            traceExplorerComposite.getTableViewer().setInput(new Vector());
-            FormHelper.setSerializedInput(traceExplorerComposite.getTableViewer(), configFileHandle.getAttribute(
-                    IModelConfigurationConstants.TRACE_EXPLORE_EXPRESSIONS, new Vector()));
-        } catch (CoreException e)
-        {
-            TLCUIActivator.getDefault().logError("Error loading trace explorer expressions into table", e);
-        }
+        /*
+		 * Fill the trace explorer expression table with expressions saved in
+		 * the config.
+         * 
+		 * Setting the input of the trace explorer composite table viewer to an
+		 * empty vector is done to avoid adding duplicates.
+         * 
+		 * FormHelper.setSerializedInput adds the elements from the config to
+		 * the table viewer.
+         */
+		traceExplorerComposite.getTableViewer().setInput(new Vector<Formula>());
+		FormHelper.setSerializedInput(traceExplorerComposite.getTableViewer(), serializedInput);
 
         // if there are errors
+		TLCError trace = null;
         if (problems != null && !problems.isEmpty())
         {
-            List<TLCState> states = null;
             StringBuffer buffer = new StringBuffer();
             // iterate over the errors
             for (int i = 0; i < problems.size(); i++)
@@ -199,31 +195,13 @@ public class TLCErrorView extends ViewPart
                 // read out the trace if any
                 if (error.hasTrace())
                 {
-                    Assert.isTrue(states == null, "Two traces are provided. Unexpected. This is a bug");
-                    states = error.getStates();
+                    Assert.isTrue(trace == null, "Two traces are provided. Unexpected. This is a bug");
+                    trace = error;
+                    }
                 }
-            }
-            if (states == null)
+            if (trace == null)
             {
-                states = new LinkedList<TLCState>();
-            }
-
-            /*
-             * determine if trace has changed. this is important for really long
-             * traces because resetting the trace input locks up the toolbox for a few
-             * seconds in these cases, so it is important to not reset the trace
-             * if it is not necessary
-             */
-            List<TLCState> oldStates = (List<TLCState>) variableViewer.getInput();
-            boolean isNewTrace = states != null && oldStates != null && !(states == oldStates);
-
-            /*
-             * Set the data structures that cause highlighting of changes in the
-             * error trace.
-             */
-            if (isNewTrace)
-            {
-                setDiffInfo(states);
+            	trace = new TLCError();
             }
 
             IDocument document = errorViewer.getDocument();
@@ -236,17 +214,20 @@ public class TLCErrorView extends ViewPart
                 TLCUIActivator.getDefault().logError("Error reporting the error " + buffer.toString(), e);
             }
 
+            /*
+             * determine if trace has changed. this is important for really long
+             * traces because resetting the trace input locks up the toolbox for a few
+             * seconds in these cases, so it is important to not reset the trace
+             * if it is not necessary
+             */
+            TLCError oldTrace = (TLCError) variableViewer.getInput();
+            boolean isNewTrace = trace != null && oldTrace != null && !(trace == oldTrace);
             // update the trace information
             if (isNewTrace)
             {
-                this.setTraceInput(states);
+                this.setTraceInput(trace);
                 traceExplorerComposite.changeExploreEnablement(true);
             }
-            if (states != null && !states.isEmpty())
-            {
-                variableViewer.expandToLevel(2);
-            }
-
             this.form.setText(modelName);
 
         } else
@@ -426,29 +407,52 @@ public class TLCErrorView extends ViewPart
         // gd.grabExcessHorizontalSpace = true ;
 
         tree.setLayoutData(gd);
-        tree.setToolTipText(TOOLTIP);
 
         // Initialize the trace display's resizer.
         TraceDisplayResizer resizer = new TraceDisplayResizer();
         resizer.comp = sashForm;
         resizer.tree = tree;
+        
+        tree.addControlListener(resizer);
 
-        final StateViewerSorter sorter = new StateViewerSorter();
+        variableViewer = new TreeViewer(tree);
+        final StateContentProvider provider = new StateContentProvider(variableViewer);
+        variableViewer.setUseHashlookup(true);
+		variableViewer.setContentProvider(provider);
+        ColumnViewerToolTipSupport.enableFor(variableViewer);
+        getSite().setSelectionProvider(variableViewer);
+
+        final StateLabelProvider labelProvider = new StateLabelProvider();
 		for (int i = 0; i < StateLabelProvider.COLUMN_TEXTS.length; i++) {
-			TreeColumn column = new TreeColumn(tree, SWT.LEFT);
-			column.setText(StateLabelProvider.COLUMN_TEXTS[i]);
-			column.setWidth(StateLabelProvider.COLUMN_WIDTH[i]);
-			resizer.column[i] = column; // set up the resizer.
-			column.setToolTipText(TOOLTIP);
-			column.addSelectionListener(new SelectionAdapter() {
-				public void widgetSelected(SelectionEvent e) {
-					sorter.reverseStateSortDirection();
-					variableViewer.refresh();
+			final TreeViewerColumn column = new TreeViewerColumn(variableViewer, i);
+			column.getColumn().setText(StateLabelProvider.COLUMN_TEXTS[i]);
+			column.getColumn().setWidth(StateLabelProvider.COLUMN_WIDTH[i]);
+			column.setLabelProvider(labelProvider);
+			resizer.column[i] = column.getColumn(); // set up the resizer.
+			column.getColumn().addSelectionListener(new SelectionAdapter() {
+				public void widgetSelected(final SelectionEvent e) {
+					// reverse the current trace
+					final TLCError error = (TLCError) variableViewer.getInput();
+					error.reverseTrace();
+					// Reset the viewer's selection to the empty selection. With empty
+					// selection, the subsequent refresh call does *not* invalidate the
+					// StateContentProvider's lazy policy.
+					// We know that the user clicked on the tree's column header
+					// and the real selection is of little importance.
+					variableViewer.setSelection(new ISelection() {
+						public boolean isEmpty() {
+							return true;
+						}
+					});
+					variableViewer.refresh(false);
+					
+					// remember the order for next trace shown
+					final IDialogSettings dialogSettings = Activator.getDefault().getDialogSettings();
+					dialogSettings.put(TLCModelLaunchDataProvider.STATESORTORDER,
+							!dialogSettings.getBoolean(TLCModelLaunchDataProvider.STATESORTORDER));
 				}
 			});
 		}
-        
-        tree.addControlListener(resizer);
 
         // I need to add a listener for size changes to column[0] to
         // detect when the user has tried to resize the individual columns.
@@ -458,14 +462,8 @@ public class TLCErrorView extends ViewPart
         // be?
         resizer.column[0].addListener(eventType, resizer);
 
-        variableViewer = new TreeViewer(tree);
-        variableViewer.setContentProvider(new StateContentProvider());
-        variableViewer.setFilters(new ViewerFilter[] { new StateFilter() });
-        variableViewer.setLabelProvider(new StateLabelProvider());
-		variableViewer.setSorter(sorter);
-        getSite().setSelectionProvider(variableViewer);
-
         variableViewer.getTree().addMouseListener(new ActionClickListener(variableViewer));
+        variableViewer.getTree().addKeyListener(new ActionClickListener(variableViewer));
 
         variableViewer.addSelectionChangedListener(new ISelectionChangedListener() {
 
@@ -663,16 +661,23 @@ public class TLCErrorView extends ViewPart
             {
                 return;
             }
+            updateErrorView(provider, config, openErrorView);
+        } catch (CoreException e)
+        {
+            TLCUIActivator.getDefault().logError("Error determining if trace explorer expressions should be shown", e);
+        }
+    }
+    
+	public static void updateErrorView(final TLCModelLaunchDataProvider provider, final ILaunchConfiguration config,
+			boolean openErrorView) {
+		try {
             TLCErrorView errorView;
-            if (provider.getErrors().size() > 0 && openErrorView == true)
-            {
+			if (provider.getErrors().size() > 0 && openErrorView == true) {
            		errorView = (TLCErrorView) UIHelper.openView(TLCErrorView.ID);
-            } else
-            {
+			} else {
                 errorView = (TLCErrorView) UIHelper.findView(TLCErrorView.ID);
             }
-            if (errorView != null)
-            {
+			if (errorView != null) {
                 /*
                  * We need a handle on the actual underlying configuration file handle
                  * in order to retrieve the expressions that should be put in the trace
@@ -680,24 +685,23 @@ public class TLCErrorView extends ViewPart
                  * all of the expressions that should appear. The filling of the trace
                  * explorer table occurs in the fill() method.
                  */
-                if (config.isWorkingCopy())
-                {
+				if (config.isWorkingCopy()) {
                     errorView.configFileHandle = ((ILaunchConfigurationWorkingCopy) config).getOriginal();
-                } else
-                {
+				} else {
                     errorView.configFileHandle = config;
                 }
 
+				final List<String> serializedInput = errorView.configFileHandle
+						.getAttribute(IModelConfigurationConstants.TRACE_EXPLORE_EXPRESSIONS, new Vector<String>());
                 // fill the name and the errors
-                errorView.fill(ModelHelper.getModelName(provider.getConfig().getFile()), provider.getErrors());
+				errorView.fill(ModelHelper.getModelName(provider.getConfig().getFile()), provider.getErrors(),
+						serializedInput);
 
-                if (provider.getErrors().size() == 0)
-                {
+				if (provider.getErrors().size() == 0) {
                     errorView.hide();
                 }
             }
-        } catch (CoreException e)
-        {
+		} catch (CoreException e) {
             TLCUIActivator.getDefault().logError("Error determining if trace explorer expressions should be shown", e);
         }
 
@@ -814,159 +818,162 @@ public class TLCErrorView extends ViewPart
     /**
      * Content provider for the tree table
      */
-    static class StateContentProvider implements ITreeContentProvider
-    // 
-    // evtl. for path-based addressing in the tree
-    // , ITreePathContentProvider
-    {
+    private class StateContentProvider implements ILazyTreeContentProvider {
+       	
+    	private final TreeViewer viewer;
+		private List<TLCState> states = new ArrayList<TLCState>(0);
 
-        public Object[] getChildren(Object parentElement)
-        {
-            if (parentElement instanceof List)
-            {
-                return (TLCState[]) ((List) parentElement).toArray(new TLCState[((List) parentElement).size()]);
-            } else if (parentElement instanceof TLCState)
-            {
-                TLCState state = (TLCState) parentElement;
-                if (!state.isStuttering() && !state.isBackToState())
-                {
-                    return state.getVariables();
+		public StateContentProvider(TreeViewer viewer) {
+			this.viewer = viewer;
+    	}
+
+		/* (non-Javadoc)
+		 * @see org.eclipse.jface.viewers.IContentProvider#dispose()
+		 */
+		public void dispose() {
+		}
+
+		/* (non-Javadoc)
+		 * @see org.eclipse.jface.viewers.IContentProvider#inputChanged(org.eclipse.jface.viewers.Viewer, java.lang.Object, java.lang.Object)
+		 */
+		public void inputChanged(Viewer viewer, Object oldInput, Object newInput) {
+			// Eagerly cache the list of states as it can be a sublist of the
+			// complete trace. Getting the sublist in the updateElement method
+			// means we obtain it over and over again for each top-level tree
+			// item.
+			if (newInput instanceof TLCError) {
+				this.states = ((TLCError) newInput).getStates();
+			} else if (newInput == null) {
+				this.states = new ArrayList<TLCState>(0);
+			} else {
+				throw new IllegalArgumentException();
+			}
+		}
+
+		/* (non-Javadoc)
+		 * @see org.eclipse.jface.viewers.ILazyTreeContentProvider#updateElement(java.lang.Object, int)
+		 */
+		public void updateElement(Object parent, int viewerIndex) {
+			if (parent instanceof TLCError) {
+				final TLCError error = (TLCError) parent;
+				if (error.isTraceRestricted() && viewerIndex == 0) {
+					// If only a subset of the trace is shown, show a dummy item
+					// at the top which can be double-clicked to load more.
+					viewer.replace(parent, viewerIndex, new ActionClickListener.LoaderTLCState(viewer,
+							Math.min(numberOfStatesToShow, error.getNumberOfRestrictedTraceStates()), error));
+					return;
+				}
+				// decrease index into states by one if the viewers first element is a dummy item
+				final int statesIndex = viewerIndex - (error.isTraceRestricted() ? 1 : 0);
+				final TLCState child = states.get(statesIndex);
+				// Diffing is supposed to be lazy and thus is done here when
+				// the state is first used by the viewer. The reason why it
+				// has to be lazy is to be able to efficiently handle traces
+				// with hundreds or thousands of states where it would be a
+				// waste to diff all state pairs even if the user is never
+				// going to look at all states anyway.
+				// TODO If ever comes up as a performance problem again, the
+				// nested TLCVariableValues could also be diffed lazily.
+           		if (statesIndex > 0) {
+           			final TLCState predecessor = states.get(statesIndex - 1);
+           			predecessor.diff(child);
+           		}
+				viewer.replace(parent, viewerIndex, child);
+				if (child.getVariablesAsList().size() > 0) {
+					viewer.setHasChildren(child, true);
+				}
+				// Lazily expand the children
+				viewer.expandToLevel(child, 1);
+			} else if (parent instanceof TLCState) {
+				final TLCState state = (TLCState) parent;
+                if ((state.isStuttering() || state.isBackToState())) {
+					viewer.setChildCount(state, 0);
+                } else {
+                	final List<TLCVariable> variablesAsList = state.getVariablesAsList();
+                	if (variablesAsList.size() > viewerIndex) {
+                		final TLCVariable child = variablesAsList.get(viewerIndex);
+                		viewer.replace(parent, viewerIndex, child);
+                		if (child.getChildCount() > 0) {
+                			viewer.setHasChildren(child, true);
+                		}
+                	}
                 }
-            } else if (parentElement instanceof TLCVariable)
-            {
-                TLCVariable variable = (TLCVariable) parentElement;
-                TLCVariableValue value = variable.getValue();
-                if (value instanceof TLCSetVariableValue)
-                {
-                    return ((TLCSetVariableValue) value).getElements();
-                } else if (value instanceof TLCSequenceVariableValue)
-                {
-                    return ((TLCSequenceVariableValue) value).getElements();
-                } else if (value instanceof TLCFunctionVariableValue)
-                {
-                    return ((TLCFunctionVariableValue) value).getFcnElements();
-                } else if (value instanceof TLCRecordVariableValue)
-                {
-                    return ((TLCRecordVariableValue) value).getPairs();
-                }
-                return null;
-            } else if (parentElement instanceof TLCVariableValue)
-            {
-                TLCVariableValue value = (TLCVariableValue) parentElement;
-                if (value instanceof TLCSetVariableValue)
-                {
-                    return ((TLCSetVariableValue) value).getElements();
-                } else if (value instanceof TLCSequenceVariableValue)
-                {
-                    return ((TLCSequenceVariableValue) value).getElements();
-                } else if (value instanceof TLCFunctionVariableValue)
-                {
-                    return ((TLCFunctionVariableValue) value).getFcnElements();
-                } else if (value instanceof TLCRecordVariableValue)
-                {
-                    return ((TLCRecordVariableValue) value).getPairs();
-                } else if (value instanceof TLCNamedVariableValue)
-                {
-                    return getChildren(((TLCNamedVariableValue) value).getValue());
-                } else if (value instanceof TLCFcnElementVariableValue)
-                {
-                    return getChildren(((TLCFcnElementVariableValue) value).getValue());
-                }
-                return null;
-            }
-            return null;
-        }
-
-        public Object getParent(Object element)
-        {
-            return null;
-        }
-
-        public boolean hasChildren(Object element)
-        {
-            if (element instanceof List)
-                return true;
-
-            return (getChildren(element) != null);
-        }
-
-        public Object[] getElements(Object inputElement)
-        {
-            return getChildren(inputElement);
-        }
-
-        public void dispose()
-        {
-        }
-
-        public void inputChanged(Viewer viewer, Object oldInput, Object newInput)
-        {
-        }
-    }
-
-    static class StateFilter extends ViewerFilter
-    {
-
-        public boolean select(Viewer viewer, Object parentElement, Object element)
-        {
-            return true;
-        }
-
-    }
-
-    static class StateViewerSorter extends ViewerSorter {
-    	
-    	private static final String STATESORTORDER = "STATESORTORDER";
-
-        /**
-         * Sort order in which states are sorted in the variable viewer
-         */
-		private boolean stateSortDirection;
-
-		private final IDialogSettings dialogSettings;
-
-		public StateViewerSorter() {
-			dialogSettings = Activator.getDefault().getDialogSettings();
-			stateSortDirection = dialogSettings.getBoolean(STATESORTORDER);
+			} else if (parent instanceof TLCVariable
+					&& ((TLCVariable) parent).getValue() instanceof TLCMultiVariableValue) {
+				final TLCMultiVariableValue multiValue = (TLCMultiVariableValue) ((TLCVariable) parent).getValue();
+				final TLCVariableValue child = multiValue.asList().get(viewerIndex);
+				viewer.replace(parent, viewerIndex, child);
+				if (child.getChildCount() > 0) {
+					viewer.setHasChildren(child, true);
+				}
+			} else if (parent instanceof TLCVariable) {
+				final TLCVariable variable = (TLCVariable) parent;
+				final TLCVariableValue child = variable.getValue();
+				viewer.replace(parent, viewerIndex, child);
+				if (child.getChildCount() > 0) {
+					viewer.setChildCount(child, child.getChildCount());
+				}
+			} else if (parent instanceof TLCMultiVariableValue) {
+				final TLCMultiVariableValue multiValue = (TLCMultiVariableValue) parent;
+				final TLCVariableValue child = multiValue.asList().get(viewerIndex);
+				viewer.replace(parent, viewerIndex, child);
+				if (child.getChildCount() > 0) {
+					viewer.setHasChildren(child, true);
+				}
+			} else if (parent instanceof TLCVariableValue
+					&& ((TLCVariableValue) parent).getValue() instanceof TLCMultiVariableValue) {
+				final TLCMultiVariableValue multiValue = (TLCMultiVariableValue) ((TLCVariableValue) parent).getValue();
+				final TLCVariableValue child = multiValue.asList().get(viewerIndex);
+				viewer.replace(parent, viewerIndex, child);
+				if (child.getChildCount() > 0) {
+					viewer.setHasChildren(child, true);
+				}
+			} else {
+				throw new IllegalArgumentException();
+			}
 		}
 		
-        public void reverseStateSortDirection() {
-        	stateSortDirection = !stateSortDirection;
-        	dialogSettings.put(STATESORTORDER, stateSortDirection);
-        }
-    	
-		public int compare(final Viewer viewer, final Object e1, final Object e2) {
-			// The error trace has to be sorted on the number of the state. An
-			// unordered state sequence is rather incomprehensible. The default
-			// is ordering the state trace first to last for educational reasons.
-			// Advanced users are free to click the table column headers to permanently
-			// change the order.
-			if (e1 instanceof TLCState && e2 instanceof TLCState) {
-				final TLCState s1 = (TLCState) e1;
-				final TLCState s2 = (TLCState) e2;
-				Integer is1 = s1.getStateNumber();
-				Integer is2 = s2.getStateNumber();
-
-				// If either is a back state, make sure they are larger
-				// than any regular state. If both are back states, simply
-				// compare their state number. The latter case is AFAICT not
-				// possible.
-				if (s1.isBackToState() && !s2.isBackToState()) {
-					is1 = Integer.MAX_VALUE;
+		/* (non-Javadoc)
+		 * @see org.eclipse.jface.viewers.ILazyTreeContentProvider#updateChildCount(java.lang.Object, int)
+		 */
+		public void updateChildCount(Object element, int currentChildCount) {
+			if (element instanceof TLCError) {
+				final TLCError error = (TLCError) element;
+				int traceSize = error.getTraceSize();
+				if (traceSize != currentChildCount) {
+					if (error.isTraceRestricted()) {
+						viewer.setChildCount(element, traceSize + 1);
+					} else {
+						viewer.setChildCount(element, traceSize);
+					}
 				}
-				else if (s2.isBackToState() && !s1.isBackToState()) {
-					is2 = Integer.MAX_VALUE;
+			} else if (element instanceof TLCState) {
+				final TLCState state = (TLCState) element;
+				if (((state.isStuttering() || state.isBackToState()) && currentChildCount != 0)) {
+					viewer.setChildCount(element, 0);
+				} else if (currentChildCount != state.getVariablesAsList().size()) {
+					viewer.setChildCount(element, state.getVariablesAsList().size());
 				}
-				
-				// Two regular states, delegate to state number
-				if(!stateSortDirection) { // negated because the default coming from DialogSettings is false
-					return Integer.valueOf(is1).compareTo(is2);
-				} else {
-					return Integer.valueOf(is2).compareTo(is1);
+			} else if (element instanceof TLCVariable) {
+				final TLCVariable variable = (TLCVariable) element;
+				if (currentChildCount != variable.getChildCount()) {
+					viewer.setChildCount(element, variable.getChildCount());
 				}
+			} else if (element instanceof TLCVariableValue) {
+				final TLCVariableValue value = (TLCVariableValue) element;
+				if (currentChildCount != value.getChildCount()) {
+					viewer.setChildCount(element, value.getChildCount());
+				}
+			} else {
+				throw new IllegalArgumentException();
 			}
-			// Sort just on the label provided by the label provider
-			return super.compare(viewer, e1, e2);
+		}
+
+		/* (non-Javadoc)
+		 * @see org.eclipse.jface.viewers.ILazyTreeContentProvider#getParent(java.lang.Object)
+		 */
+		public Object getParent(Object element) {
+			return null;
 		}
     }
     
@@ -975,8 +982,7 @@ public class TLCErrorView extends ViewPart
      * implement ITableColorProvider instead of IColorProvider. This allows
      * coloring of individual columns, not just of entire rows.
      */
-    static class StateLabelProvider extends LabelProvider implements ITableLabelProvider, ITableColorProvider,
-            ITableFontProvider // IColorProvider
+    static class StateLabelProvider extends CellLabelProvider
     {
         public static final int NAME = 0;
         public static final int VALUE = 1;
@@ -984,11 +990,12 @@ public class TLCErrorView extends ViewPart
         public static final int[] COLUMN_WIDTH = { 200, 200 };
         public static final String[] COLUMN_TEXTS = { "Name", "Value" };
 
-        private Image stateImage;
-        private Image varImage;
-        private Image recordImage;
-        private Image setImage;
-
+        private final Image stateImage;
+        private final Image varImage;
+        private final Image recordImage;
+        private final Image setImage;
+        private final Image loadMoreImage;
+        
         public StateLabelProvider()
         {
             stateImage = TLCUIActivator.getImageDescriptor("/icons/full/default_co.gif").createImage();
@@ -996,12 +1003,16 @@ public class TLCErrorView extends ViewPart
             recordImage = TLCUIActivator.getImageDescriptor("/icons/full/brkpi_obj.gif").createImage();
             // setImage = TLCUIActivator.getImageDescriptor("/icons/full/over_co.gif").createImage();
             setImage = TLCUIActivator.getImageDescriptor("/icons/full/compare_method.gif").createImage();
+            loadMoreImage = TLCUIActivator.getImageDescriptor("/icons/full/add.gif").createImage(); // other candidate is newstream_wiz.gif, nav_go.gif, debugt_obj.gif
         }
 
-        public Image getColumnImage(Object element, int columnIndex)
+        private Image getColumnImage(Object element, int columnIndex)
         {
             if (columnIndex == NAME)
             {
+            	if (element instanceof LoaderTLCState) {
+            		return loadMoreImage;	
+            	}
                 if (element instanceof TLCState)
                 {
                     return stateImage;
@@ -1020,7 +1031,7 @@ public class TLCErrorView extends ViewPart
             return null;
         }
 
-        public String getColumnText(Object element, int columnIndex)
+        private String getColumnText(Object element, int columnIndex)
         {
             if (element instanceof TLCState)
             {
@@ -1037,7 +1048,11 @@ public class TLCErrorView extends ViewPart
                     }
                     return state.getLabel();
                 case VALUE:
-                    return "State (num = " + state.getStateNumber() + ")";
+                	if (state instanceof ActionClickListener.LoaderTLCState) {
+                    	return "";
+                    } else {
+                    	return "State (num = " + state.getStateNumber() + ")";
+                    }
                     // state.toString();
                 default:
                     break;
@@ -1130,61 +1145,50 @@ public class TLCErrorView extends ViewPart
          * the table. It highlights the entire row for an added or deleted item.
          * For a changed value, only the value is highlighted.
          */
-        public Color getBackground(Object element, int column)
+		private Color getBackground(Object element, int column) {
+			if (element instanceof TLCVariable) {
+				final TLCVariable var = (TLCVariable) element;
+				if (var.isChanged() && column == VALUE) {
+					return TLCUIActivator.getDefault().getChangedColor();
+				}
+			} else if (element instanceof TLCVariableValue) {
+				final TLCVariableValue value = (TLCVariableValue) element;
+				if (value.isChanged()) {
+					if (column == VALUE) {
+						return TLCUIActivator.getDefault().getChangedColor();
+					}
+				} else if (value.isAdded()) {
+					return TLCUIActivator.getDefault().getAddedColor();
+				} else if (value.isDeleted()) {
+					return TLCUIActivator.getDefault().getDeletedColor();
+				}
+			}
+			return null;
+		}
+
+        private Color getForeground(Object element, int i)
         {
-            if (changedRows.contains(element))
+            return null;
+        }
+
+        private Font getFont(Object element, int columnIndex)
+        {
+            if (element instanceof TLCVariable)
             {
-                if (column == VALUE)
+                TLCVariable variable = (TLCVariable) element;
+                if (variable.isTraceExplorerVar())
                 {
-                    return TLCUIActivator.getDefault().getChangedColor();
+                    return JFaceResources.getFontRegistry().getBold("");
                 }
-            } else if (addedRows.contains(element))
-            {
-                return TLCUIActivator.getDefault().getAddedColor();
-            } else if (deletedRows.contains(element))
-            {
-                return TLCUIActivator.getDefault().getDeletedColor();
+            } else if (element instanceof ActionClickListener.LoaderTLCState) {
+                return JFaceResources.getFontRegistry().getBold("");
             }
             return null;
         }
 
-        /*
-         * Here are the three HashSet objects that contain the objects
-         * representing rows in the table displaying the trace that should be
-         * highlighted. They have the following meanings:
-         * 
-         * changedRows: Rows indicating values that have changed from the last
-         * state. Subobjects of the value column of such a row could also be
-         * highlighted.
-         * 
-         * addedRows: Rows that have been added to a value since the last state.
-         * 
-         * deletedRows: Rows that are deleted in the following state.
-         * 
-         * The same row can appear in both the deletedRows set and the
-         * changedRows or addedRows set. In that case, it should be displayed as
-         * a changed or added row--since we can't do multicolored backgrounds to
-         * show that it is both.
+        /* (non-Javadoc)
+         * @see org.eclipse.jface.viewers.BaseLabelProvider#dispose()
          */
-        protected HashSet<Object> changedRows = new HashSet<Object>();
-        protected HashSet<TLCVariableValue> addedRows = new HashSet<TLCVariableValue>();
-        protected HashSet<TLCVariableValue> deletedRows = new HashSet<TLCVariableValue>();
-
-        public Color getForeground(Object element, int i)
-        {
-            return null;
-        }
-
-        public Image getImage(Object element)
-        {
-            return getColumnImage(element, 0);
-        }
-
-        public String getText(Object element)
-        {
-            return getColumnText(element, 0);
-        }
-
         public void dispose()
         {
             /*
@@ -1194,400 +1198,46 @@ public class TLCErrorView extends ViewPart
             varImage.dispose();
             recordImage.dispose();
             setImage.dispose();
-            super.dispose();
+            loadMoreImage.dispose();
+           super.dispose();
         }
 
-        public Font getFont(Object element, int columnIndex)
-        {
-            if (element instanceof TLCVariable)
-            {
-                TLCVariable variable = (TLCVariable) element;
-                if (variable.isTraceExplorerVar())
-                {
-                    return JFaceResources.getFontRegistry().getBold("");
-                }
-            }
-            return null;
-        }
+		/* (non-Javadoc)
+		 * @see org.eclipse.jface.viewers.IToolTipProvider#getToolTipText(java.lang.Object)
+		 */
+		public String getToolTipText(Object element) {
+			if (element instanceof LoaderTLCState) {
+				return "Double-click to load more states.\nIf the number of states is large, this might take a few seconds.";
+			}
+			return "Click on a row to see in viewer below, double-click to go to corresponding action in spec.";
+		}
 
+		/* (non-Javadoc)
+		 * @see org.eclipse.jface.viewers.CellLabelProvider#update(org.eclipse.jface.viewers.ViewerCell)
+		 */
+		public void update(ViewerCell cell) {
+			// labels
+			cell.setText(getColumnText(cell.getElement(), cell.getColumnIndex()));
+			
+			// images
+			cell.setImage(getColumnImage(cell.getElement(), cell.getColumnIndex()));
+			
+			// font
+			cell.setFont(getFont(cell.getElement(), cell.getColumnIndex()));
+			
+			// colors
+			cell.setForeground(getForeground(cell.getElement(), cell.getColumnIndex()));
+			cell.setBackground(getBackground(cell.getElement(), cell.getColumnIndex()));
+		}
     }
 
-    /*
-     * Sets the HashSet objects of StateLabelProvider object that stores the
-     * sets of objects to be highlighted to show state changes in the states
-     * contained in the parameter stateList.
-     */
-    private void setDiffInfo(List<TLCState> stateList)
-    {
-        if (stateList.size() < 2)
-        {
-            return;
-        }
-
-        /*
-         * Set states to the array of TLCState objects in stateList, and set
-         * changedRows, addedRows, and deletedRows to the HashSet into which all
-         * the appropriate row objects are put, and initialize each HashSet to
-         * empty.
-         */
-        TLCState[] states = new TLCState[stateList.size()];
-        for (int i = 0; i < states.length; i++)
-        {
-            states[i] = stateList.get(i);
-        }
-        StateLabelProvider labelProvider = (StateLabelProvider) variableViewer.getLabelProvider();
-        HashSet<Object> changedRows = labelProvider.changedRows;
-        HashSet<TLCVariableValue> addedRows = labelProvider.addedRows;
-        HashSet<TLCVariableValue> deletedRows = labelProvider.deletedRows;
-        changedRows.clear();
-        addedRows.clear();
-        deletedRows.clear();
-
-        TLCState firstState = states[0];
-        TLCVariable[] firstVariables = firstState.getVariables();
-
-        for (int i = 1; i < states.length; i++)
-        {
-            TLCState secondState = states[i];
-            if (secondState.isStuttering() || secondState.isBackToState())
-            {
-                // there are no variables in second state
-                // because it is a stuttering or a back to state
-                // step
-                break;
-            }
-            TLCVariable[] secondVariables = secondState.getVariables();
-            for (int j = 0; j < firstVariables.length; j++)
-            {
-                TLCVariableValue firstValue = firstVariables[j].getValue();
-                TLCVariableValue secondValue = secondVariables[j].getValue();
-                if (!firstValue.toSimpleString().equals(secondValue.toSimpleString()))
-                {
-                    changedRows.add(secondVariables[j]);
-                    setInnerDiffInfo(firstValue, secondValue, changedRows, addedRows, deletedRows);
-                }
-            }
-
-            firstState = secondState;
-            firstVariables = secondVariables;
-        }
-
-    }
-
-    /**
-     * The recursive method called by setDiffInfo that adds the subobjects of
-     * the variable value objects to the HashSets that indicate which rows of
-     * the hierarchical trace table should be highlighted to show the parts of
-     * the state that have changed.
-     * 
-     * It is called with the objects in the Value columns of corresponding
-     * values that have changed. It adds rows of these two objects' table
-     * representations to the appropriate HashSets to indicate that those rows
-     * should be appropriately highlighted.
-     */
-    private void setInnerDiffInfo(TLCVariableValue first, TLCVariableValue second, HashSet<Object> changed, HashSet<TLCVariableValue> added,
-            HashSet<TLCVariableValue> deleted)
-    {
-        if (first instanceof TLCSimpleVariableValue)
-        {
-            return;
-        } else if (first instanceof TLCSetVariableValue)
-        { /*
-           * SETS For two
-           * sets, the only
-           * meaningful
-           * changes are
-           * additions and
-           * deletions.
-           */
-
-            if (!(second instanceof TLCSetVariableValue))
-            {
-                return;
-            }
-            TLCVariableValue[] firstElts = ((TLCSetVariableValue) first).getElements();
-            TLCVariableValue[] secondElts = ((TLCSetVariableValue) second).getElements();
-
-            for (int i = 0; i < firstElts.length; i++)
-            {
-                boolean notfound = true;
-                int j = 0;
-                while (notfound && j < secondElts.length)
-                {
-                    if (firstElts[i].toSimpleString().equals(secondElts[j].toSimpleString()))
-                    {
-                        notfound = false;
-                    }
-                    j++;
-                }
-                if (notfound)
-                {
-                    deleted.add(firstElts[i]);
-                }
-            }
-
-            for (int i = 0; i < secondElts.length; i++)
-            {
-                boolean notfound = true;
-                int j = 0;
-                while (notfound && j < firstElts.length)
-                {
-                    if (firstElts[j].toSimpleString().equals(secondElts[i].toSimpleString()))
-                    {
-                        notfound = false;
-                    }
-                    j++;
-                }
-                if (notfound)
-                {
-                    added.add(secondElts[i]);
-                }
-            }
-        } else if (first instanceof TLCRecordVariableValue)
-        {
-            /*
-             * RECORDS We mark a record element as added or deleted if its label
-             * does not appear in one of the elements of the other record. We
-             * mark the element as changed, and call setInnerDiffInfo on the
-             * elements' values if elements with same label but different values
-             * appear in the two records.
-             */
-            if (!(second instanceof TLCRecordVariableValue))
-            {
-                return;
-            }
-            TLCVariableValue[] firstElts = ((TLCRecordVariableValue) first).getPairs();
-            TLCVariableValue[] secondElts = ((TLCRecordVariableValue) second).getPairs();
-
-            String[] firstLHStrings = new String[firstElts.length];
-            for (int i = 0; i < firstElts.length; i++)
-            {
-                firstLHStrings[i] = ((TLCNamedVariableValue) firstElts[i]).getName();
-            }
-            String[] secondLHStrings = new String[secondElts.length];
-            for (int i = 0; i < secondElts.length; i++)
-            {
-                secondLHStrings[i] = ((TLCNamedVariableValue) secondElts[i]).getName();
-            }
-
-            setElementArrayDiffInfo(firstElts, firstLHStrings, secondElts, secondLHStrings, changed, added, deleted);
-        } else if (first instanceof TLCFunctionVariableValue)
-        {
-            /*
-             * FUNCTIONS We mark a record element as added or deleted if its
-             * label does not appear in one of the elements of the other record.
-             * We mark the element as changed, and call setInnerDiffInfo on the
-             * elements' values if elements with same label but different values
-             * appear in the two records.
-             */
-            if (!(second instanceof TLCFunctionVariableValue))
-            {
-                return;
-            }
-
-            setFcnElementArrayDiffInfo(((TLCFunctionVariableValue) first).getFcnElements(),
-                    ((TLCFunctionVariableValue) second).getFcnElements(), changed, added, deleted);
-
-        }
-
-        else if (first instanceof TLCSequenceVariableValue)
-        {
-            /*
-             * SEQUENCES In general, it's not clear how differences between two
-             * sequences should be highlighted. We adopt the following
-             * preliminary approach: If one sequence is a proper initial prefix
-             * or suffix of the other, then the difference is interpreted as
-             * adding or deleting the appropriate sequence elements. Otherwise,
-             * the sequences are treated as functions.
-             * 
-             * Note: If one sequence is both an initial prefix and a suffix of
-             * the other then we give preference to interpreting the operation
-             * as adding to the end or removing from the front.
-             */
-            if (!(second instanceof TLCSequenceVariableValue))
-            {
-                return;
-            }
-            TLCFcnElementVariableValue[] firstElts = ((TLCSequenceVariableValue) first).getElements();
-            TLCFcnElementVariableValue[] secondElts = ((TLCSequenceVariableValue) second).getElements();
-            if (firstElts.length == secondElts.length)
-            {
-                setFcnElementArrayDiffInfo(firstElts, secondElts, changed, added, deleted);
-                return;
-            }
-
-            TLCFcnElementVariableValue[] shorter = firstElts;
-            TLCFcnElementVariableValue[] longer = secondElts;
-            boolean firstShorter = true;
-            if (firstElts.length > secondElts.length)
-            {
-                longer = firstElts;
-                shorter = secondElts;
-                firstShorter = false;
-            }
-            boolean isPrefix = true;
-            for (int i = 0; i < shorter.length; i++)
-            {
-                if (!((TLCVariableValue) shorter[i].getValue()).toSimpleString().equals(
-                        ((TLCVariableValue) longer[i].getValue()).toSimpleString()))
-                {
-                    isPrefix = false;
-                    break;
-                }
-            }
-            boolean isSuffix = true;
-            for (int i = 0; i < shorter.length; i++)
-            {
-                if (!((TLCVariableValue) shorter[i].getValue()).toSimpleString().equals(
-                        ((TLCVariableValue) longer[i + longer.length - shorter.length].getValue()).toSimpleString()))
-                {
-
-                    isSuffix = false;
-                    break;
-                }
-            }
-            /*
-             * If it's both a prefix and a suffix, we interpret the change as
-             * either adding to the end or deleting from the front. If it's
-             * neither, we treat the sequences as functions.
-             */
-            if (isPrefix && isSuffix)
-            {
-                if (firstShorter)
-                {
-                    isSuffix = false;
-                } else
-                {
-                    isPrefix = false;
-                }
-            } else if (!(isPrefix || isSuffix))
-            {
-                setFcnElementArrayDiffInfo(firstElts, secondElts, changed, added, deleted);
-                return;
-            }
-            /*
-             * There are four cases: isPrefix and firstShorter : we mark end of
-             * longer (= second) as added. isPrefix and !firstShorter : we mark
-             * end of longer (= first) as deleted. isSuffix and firstShorter :
-             * we mark beginning of longer (=second) as added. isSuffix and
-             * !firstShorter : we mark beginning of longer (=first) as deleted.
-             */
-            int firstEltToMark = (isPrefix) ? shorter.length : 0;
-            HashSet<TLCVariableValue> howToMark = (firstShorter) ? added : deleted;
-
-            for (int i = 0; i < longer.length - shorter.length; i++)
-            {
-                howToMark.add(longer[i + firstEltToMark]);
-            }
-            // setFcnElementArrayDiffInfo(firstElts, secondElts, changed, added,
-            // deleted);
-        }
-
-        return;
-
-    }
-
-    /**
-     * A method that sets the diff highlighting information for two arrays of
-     * either TLCFcnElementVariableValue or TLCNamedVariableValue objects,
-     * representing the value elements of twos values represented by
-     * TLCFunctionVariableValue, TLCRecordVariableValue, or
-     * TLCSequenceVariableValue objects. The parameters firstElts and secondElts
-     * are the two arrays, and firstLHStrings and secondLHStrings are the
-     * results of applying the toString or toSimpleString method to their first
-     * elements. In plain math, this means that we are doing a diff on two
-     * functions (possibly two records or two sequences) where the ...Strings
-     * arrays are string representations of the domain elements of each of the
-     * function elements.
-     * 
-     * The HashSet arguments are the sets of element objects that are to be
-     * highlighted in the appropriate fashion.
-     * 
-     * We mark a function element as added or deleted if its left-hand value
-     * does not appear in one of the elements of the other function. We mark the
-     * element as changed, and call setInnerDiffInfo on the elements' values if
-     * elements with the same left-hand values having different values appear in
-     * the two records.
-     */
-    private void setElementArrayDiffInfo(TLCVariableValue[] firstElts, String[] firstLHStrings,
-            TLCVariableValue[] secondElts, String[] secondLHStrings, HashSet<Object> changed, HashSet<TLCVariableValue> added, HashSet<TLCVariableValue> deleted)
-    {
-
-        for (int i = 0; i < firstElts.length; i++)
-        {
-            boolean notfound = true;
-            int j = 0;
-            while (notfound && j < secondElts.length)
-            {
-                if (firstLHStrings[i].equals(secondLHStrings[j]))
-                {
-                    notfound = false;
-                    TLCVariableValue first = (TLCVariableValue) firstElts[i].getValue();
-                    TLCVariableValue second = (TLCVariableValue) secondElts[j].getValue();
-                    if (!first.toSimpleString().equals(second.toSimpleString()))
-                    {
-                        changed.add(secondElts[j]);
-                        setInnerDiffInfo(first, second, changed, added, deleted);
-                    }
-                }
-                j++;
-            }
-            if (notfound)
-            {
-                deleted.add(firstElts[i]);
-            }
-        }
-
-        for (int i = 0; i < secondElts.length; i++)
-        {
-            boolean notfound = true;
-            int j = 0;
-            while (notfound && j < firstElts.length)
-            {
-                if (firstElts[j].toSimpleString().equals(secondElts[i].toSimpleString()))
-                {
-                    notfound = false;
-                }
-                j++;
-            }
-            if (notfound)
-            {
-                added.add(secondElts[i]);
-            }
-        }
-
-    }
-
-    /**
-     * A method that sets the diff highlighting information for two arrays of
-     * TLCFcnElementVariableValue objects. The parameters firstElts and
-     * secondElts are the two arrays.In plain math, this means that we are doing
-     * a diff on two functions (possibly two sequences). This method calls
-     * setElementArrayDiffInfo to do the work.
-     */
-    private void setFcnElementArrayDiffInfo(TLCFcnElementVariableValue[] firstElts,
-            TLCFcnElementVariableValue[] secondElts, HashSet<Object> changed, HashSet<TLCVariableValue> added, HashSet<TLCVariableValue> deleted)
-    {
-        String[] firstLHStrings = new String[firstElts.length];
-        for (int i = 0; i < firstElts.length; i++)
-        {
-            firstLHStrings[i] = firstElts[i].getFrom().toSimpleString();
-        }
-        String[] secondLHStrings = new String[secondElts.length];
-        for (int i = 0; i < secondElts.length; i++)
-        {
-            secondLHStrings[i] = secondElts[i].getFrom().toSimpleString();
-        }
-        setElementArrayDiffInfo(firstElts, firstLHStrings, secondElts, secondLHStrings, changed, added, deleted);
-    }
-
-    public List getTrace()
+	public TLCError getTrace()
     {
         if (variableViewer == null)
         {
             return null;
         }
-        return (List) variableViewer.getInput();
+        return (TLCError) variableViewer.getInput();
     }
 
     /**
@@ -1623,10 +1273,32 @@ public class TLCErrorView extends ViewPart
      * 
      * @param states
      */
-    private void setTraceInput(List<TLCState> states)
+    void setTraceInput(TLCError error)
     {
-        variableViewer.setInput(states);
-        if (!states.isEmpty())
+		// If itemCount is large (>10.000 items), the underlying OS window
+		// toolkit can be slow. As a possible fix, look into
+		// http://www.eclipse.org/nattable/. For background, read
+		// https://bugs.eclipse.org/bugs/show_bug.cgi?id=129457#c27
+    	error.restrictTraceTo(numberOfStatesToShow);
+		variableViewer.getTree().setItemCount(error.getTraceSize() + (error.isTraceRestricted() ? 1 : 0));
+        variableViewer.setInput(error);
+		// If the number of states in the trace is sufficiently small, eagerly
+		// expand all root level items (which translates to the states
+		// variables). This causes the TreeViewer to correctly determine the
+		// vertical scroll bar's height. For larger number of states, we accept
+		// an incorrect scroll bar height in return for lazy and thus much
+		// faster item handling. I pulled the limit out of thin air, but
+        // tested it on three modern (2015) laptops with Win/Mac/Linux.
+        //
+		// There seems to be an implementation inside the Eclipse SDK that
+		// correctly handles the expanded state of a virtual tree:
+		// https://bugs.eclipse.org/bugs/show_bug.cgi?id=201135
+        // https://bugs.eclipse.org/bugs/show_bug.cgi?id=266189
+        final int level = 1;
+        if (error.getTraceSize(level) < 1000) {
+        	variableViewer.expandToLevel(level + 1); // viewer counts root node. 
+        }
+        if (!error.isTraceEmpty())
         {
             valueViewer.setDocument(NO_VALUE_DOCUMENT());
         } else

@@ -6,6 +6,7 @@
 package tlc2.tool;
 
 import tla2sany.modanalyzer.SpecObj;
+import tla2sany.semantic.APSubstInNode;
 import tla2sany.semantic.ExprNode;
 import tla2sany.semantic.ExprOrOpArgNode;
 import tla2sany.semantic.FormalParamNode;
@@ -19,7 +20,6 @@ import tla2sany.semantic.OpDefNode;
 import tla2sany.semantic.SemanticNode;
 import tla2sany.semantic.Subst;
 import tla2sany.semantic.SubstInNode;
-import tla2sany.semantic.APSubstInNode;
 import tla2sany.semantic.SymbolNode;
 import tla2sany.semantic.ThmOrAssumpDefNode;
 import tlc2.TLCGlobals;
@@ -306,9 +306,14 @@ public class Tool
    * probably make tools like TLC useless.
    */
   public final StateVec getInitStates() {
+	  final StateVec initStates = new StateVec(0);
+	  getInitStates(initStates);
+	  return initStates;
+  }
+  
+  public final void getInitStates(IStateFunctor functor) {
     Vect init = this.getInitStateSpec();
     ActionItemList acts = ActionItemList.Empty;
-    StateVec initStates = new StateVec(0);
     for (int i = 1; i < init.size(); i++) {
       Action elem = (Action)init.elementAt(i);
       acts = acts.cons(elem.pred, elem.con, -1);
@@ -316,9 +321,8 @@ public class Tool
     if (init.size() != 0) {
       Action elem = (Action)init.elementAt(0);
       TLCState ps = TLCState.Empty.createEmpty();
-      this.getInitStates(elem.pred, acts, elem.con, ps, initStates);
+      this.getInitStates(elem.pred, acts, elem.con, ps, functor);
     }
-    return initStates;
   }
 
   /* Create the state specified by pred.  */
@@ -338,7 +342,7 @@ public class Tool
   }
 
   private final void getInitStates(SemanticNode init, ActionItemList acts,
-                                   Context c, TLCState ps, StateVec states) {
+                                   Context c, TLCState ps, IStateFunctor states) {
     switch (init.getKind()) {
     case OpApplKind:
       {
@@ -396,7 +400,7 @@ public class Tool
     }
   }
 
-  private final void getInitStates(ActionItemList acts, TLCState ps, StateVec states) {
+  private final void getInitStates(ActionItemList acts, TLCState ps, IStateFunctor states) {
     if (acts.isEmpty()) {
       states.addElement(ps.copy());
     }
@@ -408,7 +412,7 @@ public class Tool
   }
 
   private final void getInitStatesAppl(OpApplNode init, ActionItemList acts,
-                                       Context c, TLCState ps, StateVec states) {
+                                       Context c, TLCState ps, IStateFunctor states) {
     ExprOrOpArgNode[] args = init.getArgs();
     int alen = args.length;
     SymbolNode opNode = init.getOperator();
@@ -700,7 +704,7 @@ public class Tool
    * This method returns the set of next states when taking the action
    * in the given state.
    */
-  public final StateVec getNextStates(Action action, TLCState state) {
+  public /*final*/ StateVec getNextStates(Action action, TLCState state) {
     ActionItemList acts = ActionItemList.Empty;
     TLCState s1 = TLCState.Empty.createEmpty();
     StateVec nss = new StateVec(0);
@@ -2093,7 +2097,7 @@ public class Tool
   }
 
   /* This method determines if a state satisfies the model constraints. */
-  public final boolean isInModel(TLCState state) throws EvalException {
+  public /*final*/ boolean isInModel(TLCState state) throws EvalException {
     ExprNode[] constrs = this.getModelConstraints();
     for (int i = 0; i < constrs.length; i++) {
       Value bval = this.eval(constrs[i], Context.Empty, state);
@@ -2106,7 +2110,7 @@ public class Tool
   }
 
   /* This method determines if a pair of states satisfy the action constraints. */
-  public final boolean isInActions(TLCState s1, TLCState s2) throws EvalException {
+  public /*final*/ boolean isInActions(TLCState s1, TLCState s2) throws EvalException {
     ExprNode[] constrs = this.getActionConstraints();
     for (int i = 0; i < constrs.length; i++) {
       Value bval = this.eval(constrs[i], Context.Empty, s1, s2, EvalControl.Clear);
@@ -2710,11 +2714,30 @@ public class Tool
       long nfp = state.fingerPrint();
       if (fp == nfp) {
         String info = "<Initial predicate>";
-        return new TLCStateInfo(state, info);
+        final TLCStateInfo tlcStateInfo = new TLCStateInfo(state, info, 1, fp);
+		return tlcStateInfo;
       }
     }
     return null;
   }
+  
+	/**
+	 * Reconstruct the next state of state s whose fingerprint is fp.
+	 * 
+	 * @return Returns the TLCState wrapped in TLCStateInfo. TLCStateInfo stores
+	 *         the stateNumber (relative to the given sinfo) and a pointer to
+	 *         the predecessor.
+	 */
+	public final TLCStateInfo getState(long fp, TLCStateInfo sinfo) {
+		final TLCStateInfo tlcStateInfo = getState(fp, sinfo.state);
+		if (tlcStateInfo == null) {
+			throw new EvalException(EC.TLC_FAILED_TO_RECOVER_NEXT);
+		}
+		tlcStateInfo.stateNumber = sinfo.stateNumber + 1;
+		tlcStateInfo.predecessorState = sinfo;
+		tlcStateInfo.fp = fp;
+		return tlcStateInfo;
+	}
   
   /* Reconstruct the next state of state s whose fingerprint is fp. */
   public final TLCStateInfo getState(long fp, TLCState s) {
@@ -2765,6 +2788,14 @@ public class Tool
     ValueEnumeration Enum = ((Enumerable)fcns).elements();
     return MVPerm.permutationSubgroup(Enum);
   }
+
+	public boolean hasSymmetry() {
+		if (this.config == null) {
+			return false;
+		}
+		final String name = this.config.getSymmetry();
+		return name.length() > 0;
+	}
 
   public final Context getFcnContext(FcnLambdaValue fcn, ExprOrOpArgNode[] args,
                                      Context c, TLCState s0, TLCState s1,

@@ -5,12 +5,14 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.Hashtable;
 import java.util.List;
 import java.util.TimeZone;
 import java.util.Vector;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IWorkspace;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.resources.WorkspaceJob;
@@ -25,6 +27,8 @@ import org.eclipse.jface.resource.JFaceResources;
 import org.eclipse.jface.text.Document;
 import org.eclipse.jface.text.source.SourceViewer;
 import org.eclipse.jface.viewers.IStructuredContentProvider;
+import org.eclipse.jface.viewers.ITableColorProvider;
+import org.eclipse.jface.viewers.ITableFontProvider;
 import org.eclipse.jface.viewers.ITableLabelProvider;
 import org.eclipse.jface.viewers.LabelProvider;
 import org.eclipse.jface.viewers.TableViewer;
@@ -35,6 +39,7 @@ import org.eclipse.swt.events.PaintListener;
 import org.eclipse.swt.events.SelectionEvent;
 import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.graphics.Color;
+import org.eclipse.swt.graphics.Font;
 import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.graphics.Rectangle;
 import org.eclipse.swt.layout.GridData;
@@ -81,10 +86,12 @@ import org.lamport.tla.toolbox.util.UIHelper;
  * A page to display results of model checking (the "third tab"
  * of the model editor).
  * @author Simon Zambrovski
- * @version $Id$
  */
 public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPresenter
 {
+	
+	public static final String RESULT_PAGE_PROBLEM = "ResultPageProblem";
+
     public static final String ID = "resultPage";
 
     private static final String TOOLTIP = "Click on a row to go to action.";
@@ -132,6 +139,8 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
             }
         }
     };
+
+	private IMarker incompleteStateExploration;
 
     /**
      * Constructor for the page
@@ -261,13 +270,48 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
 	
 	                    ResultPage.this.errorStatusHyperLink.setText(text);
 	                    ResultPage.this.errorStatusHyperLink.setForeground(color);
-	
+						
 	                    // update the error view
 	                    TLCErrorView.updateErrorView(dataProvider.getConfig());
 	                    break;
 	                default:
 	                    break;
 	                }
+					
+					// Set label provider to highlight unexplored states if
+					// TLC is done but not all states are explored.
+					final StateSpaceLabelProvider sslp = (StateSpaceLabelProvider) ResultPage.this.stateSpace
+							.getLabelProvider();
+					if (dataProvider.isDone() && dataProvider.getProgressInformation().size() > 0) {
+						final long statesLeft = dataProvider.getProgressInformation().get(0).getLeftStates();
+						if (statesLeft > 0) {
+							sslp.setHighlightUnexplored();
+							// Create a problem marker which gets displayed by
+							// BasicFormPage/ModelEditor as a warning on the
+							// result page.
+							if (incompleteStateExploration == null) {
+								final Hashtable<String, Object> marker = ModelHelper.createMarkerDescription(
+										"State space exploration incomplete", IMarker.SEVERITY_WARNING);
+								marker.put(ModelHelper.TLC_MODEL_ERROR_MARKER_ATTRIBUTE_PAGE, 2);
+								incompleteStateExploration = ModelHelper.installModelProblemMarker(getConfig().getFile(),
+										marker, ModelHelper.TLC_MODEL_ERROR_MARKER_TLC);
+							}
+						} else {
+							if (incompleteStateExploration != null) {
+								try {
+									incompleteStateExploration.delete();
+									ResultPage.this.resetMessage(RESULT_PAGE_PROBLEM);
+									incompleteStateExploration = null;
+								} catch (CoreException e) {
+									TLCUIActivator.getDefault().logError(e.getMessage(), e);
+								}
+							}
+							sslp.unsetHighlightUnexplored();
+						}
+					}
+					ResultPage.this.stateSpace.refresh();
+					
+
             	} finally {
             		disposeLock.unlock();
             	}
@@ -289,14 +333,14 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
             provider.setPresenter(this);
         } else
         {
-            // no data provider
-            reinit();
-        }
+							// no data provider
+							reinit();
+						}
 
-        // constant expression
+						// constant expression
         String expression = getConfig().getAttribute(MODEL_EXPRESSION_EVAL, EMPTY_STRING);
-        expressionEvalInput.setDocument(new Document(expression));
-    }
+						expressionEvalInput.setDocument(new Document(expression));
+					}
 
     /**
      * Reinitialize the fields
@@ -333,32 +377,36 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
     public void dispose()
     {
     	disposeLock.lock();
-    	try {
-        /*
-         * Remove graph windows raised for the page.
-         */
-        String suffix = getGraphTitleSuffix(this);
-        Shell[] shells = UIHelper.getCurrentDisplay().getShells();
-        for (int i = 0; i < shells.length; i++)
-        {
-            if (shells[i].getText().endsWith(suffix))
-            {
-                shells[i].dispose();
-            }
-        }
+		try {
+			/*
+			 * Remove graph windows raised for the page.
+			 */
+			String suffix = getGraphTitleSuffix(this);
+			Shell[] shells = UIHelper.getCurrentDisplay().getShells();
+			for (int i = 0; i < shells.length; i++) {
+				if (shells[i].getText().endsWith(suffix)) {
+					shells[i].dispose();
+				}
+			}
 
-        JFaceResources.getFontRegistry().removeListener(fontChangeListener);
+			if (incompleteStateExploration != null) {
+				incompleteStateExploration.delete();
+				incompleteStateExploration = null;
+			}
 
-        TLCModelLaunchDataProvider provider = TLCOutputSourceRegistry.getModelCheckSourceRegistry().getProvider(
-                getConfig());
-        if (provider != null)
-        {
-            provider.setPresenter(null);
-        }
-        super.dispose();
-    	} finally {
-    		disposeLock.unlock();
-    	}
+			JFaceResources.getFontRegistry().removeListener(fontChangeListener);
+
+			TLCModelLaunchDataProvider provider = TLCOutputSourceRegistry.getModelCheckSourceRegistry()
+					.getProvider(getConfig());
+			if (provider != null) {
+				provider.setPresenter(null);
+			}
+			super.dispose();
+		} catch (CoreException e) {
+			e.printStackTrace();
+		} finally {
+			disposeLock.unlock();
+		}
     }
 
     /**
@@ -373,8 +421,9 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
      */
     protected void createBodyContent(IManagedForm managedForm)
     {
-        int sectionFlags = Section.TITLE_BAR | Section.DESCRIPTION | Section.TREE_NODE | Section.EXPANDED | SWT.WRAP;
-        int textFieldFlags = SWT.MULTI | SWT.V_SCROLL | SWT.READ_ONLY | SWT.FULL_SELECTION | SWT.WRAP;
+        final int sectionFlags = Section.TITLE_BAR | Section.DESCRIPTION | Section.TREE_NODE | Section.EXPANDED | SWT.WRAP;
+        final int textFieldFlags = SWT.MULTI | SWT.V_SCROLL | SWT.READ_ONLY | SWT.FULL_SELECTION;
+        final int expressionFieldFlags = textFieldFlags | SWT.WRAP;
 
         FormToolkit toolkit = managedForm.getToolkit();
         Composite body = managedForm.getForm().getBody();
@@ -474,7 +523,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
         expressionComposite.setLayout(gLayout);
 
         toolkit.createLabel(expressionComposite, "Expression: ");
-        expressionEvalInput = FormHelper.createFormsSourceViewer(toolkit, expressionComposite, textFieldFlags);
+        expressionEvalInput = FormHelper.createFormsSourceViewer(toolkit, expressionComposite, expressionFieldFlags);
 
         // We want the value section to get larger as the window
         // gets larger but not the expression section.
@@ -482,7 +531,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
         valueComposite.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, false));
         valueComposite.setLayout(gLayout);
         toolkit.createLabel(valueComposite, "Value: ");
-        expressionEvalResult = FormHelper.createFormsOutputViewer(toolkit, valueComposite, textFieldFlags);
+        expressionEvalResult = FormHelper.createFormsOutputViewer(toolkit, valueComposite, expressionFieldFlags);
 
         // We dont want these items to fill excess
         // vertical space because then in some cases
@@ -596,6 +645,10 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
 			// Get the user input (the path to the TLC output file).
 			final FileDialog fileDialog = new FileDialog(new Shell());
 			final String path = fileDialog.open();
+			if (path == null) {
+				// User cancelled the dialog
+				return;
+			}
 			
 			// I/O operations should never run inside the UI thread.
 			final Job j = new WorkspaceJob("Loading output file...") {
@@ -786,7 +839,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
     /**
      * Provides labels for the state space table 
      */
-    static class StateSpaceLabelProvider extends LabelProvider implements ITableLabelProvider
+    static class StateSpaceLabelProvider extends LabelProvider implements ITableLabelProvider, ITableFontProvider, ITableColorProvider
     {
         public final static String[] columnTitles = new String[] { "Time", "Diameter", "States Found",
                 "Distinct States", "Queue Size" };
@@ -800,6 +853,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
         public final static int COL_LEFT = 4;
 
         private static final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss"); // $NON-NLS-1$
+		private boolean doHighlight = false;
 
         /* (non-Javadoc)
          * @see org.eclipse.jface.viewers.ITableLabelProvider#getColumnImage(java.lang.Object, int)
@@ -809,7 +863,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
             return null;
         }
 
-        /**
+		/**
          * @param stateTable
          */
         public static void createTableColumns(Table stateTable, ResultPage page)
@@ -871,7 +925,35 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
             }
             return null;
         }
-    }
+
+		public Color getForeground(Object element, int columnIndex) {
+			return null; // Use default color
+		}
+
+		public Color getBackground(Object element, int columnIndex) {
+			final StateSpaceInformationItem ssii = (StateSpaceInformationItem) element;
+			if (doHighlight && columnIndex == COL_LEFT && ssii.isMostRecent()) {
+				return TLCUIActivator.getColor(SWT.COLOR_RED);
+			}
+			return null;
+		}
+
+		public Font getFont(Object element, int columnIndex) {
+			final StateSpaceInformationItem ssii = (StateSpaceInformationItem) element;
+			if (doHighlight && columnIndex == COL_LEFT && ssii.isMostRecent()) {
+				return JFaceResources.getFontRegistry().getBold(JFaceResources.DEFAULT_FONT);
+			}
+			return null;
+		}
+
+        public void setHighlightUnexplored() {
+			doHighlight  = true;
+		}
+
+		public void unsetHighlightUnexplored() {
+			doHighlight = false;
+		}
+   }
 
     /**
      * Provides labels for the coverage table 

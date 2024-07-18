@@ -26,8 +26,12 @@
 
 package tlc2.tool.liveness.simulation;
 
-import java.util.List;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
+import java.util.List;
+import org.junit.Test;
 import tlc2.output.EC;
 import tlc2.tool.TLCStateInfo;
 import tlc2.tool.liveness.ModelCheckerTestCase;
@@ -40,10 +44,12 @@ public abstract class AbstractExampleTestCase extends ModelCheckerTestCase {
 		super(cfg, "simulation", new String[] {"-simulate", "-depth", "11"});
 	}
 	
+	@Test
 	public void testSpec() {
 		// ModelChecker has finished and generated the expected amount of states
 		assertTrue(recorder.recorded(EC.TLC_FINISHED));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_STATS_SIMU, "12"));
+		assertFalse(recorder.recorded(EC.GENERAL));
 		
 		// Assert it has found the temporal violation and also a counter example
 		assertTrue(recorder.recorded(EC.TLC_TEMPORAL_PROPERTY_VIOLATED));

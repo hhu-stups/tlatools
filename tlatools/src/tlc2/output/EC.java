@@ -36,6 +36,11 @@ public interface EC
 
     public static final int UNKNOWN = -1;  // TODO remove all these
     public final static int UNIT_TEST = -123456;
+	/**
+	 * A feature of TLA+/TLC is not supported by TLC's current mode. E.g.
+	 * TLCGet/TLCSet operator cannot be used in distributed TLC.
+	 */
+	public static final int TLC_FEATURE_UNSUPPORTED = 2156;
 
     public static final int GENERAL = 1000;
     public static final int SYSTEM_OUT_OF_MEMORY = 1001;
@@ -65,6 +70,7 @@ public interface EC
     public static final int TLC_ACTION_PROPERTY_EVALUATION_FAILED = 2113;
     public static final int TLC_DEADLOCK_REACHED = 2114;
 
+    public static final int TLC_STATES_AND_NO_NEXT_ACTION = 2115;
     public static final int TLC_TEMPORAL_PROPERTY_VIOLATED = 2116;
     public static final int TLC_FAILED_TO_RECOVER_NEXT = 2117;
     public static final int TLC_NO_STATES_SATISFYING_INIT = 2118;
@@ -79,6 +85,7 @@ public interface EC
     public static final int SYSTEM_ERROR_READING_POOL = 2125;
     public static final int SYSTEM_CHECKPOINT_RECOVERY_CORRUPT = 2126;
     public static final int SYSTEM_ERROR_WRITING_POOL = 2127;
+    public static final int SYSTEM_ERROR_CLEANING_POOL = 2270;
     public static final int SYSTEM_INDEX_ERROR = 2134;
     public static final int SYSTEM_STREAM_EMPTY = 2135;
     public static final int SYSTEM_FILE_NULL = 2137;
@@ -98,7 +105,7 @@ public interface EC
     public static final int TLC_CHOOSE_UPPER_BOUND = 2165;
 
     public static final int TLC_VALUE_ASSERT_FAILED = 2132;
-    public static final int TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE = 2154;
+	public static final int TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE = 2154;
 
     public static final int TLC_FP_NOT_IN_SET = 2133;
     public static final int TLC_FP_VALUE_ALREADY_ON_DISK = 2166;
@@ -174,6 +181,7 @@ public interface EC
     public static final int TLC_INIT_GENERATED3 = 2207;
     public static final int TLC_INIT_GENERATED4 = 2208;
     public static final int TLC_CHECKING_TEMPORAL_PROPS = 2192;
+    public static final int TLC_CHECKING_TEMPORAL_PROPS_END = 2267;
     public static final int TLC_SUCCESS = 2193;
     public static final int TLC_SEARCH_DEPTH = 2194;
     public static final int TLC_CHECKPOINT_START = 2195;

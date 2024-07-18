@@ -43,6 +43,7 @@
 	<target name="default" depends="info" description="Default">
 		<antcall target="compile" inheritall="true" inheritrefs="true" />
 		<antcall target="compile-aj" inheritall="true" inheritrefs="true" />
+		<antcall target="compile-test" inheritall="true" inheritrefs="true" />
 		<antcall target="test" inheritall="true" inheritrefs="true" />
 		<antcall target="dist" inheritall="true" inheritrefs="true" />
 		<antcall target="test-dist" inheritall="true" inheritrefs="true" />
@@ -53,16 +54,39 @@
 		<antcall target="dist-mixed-zip" inheritall="true" inheritrefs="true" />
 	</target>
 
+	<!-- Compiles and runs the short-running tests. -->
+	<target name="shorttests" depends="info" description="Run tests">
+		<antcall target="default" inheritall="true" inheritrefs="true" />
+		<antcall target="test-verify" inheritall="true" inheritrefs="true" />
+	</target>
 
+	<!-- Compiles and runs *only* the long-running tests. Not the ones. -->
+	<target name="longtests" depends="info" description="Run long-running tests">
+		<antcall target="compile" inheritall="true" inheritrefs="true" />
+		<antcall target="compile-aj" inheritall="true" inheritrefs="true">
+			<!-- long tests require AspjectJ -->
+	        <param name="withaj" value="true"/>
+	    </antcall>
+		<antcall target="compile-test" inheritall="true" inheritrefs="true" />
+		<antcall target="dist" inheritall="true" inheritrefs="true" />
+		<antcall target="test-dist-long" inheritall="true" inheritrefs="true" />
+	</target>
+	
+	<!-- ===========================================================-->
+	<!-- Don't call any of the targets below, use the umbrella      -->
+	<!-- targets above which correctly call a target's dependencies -->
+	<!-- ===========================================================-->
 
-	<target name="clean" description="Cleans the compilation output directory" unless="noclean">
+	<!-- Cleans the compilation output directory -->
+	<target name="clean" unless="noclean">
 		<delete includeemptydirs="true" failonerror="false">
 			<fileset dir="${class.dir}" includes="*/**" />
 			<fileset dir="${test.class.dir}" includes="*/**" />
 		</delete>
 	</target>
 
-	<target name="compile" depends="clean" description="Compile">
+	<!-- Compiles the TLA+ tools code -->
+	<target name="compile" depends="clean">
 		<echo>
 			================================================================
 			= The following warnings about sun.misc.Unsafe can be ignored. = 
@@ -92,6 +116,7 @@
 		</copy>
 	</target>
 
+	<!-- Compiles AspectJ auxiliary code -->
 	<target name="compile-aj" if="withaj">
 		<echo>
 			====================================================================
@@ -101,7 +126,7 @@
 			====================================================================
 		</echo>
 		<!-- compile aspectj related class files -->
-		<iajc destdir="${class.dir}" sourceRoots="${src-aj.dir}" debug="true">
+		<iajc destdir="${class.dir}" sourceRoots="${src-aj.dir}" debug="true" source="1.5" target="1.5">
 			<classpath refid="project.classpath" />
 			<classpath>
 				<pathelement location="lib/aspectjrt-1.8.5.jar" />
@@ -128,7 +153,8 @@
 		</copy>
 	</target>
 
-	<target name="dist" description="Build a distribution">
+	<!-- Creates a distribution out of compiled code -->
+	<target name="dist">
 		<!-- Extract javax.mail jar into class directory to be packaged into tla2tools.jar -->
 		<!-- javax.mail is used by the MailSender functionality, that mails the output -->
 		<!-- of TLC to a given email address. -->
@@ -159,12 +185,14 @@
 				<!-- Depending on security level, the user will see a warning otherwise. -->
 				<!-- http://docs.oracle.com/javase/7/docs/technotes/guides/jweb/security/manifest.html -->
 				<attribute name="Application-Name" value="TLC" />
-				<attribute name="permissions" value="all-permissions" /> <!-- won't work with 'sandbox' as it writes files -->
+				<attribute name="permissions" value="all-permissions" />
+				<!-- won't work with 'sandbox' as it writes files -->
 			</manifest>
 		</jar>
 	</target>
 
-	<target name="test" description="Executes accompining unit tests" unless="test.skip">
+	<!-- Compiles the TLA+ tools *test* code -->
+	<target name="compile-test" unless="test.skip">
 		<!-- compile unit tests -->
 		<mkdir dir="${test.class.dir}" />
 		<javac includeantruntime="false" srcdir="${test.dir}" destdir="${test.class.dir}" debug="true" verbose="false">
@@ -182,10 +210,16 @@
 		<copy todir="${ws.class.dir}">
 			<fileset dir="${class.dir}" />
 		</copy>
+	</target>
+
+	<!-- Executes accompining unit tests -->
+	<target name="test" unless="test.skip">
 		<!-- run junit tests -->
 		<mkdir dir="${test.reports}" />
 		<jacoco:coverage destfile="target/code-coverage.exec">
 			<junit printsummary="yes" haltonfailure="no" haltonerror="no"  forkmode="perTest" fork="yes">
+				<!-- enable all assertions -->
+				<jvmarg value="-ea"/>
 				<!-- Uncomment to open a debug port in each forked VM to remote attach your Eclipse at port 1044.
 	            <jvmarg value="-Xdebug" />
 		        <jvmarg value="-Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=1044" />
@@ -196,7 +230,7 @@
 					<pathelement location="lib/cglib-nodep-3.1.jar" />
 					<pathelement location="lib/objenesis-2.1.jar" />
 					<pathelement location="lib/easymock-3.3.1.jar" />
-					<pathelement path="${ws.class.dir}" />
+					<pathelement path="${class.dir}" />
 					<pathelement path="${test.class.dir}" />
 				</classpath>
 				<formatter type="xml" />
@@ -207,6 +241,7 @@
 					<fileset dir="${test.dir}">
 						<include name="**/*Test*.java" />
 						<exclude name="**/ModelCheckerTestCase.java" />
+						<exclude name="**/TLCServerTestCase.java" />
 						<exclude name="**/SuccessfulSimulationTestCase.java" />
 						<exclude name="**/AbstractExampleTestCase.java" />
 						<exclude name="**/TestMPRecorder.java" />
@@ -223,27 +258,13 @@
 		<delete dir="${ws.class.dir}" deleteonexit="true"/>
 	</target>
 
-	<target name="test-dist" description="Executes accompining unit tests on jar file" unless="test.skip">
-		<!-- compile unit tests -->
-		<mkdir dir="${test.class.dir}" />
-		<javac includeantruntime="false" srcdir="${test.dir}" destdir="${test.class.dir}" debug="true" verbose="false">
-			<classpath refid="project.classpath" />
-			<classpath>
-				<pathelement location="lib/junit-4.8.2.jar" />
-				<pathelement location="lib/easymock-3.3.1.jar" />
-				<pathelement path="${class.dir}" />
-			</classpath>
-		</javac>
-		<!-- copy class.dir to path with whitespace -->
-		<!-- this is required by some tests to make sense -->
-		<!-- even throw a "+" and whitespace into the mix -->
-		<property name="ws.class.dir" value="TLA+ Tools" />
-		<copy todir="${ws.class.dir}">
-			<fileset dir="${class.dir}" />
-		</copy>
+	<!-- Executes accompining unit tests on jar file -->
+	<target name="test-dist" unless="test.skip">
 		<!-- run junit tests on tlatools.jar -->
 		<mkdir dir="${test.reports}/onJar" />
 		<junit printsummary="yes" haltonfailure="no" haltonerror="no" forkmode="perTest" fork="yes">
+			<!-- enable all assertions -->
+			<jvmarg value="-ea"/>
 			<classpath refid="project.classpath" />
 			<classpath>
 				<pathelement location="lib/junit-4.8.2.jar" />
@@ -261,6 +282,7 @@
 				<fileset dir="${test.dir}">
 					<include name="**/*Test*.java" />
 					<exclude name="**/ModelCheckerTestCase.java" />
+					<exclude name="**/TLCServerTestCase.java" />
 					<exclude name="**/SuccessfulSimulationTestCase.java" />
 					<exclude name="**/AbstractExampleTestCase.java" />
 					<exclude name="**/TestMPRecorder.java" />
@@ -276,7 +298,8 @@
 		<delete dir="${ws.class.dir}" deleteonexit="true"/>
 	</target>
 
-	<target name="test-dist-long" description="Executes accompining long-running unit tests on jar file" unless="test.skip">
+	<!-- Executes accompining long-running unit tests on jar file -->
+	<target name="test-dist-long" unless="test.skip">
 		<!-- compile unit tests -->
 		<mkdir dir="${test.class.dir}" />
 		<javac includeantruntime="false" srcdir="${test.dir}-long" destdir="${test.class.dir}" debug="true" verbose="false">
@@ -296,6 +319,8 @@
 		<!-- run junit tests on tlatools.jar -->
 		<mkdir dir="${test.reports}/onJarLong" />
 		<junit printsummary="yes" haltonfailure="no" haltonerror="no" maxmemory="4096m" forkmode="perTest" fork="yes">
+			<!-- enable all assertions -->
+			<jvmarg value="-ea"/>
 			<jvmarg value="-javaagent:lib/aspectjweaver-1.8.5.jar" />
 			<sysproperty key="org.aspectj.weaver.showWeaveInfo" value="false"/>
 			<sysproperty key="aj.weaving.verbose" value="false"/>
@@ -304,6 +329,8 @@
 				<pathelement location="lib/junit-4.8.2.jar" />
 				<pathelement location="${dist.file}" />
 				<pathelement path="${test.class.dir}" />
+				<!-- Need class.dir on path to find AspectJ related classes which don't get packaged into dist -->
+				<pathelement path="${class.dir}" />
 			</classpath>
 
 			<formatter type="xml" />
@@ -329,8 +356,8 @@
 		<delete dir="${ws.class.dir}" deleteonexit="true"/>
 	</target>
 
-	<!-- -->
-	<target name="test-verify" description="Verifies TLC parts with NASA's pathfinder model checker">
+	<!-- Verifies TLC parts with NASA's pathfinder model checker -->
+	<target name="test-verify">
 		<!-- Compile our boilerplate code needed to verify TLC. E.g. the StateQueueVerify creates -->
 		<!-- examplary produces & consumers and a dummy implementation of StateQueue. -->
 		<javac includeantruntime="false" srcdir="${test.dir}-verify" destdir="${test.class.dir}" debug="true" verbose="false">
@@ -363,7 +390,8 @@
 		</junit>
 	</target>
 
-	<target name="dist-mixed-jar" description="Build a distribution" depends="default">
+	<!-- Build a distribution -->
+	<target name="dist-mixed-jar" depends="default">
 		<!-- create a JAR file for the users -->
 		<jar destfile="${dist-mixed.file.jar}">
 			<fileset dir="${class.dir}" includes="**/*" />
@@ -389,7 +417,8 @@
 	</target>
 
 
-	<target name="dist-mixed-zip" description="Build a distribution" depends="default">
+	<!-- Build a distribution -->
+	<target name="dist-mixed-zip" depends="default">
 		<!-- create a zip file for the users and developers-->
 		<zip destfile="${dist-mixed.file}">
 			<zipfileset dir="${src.dir}" includes="**/*.java" prefix="tla" />

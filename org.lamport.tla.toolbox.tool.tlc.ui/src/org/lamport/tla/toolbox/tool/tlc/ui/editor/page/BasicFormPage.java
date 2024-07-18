@@ -820,6 +820,15 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
         getManagedForm().getMessageManager().setAutoUpdate(applyChange);
     }
 
+    public void resetMessage(final Object key) {
+        getManagedForm().getMessageManager().setAutoUpdate(false);
+        getManagedForm().getMessageManager().removeMessage(key);;
+        // make the run possible
+        setComplete(true);
+        // make the change visible
+        getManagedForm().getMessageManager().setAutoUpdate(true);
+    }
+    
     /**
      * This method adds the text "TLC Error" next to the title of the page.
      * The text will appear as a hyperlink. Clicking on the link will give
@@ -833,8 +842,13 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
      */
     public void addGlobalTLCErrorMessage(String key)
     {
-        IMessageManager mm = getManagedForm().getMessageManager();
-        mm.addMessage(key, TLC_ERROR_STRING, null, IMessageProvider.WARNING);
+    	addGlobalTLCErrorMessage(key, TLC_ERROR_STRING);
+    }
+    
+    public void addGlobalTLCErrorMessage(String key, String message)
+    {
+    	IMessageManager mm = getManagedForm().getMessageManager();
+        mm.addMessage(key, message, null, IMessageProvider.WARNING);
         /*globalTLCErrorHyperLink.setText(TLC_ERROR_STRING);
         globalTLCErrorHyperLink.setToolTipText(tooltipText);
         globalTLCErrorHyperLink.setForeground(TLCUIActivator.getColor(SWT.COLOR_DARK_YELLOW));

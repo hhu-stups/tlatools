@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <?eclipse version="3.2"?>
 <plugin>
-   <extension-point id="org.lamport.tla.toolbox.tool" name="Toolbox Life Cycle Participant" schema="schema/org.lamport.tla.toolbox.tool.exsd"/>
    <extension-point id="org.lamport.tla.toolbox.spec" name="Specification Life Cycle Participant" schema="schema/org.lamport.tla.toolbox.spec.exsd"/>
 <!--                                   -->
 <!-- Perspectives                      -->
@@ -208,9 +207,14 @@
          point="org.eclipse.ui.commands">
       <!-- spec commands -->
       <category
-            description="Speicification Commands"
+            description="Dummy Command"
+            id="toolbox.command.category.dummy"
+            name="Dummy Command">
+      </category>
+      <category
+            description="Specification Commands"
             id="toolbox.command.category.spec"
-            name="Speicification Commands">
+            name="Specification Commands">
       </category>
       <command
             categoryId="toolbox.command.category.spec"
@@ -345,6 +349,10 @@
             description="Refresh selected specification."
             id="org.lamport.tla.toolbox.refresh"
             name="Refresh Specification">
+      </command>
+      <command
+            id="org.lamport.tla.toolbox.history"
+            name="Module History">
       </command>
    </extension>
 <!-- 
@@ -752,6 +760,11 @@
                label="Refresh"
                style="push">
          </command>
+         <command
+               commandId="org.lamport.tla.toolbox.history"
+               label="Show in History"
+               style="push">
+         </command>
       </menuContribution>
 
       <menuContribution
@@ -772,6 +785,16 @@
             locationURI="toolbar:org.eclipse.ui.trim.status">
          <toolbar
                id="toolbox.trim">
+ 			<!-- Dummy command needed to make the contributions height --> 
+			<!-- be larger than too small. --> 
+            <!-- https://bugs.eclipse.org/bugs/show_bug.cgi?id=471313 -->
+	        <command
+	            id="org.lamport.tla.toolbox.ui.contribution.dummy"
+	            commandId="toolbox.command.category.dummyj"
+	            label="&#160;"> 
+	            <!-- &#160; is the "No break space" unicode character. -->	
+	            <!-- It is not printable and thus make the dummy invisible. -->
+	        </command>
             <control
                   class="org.lamport.tla.toolbox.ui.contribution.SizeControlContribution"
                   id="toolbox.contributions.spec.size">
@@ -1018,6 +1041,27 @@
             <test
                   property="toolbox.property.hasParseErrors">
             </test>
+         </enabledWhen>
+      </handler>
+      <handler
+            class="org.lamport.tla.toolbox.ui.handler.ShowHistoryHandler"
+            commandId="org.lamport.tla.toolbox.history">
+         <enabledWhen>
+               <and>
+                  <count
+                        value="1">
+                  </count>
+                  <with
+                        variable="selection">
+                     <iterate
+                           ifEmpty="false"
+                           operator="or">
+                        <instanceof
+                              value="org.lamport.tla.toolbox.spec.Module">
+                        </instanceof>
+                     </iterate>
+                  </with>
+               </and>
          </enabledWhen>
       </handler>
    </extension>
@@ -1302,6 +1346,18 @@
          point="org.lamport.tla.toolbox.tool">
       <participant
             class="org.lamport.tla.toolbox.util.pref.UnwantedPreferenceManager">
+      </participant>
+   </extension>
+   <extension
+         point="org.lamport.tla.toolbox.tool">
+      <participant
+            class="org.lamport.tla.toolbox.ui.navigator.ToolboxExplorerResourceListener">
+      </participant>
+   </extension>
+   <extension
+         point="org.lamport.tla.toolbox.tool">
+      <participant
+            class="org.lamport.tla.toolbox.ui.view.ProblemViewResourceListener">
       </participant>
    </extension>
    

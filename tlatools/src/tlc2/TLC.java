@@ -5,12 +5,17 @@
 
 package tlc2;
 
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.net.UnknownHostException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.List;
+import java.util.TimeZone;
 
 import model.InJarFilenameToStream;
 import model.ModelInJar;
@@ -135,6 +140,8 @@ public class TLC
      *    Defaults to 1000000 if not specified
      *  o -metadir path: store metadata in the directory at path
      *    Defaults to specdir/states if not specified
+	 *  o -userFile file: A full qualified/absolute path to a file to log user
+	 *    output (Print/PrintT/...) to
      *  o -workers num: the number of TLC worker threads
      *    Defaults to 1
      *  o -dfid num: use depth-first iterative deepening with initial depth num
@@ -169,7 +176,7 @@ public class TLC
      *  Defaults to 1
      *  o -maxSetSize num: the size of the largest set TLC will enumerate.
      *                     default: 1000000
-     *    
+     *   
      */
     public static void main(String[] args) throws UnknownHostException, FileNotFoundException
     {
@@ -217,7 +224,6 @@ public class TLC
     {
         // SZ Feb 20, 2009: extracted this method to separate the 
         // parameter handling from the actual processing
-               
         int index = 0;
 		while (index < args.length)
         {
@@ -466,6 +472,24 @@ public class TLC
                     printErrorMsg("Error: need to specify the metadata directory.");
                     return false;
                 }
+            } else if (args[index].equals("-userFile"))
+            {
+                index++;
+                if (index < args.length)
+                {
+                    try {
+						// Most problems will only show we TLC eventually tries
+						// to write to the file.
+						tlc2.module.TLC.OUTPUT = new BufferedWriter(new FileWriter(new File(args[index++])));
+        			} catch (IOException e) {
+                        printErrorMsg("Error: Failed to create user output log file.");
+                        return false;
+        			}
+                } else
+                {
+                    printErrorMsg("Error: need to specify the full qualified file.");
+                    return false;
+                }
             } else if (args[index].equals("-workers"))
             {
                 index++;
@@ -682,6 +706,8 @@ public class TLC
      */
     public void process()
     {
+    	long startTime = System.currentTimeMillis();
+    	
         ToolIO.cleanToolObjects(TLCGlobals.ToolId);
         // UniqueString.initialize();
         
@@ -721,6 +747,7 @@ public class TLC
                 MP.printMessage(EC.TLC_MODE_SIMU, String.valueOf(seed));
                 Simulator simulator = new Simulator(mainFile, configFile, null, deadlock, traceDepth, 
                         traceNum, rng, seed, true, resolver, specObj);
+                TLCGlobals.simulator = simulator;
 // The following statement moved to Spec.processSpec by LL on 10 March 2011               
 //                MP.printMessage(EC.TLC_STARTING);
                 instance = simulator;
@@ -734,12 +761,12 @@ public class TLC
                 if (TLCGlobals.DFIDMax == -1)
                 {
                     mc = new ModelChecker(mainFile, configFile, dumpFile, deadlock, fromChkpt, resolver, specObj, fpSetConfiguration);
-                    TLCGlobals.mainChecker = (ModelChecker) mc;
                     modelCheckerMXWrapper = new ModelCheckerMXWrapper((ModelChecker) mc);
                 } else
                 {
                     mc = new DFIDModelChecker(mainFile, configFile, dumpFile, deadlock, fromChkpt, true, resolver, specObj);
                 }
+                TLCGlobals.mainChecker = mc;
 // The following statement moved to Spec.processSpec by LL on 10 March 2011               
 //                MP.printMessage(EC.TLC_STARTING);
                 instance = mc;
@@ -768,13 +795,44 @@ public class TLC
             }
         } finally 
         {
-       		modelCheckerMXWrapper.unregister();
-            MP.printMessage(EC.TLC_FINISHED);
-            MP.flush();
+        	if (tlc2.module.TLC.OUTPUT != null) {
+        		try {
+        			tlc2.module.TLC.OUTPUT.flush();
+					tlc2.module.TLC.OUTPUT.close();
+				} catch (IOException e) {
+				}
+        	}
+			modelCheckerMXWrapper.unregister();
+			MP.printMessage(EC.TLC_FINISHED,
+					convertRuntimeToHumanReadable(System.currentTimeMillis() - startTime));
+			MP.flush();
         }
     }
     
-    @SuppressWarnings("unchecked")
+    /**
+	 * @return The given milliseconds runtime converted into human readable form
+	 *         with SI unit and insignificant parts stripped (when runtime is
+	 *         days, nobody cares for minutes or seconds).
+	 */
+    public static String convertRuntimeToHumanReadable(long runtime) {
+		SimpleDateFormat df = null;
+		if (runtime > (60 * 60 * 24 * 1000L)) {
+			df = new SimpleDateFormat("D'd' HH'h'");
+			runtime -= 86400000L;
+		} else if (runtime > (60 * 60 * 24 * 1000L)) {
+			df = new SimpleDateFormat("D'd' HH'h'");
+			runtime -= 86400000L;
+		} else if (runtime > (60 * 60 * 1000L)) {
+			df = new SimpleDateFormat("HH'h' mm'min'");
+		} else if (runtime > (60 * 1000L)) {
+			df = new SimpleDateFormat("mm'min' ss's'");
+		} else {
+			df = new SimpleDateFormat("ss's'");
+		}
+		df.setTimeZone(TimeZone.getTimeZone("UTC"));
+		return df.format(runtime);
+    }
+    
 	public List<File> getModuleFiles() {
     	final List<File> result = new ArrayList<File>();
     	

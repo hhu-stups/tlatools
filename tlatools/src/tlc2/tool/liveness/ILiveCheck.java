@@ -1,3 +1,28 @@
+/*******************************************************************************
+ * Copyright (c) 2015 Microsoft Research. All rights reserved. 
+ *
+ * The MIT License (MIT)
+ * 
+ * Permission is hereby granted, free of charge, to any person obtaining a copy 
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+ * of the Software, and to permit persons to whom the Software is furnished to do
+ * so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software. 
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+ * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+ * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+ * AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Contributors:
+ *   Markus Alexander Kuppe - initial API and implementation
+ ******************************************************************************/
 package tlc2.tool.liveness;
 
 import java.io.IOException;
@@ -5,7 +30,7 @@ import java.io.IOException;
 import tlc2.tool.StateVec;
 import tlc2.tool.TLCState;
 import tlc2.tool.Tool;
-import tlc2.util.LongVec;
+import tlc2.util.SetOfStates;
 import tlc2.util.statistics.IBucketStatistics;
 
 public interface ILiveCheck {
@@ -20,7 +45,12 @@ public interface ILiveCheck {
 	 * This method adds new nodes into the behavior graph induced by s0. It is
 	 * called after the successors of s0 are computed.
 	 */
-	void addNextState(TLCState s0, long fp0, StateVec nextStates, LongVec nextFPs) throws IOException;
+	void addNextState(TLCState s0, long fp0, SetOfStates nextStates) throws IOException;
+	
+	/**
+	 * true iff a call to {@link ILiveCheck#check(boolean)} would indeed result in liveness checking.
+	 */
+	boolean doLiveCheck();
 	
 	/**
 	 * Check liveness properties for the current (potentially partial) state graph. Returns

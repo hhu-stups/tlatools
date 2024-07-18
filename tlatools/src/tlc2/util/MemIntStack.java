@@ -5,66 +5,74 @@
 
 package tlc2.util;
 
-public final class MemIntStack {
-  private int size;
-  private int[] elems;
-  
-  public MemIntStack(String diskdir, String name) {
-    this.size = 0;
-    this.elems = new int[1024];
-  }
+public final class MemIntStack extends MemBasedSet implements IntStack {
+	private static final int MIN_CAPACITY = 1024;
 
-  /* Return the number of items on the stack. */
-  public final int size() { return this.size; }
-  
-  /* Push an integer onto the stack.  */
-  public final synchronized void pushInt(int x) {
-    if (this.size == this.elems.length) {
-      int[] elems1 = new int[2*this.size];
-      System.arraycopy(elems, 0, elems1, 0, this.size);
-      this.elems = elems1;
-    }
-    this.elems[this.size] = x;
-    this.size++;
-  }
-  
-  /* Push a long integer onto the stack.  */
-  public final synchronized void pushLong(long x) {
-    this.pushInt((int)(x & 0xFFFFFFFFL));
-    this.pushInt((int)(x >>> 32));
-  }
+	public MemIntStack(String diskdir, String name) {
+		super(MIN_CAPACITY);
+	}
 
-  /* Pop the integer on top of the stack.  */
-  public final synchronized int popInt() {
-    return this.elems[--this.size];
-  }
+	/* (non-Javadoc)
+	 * @see tlc2.util.IntStack#pushInt(int)
+	 */
+	public final synchronized void pushInt(int x) {
+		if (this.size == this.elems.length) {
+			final int[] newElems = ensureCapacity(MIN_CAPACITY);
+			System.arraycopy(elems, 0, newElems, 0, this.size);
+			this.elems = newElems;
+		}
+		this.elems[this.size] = x;
+		this.size++;
+	}
 
-  public final synchronized int peakInt() {
-	    return peakInt(size - 1);
-  }
+	/* (non-Javadoc)
+	 * @see tlc2.util.IntStack#pushLong(long)
+	 */
+	public final synchronized void pushLong(long x) {
+		this.pushInt((int) (x & 0xFFFFFFFFL));
+		this.pushInt((int) (x >>> 32));
+	}
 
-  public final synchronized int peakInt(int pos) {
-	    return this.elems[pos];
-}
+	/* (non-Javadoc)
+	 * @see tlc2.util.IntStack#popInt()
+	 */
+	public final synchronized int popInt() {
+		return this.elems[--this.size];
+	}
 
-  /* Pop the long integer on top of the stack.  */
-  public final synchronized long popLong() {
-    long high = this.popInt();
-    long low = this.popInt();
-    return (high << 32) | (low & 0xFFFFFFFFL);
-  }
+	public final synchronized int peakInt() {
+		return peakInt(size - 1);
+	}
 
-  public final synchronized long peakLong() {
-	    long high = this.peakInt();
-	    long low = this.peakInt();
-	    return (high << 32) | (low & 0xFFFFFFFFL);
-	  }
+	public final synchronized int peakInt(int pos) {
+		return this.elems[pos];
+	}
 
-  public final synchronized long peakLong(int pos) {
-	    long high = this.peakInt(pos);
-	    long low = this.peakInt(pos + 1);
-	    return (high << 32) | (low & 0xFFFFFFFFL);
-	  }
+	/* (non-Javadoc)
+	 * @see tlc2.util.IntStack#popLong()
+	 */
+	public final synchronized long popLong() {
+		long high = this.popInt();
+		long low = this.popInt();
+		return (high << 32) | (low & 0xFFFFFFFFL);
+	}
 
-  public final void reset() { this.size = 0; }
+	public final synchronized long peakLong() {
+		long high = this.peakInt();
+		long low = this.peakInt();
+		return (high << 32) | (low & 0xFFFFFFFFL);
+	}
+
+	public final synchronized long peakLong(int pos) {
+		long high = this.peakInt(pos + 1);
+		long low = this.peakInt(pos);
+		return (high << 32) | (low & 0xFFFFFFFFL);
+	}
+
+	/* (non-Javadoc)
+	 * @see tlc2.util.IntStack#reset()
+	 */
+	public final void reset() {
+		this.size = 0;
+	}
 }

@@ -159,6 +159,11 @@
                optional="false">
          </commandParameter>
       </command>
+      <command
+            description="Open a spec, module or model."
+            id="org.lamport.tla.toolbox.openElementSelection"
+            name="Filtered open element selection dialog">
+      </command>
    </extension>
    
    
@@ -170,7 +175,7 @@
          <menu
                id="toolbox.toolmenus.tlc"
                label="TLC Model Checker"
-               mnemonic="M"
+               mnemonic="C"
                tooltip="TLC Model Checker Actions">
             <command
                   commandId="toolbox.tool.tlc.commands.model.new.delegate.current"
@@ -254,6 +259,19 @@
             </separator>
          </menu>
       </menuContribution>
+      
+      <!-- 'Window' menu -->
+      
+      <menuContribution
+            locationURI="menu:toolbox.window.menu?after=toolbox.window.view.separator">
+                  <command
+                  commandId="org.lamport.tla.toolbox.openElementSelection"
+                  label="Quick Access..."
+                  mnemonic="A"
+                  style="push">
+            </command>
+       </menuContribution>
+      
       <menuContribution
             locationURI="menu:toolbox.toolmenus.tlc?after=org.lamport.tla.toolbox.tool.tlc.separator">
 
@@ -268,9 +286,17 @@
                mode="FORCE_TEXT"
                style="push"
                tooltip="Runs TLC on the model.">
-            <visibleWhen
-                  checkEnabled="false">
-            </visibleWhen>
+               <visibleWhen
+                     checkEnabled="true">
+                  <with
+                        variable="activeWorkbenchWindow.activePerspective">
+                     <not>
+                        <equals
+                              value="org.lamport.tla.toolbox.ui.perspective.initial">
+                        </equals>
+                     </not>
+                  </with>
+               </visibleWhen>
          </command>
          <separator
                name="org.lamport.tla.toolbox.tool.tlc.ui.separator1"
@@ -510,29 +536,6 @@ Console Facory
       <handler
             class="org.lamport.tla.toolbox.tool.tlc.handlers.NewModelHandlerSelectedDelegate"
             commandId="toolbox.tool.tlc.commands.model.new.delegate.selected">
-         <activeWhen>
-            <and>
-               <with
-                     variable="selection">
-                  <iterate
-                        ifEmpty="true"
-                        operator="and">
-                     <instanceof
-                           value="org.lamport.tla.toolbox.spec.Spec">
-                     </instanceof>
-                     <adapt
-                           type="org.lamport.tla.toolbox.spec.Spec">
-                        <reference
-                              definitionId="toolbox.isCurrentSpec">
-                        </reference>
-                     </adapt>
-                  </iterate>
-               </with>
-               <count
-                     value="1">
-               </count>
-            </and>
-         </activeWhen>
       </handler>
       <handler
             class="org.lamport.tla.toolbox.tool.tlc.handlers.NewModelHandlerCurrentDelegate"
@@ -807,6 +810,10 @@ Console Facory
             </and>
          </activeWhen>
       </handler>
+      <handler
+            class="org.lamport.tla.toolbox.tool.tlc.handlers.TLAOpenElementSelectionDialogHandler"
+            commandId="org.lamport.tla.toolbox.openElementSelection">
+      </handler>
    </extension>
    <extension
          point="org.eclipse.ui.preferencePages">
@@ -881,4 +888,13 @@ Console Facory
             commandId="toolbox.tool.tlc.commands.model.run"
             schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"/>
 	</extension>
+   <extension
+         point="org.eclipse.ui.bindings">
+      <key
+            commandId="org.lamport.tla.toolbox.openElementSelection"
+            contextId="org.eclipse.ui.contexts.window"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+            sequence="M1+M2+A">
+      </key>
+   </extension>
 </plugin>

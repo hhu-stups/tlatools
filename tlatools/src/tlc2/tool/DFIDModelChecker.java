@@ -16,6 +16,7 @@ import tlc2.tool.liveness.LiveException;
 import tlc2.util.IdThread;
 import tlc2.util.LongVec;
 import tlc2.util.ObjLongTable;
+import tlc2.util.SetOfStates;
 import util.FileUtil;
 import util.FilenameToStream;
 import util.UniqueString;
@@ -128,8 +129,12 @@ public class DFIDModelChecker extends AbstractChecker
                         // Always check liveness properties at the end:
                         if (this.checkLiveness)
                         {
-							MP.printMessage(EC.TLC_CHECKING_TEMPORAL_PROPS,
-									new String[] { "complete", Long.toString(this.theFPSet.size()) });
+        					// Print progress statistics prior to liveness checking.
+        					// Liveness checking can take a substantial amount of time
+        					// and thus give the user some clues at what stage safety
+        					// checking is.
+							MP.printMessage(EC.TLC_PROGRESS_STATS_DFID, new String[] {
+									String.valueOf(this.numOfGenStates), String.valueOf(theFPSet.size()) });
                             // SZ Jul 10, 2009: what for?
                             // ToolIO.out.flush();
                             success = liveCheck.finalCheck();
@@ -337,13 +342,11 @@ public class DFIDModelChecker extends AbstractChecker
     {
         boolean deadLocked = true;
         TLCState succState = null;
-        StateVec liveNextStates = null;
-        LongVec liveNextFPs = null;
+        SetOfStates liveNextStates = null;
 
         if (this.checkLiveness && isLeaf)
         {
-            liveNextStates = new StateVec(2);
-            liveNextFPs = new LongVec(2);
+            liveNextStates = new SetOfStates(INITIAL_CAPACITY * threadLocal.get());
         }
 
         try
@@ -364,15 +367,11 @@ public class DFIDModelChecker extends AbstractChecker
                     // Check if the state is a legal state.
                     if (!this.tool.isGoodState(succState))
                     {
-                        if (this.setErrState(curState, succState, false))
-                        {
-                            this.printTrace(EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT, null, curState, succState);
-
-                            synchronized (this)
-                            {
-                                this.notify();
-                            }
-                        }
+						synchronized (this) {
+							if (this.setErrState(curState, succState, false)) {
+								this.printTrace(EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT, null, curState, succState);
+							}
+						}
                         return allSuccNonLeaf;
                     }
 
@@ -406,8 +405,7 @@ public class DFIDModelChecker extends AbstractChecker
                         // For liveness checking:
                         if (this.checkLiveness && isLeaf)
                         {
-                            liveNextStates.addElement(succState);
-                            liveNextFPs.addElement(fp);
+                            liveNextStates.put(fp, succState);
                         }
                     }
 
@@ -447,13 +445,15 @@ public class DFIDModelChecker extends AbstractChecker
                                 continue;
                         } catch (Exception e)
                         {
-                            if (this.setErrState(curState, succState, true))
-                            {
-                                this.printTrace(EC.TLC_INVARIANT_EVALUATION_FAILED, new String[] { this.tool
-                                        .getInvNames()[k] }, curState, succState);
-                                this.notify();
-                            }
-                            return allSuccNonLeaf;
+                        	synchronized (this) {
+		                        if (this.setErrState(curState, succState, true))
+		                        {
+		                            this.printTrace(EC.TLC_INVARIANT_EVALUATION_FAILED, new String[] { this.tool
+		                                    .getInvNames()[k] }, curState, succState);
+		                            this.notify();
+		                        }
+		                        return allSuccNonLeaf;
+                        	}
                         }
                     }
                     // Check if the state violates any implied action. We need to do it
@@ -494,13 +494,15 @@ public class DFIDModelChecker extends AbstractChecker
                             continue;
                     } catch (Exception e)
                     {
-                        if (this.setErrState(curState, succState, true))
-                        {
-                            this.printTrace(EC.TLC_ACTION_PROPERTY_EVALUATION_FAILED, new String[] { this.tool
-                                    .getImpliedActNames()[k] }, curState, succState);
-                            this.notify();
-                        }
-                        return allSuccNonLeaf;
+                    	synchronized (this) {
+		                    if (this.setErrState(curState, succState, true))
+		                    {
+		                        this.printTrace(EC.TLC_ACTION_PROPERTY_EVALUATION_FAILED, new String[] { this.tool
+		                                .getImpliedActNames()[k] }, curState, succState);
+		                        this.notify();
+		                    }
+                    	}
+                    	return allSuccNonLeaf;
                     }
                 }
 
@@ -527,10 +529,17 @@ public class DFIDModelChecker extends AbstractChecker
             {
                 // Add a stuttering step for curState:
                 long curStateFP = curState.fingerPrint();
-                liveNextStates.addElement(curState);
-                liveNextFPs.addElement(curStateFP);
+                liveNextStates.put(curStateFP, curState);
                 // Add curState to the behavior graph:
-                liveCheck.addNextState(curState, curStateFP, liveNextStates, liveNextFPs);
+                liveCheck.addNextState(curState, curStateFP, liveNextStates);
+
+				// Poor man's version of a controller. If necessary, try e.g.
+				// PID controller instead.
+				final int multiplier = threadLocal.get();
+				if (liveNextStates.capacity() > (multiplier * INITIAL_CAPACITY)) {
+					// Increase initial size for as long as the set has to grow
+					threadLocal.set(multiplier + 1);
+				}
             }
 
             // We set curState DONE if

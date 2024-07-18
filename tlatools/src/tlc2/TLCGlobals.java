@@ -3,7 +3,8 @@
 package tlc2;
 
 import tla2sany.semantic.FrontEnd;
-import tlc2.tool.ModelChecker;
+import tlc2.tool.AbstractChecker;
+import tlc2.tool.Simulator;
 
 /**
  * Globals
@@ -16,7 +17,7 @@ public class TLCGlobals
 {
 
     // The current version of TLC
-    public static String versionOfTLC = "Version 2.07 of 1 June 2015";
+    public static String versionOfTLC = "Version 2.08 of 21 December 2015";
 
     // The bound for set enumeration, used for pretty printing
     public static int enumBound = 2000;
@@ -32,6 +33,15 @@ public class TLCGlobals
 	 * exceeding the threshold (10% by default).
 	 */
     public static double livenessThreshold = 0.1d;
+
+    public static double livenessGraphSizeThreshold = 0.1d;
+
+	/**
+	 * Ratio of runtime dedicated to safety checking (80%) and liveness checking
+	 * (20%). Some aspects of liveness are also checked during state insertion
+	 * (see ILiveCheck#addNextState) and thus part of safety checking..
+	 */
+	public static double livenessRatio = 0.2d;
 
     public synchronized static void setNumWorkers(int n)
     {
@@ -62,8 +72,11 @@ public class TLCGlobals
     	incNumWorkers(-1);
     }
 
-    // The main model checker object
-    public static ModelChecker mainChecker = null;
+    // The main model checker object (null if simulator non-null)
+    public static AbstractChecker mainChecker = null;
+    
+    // The main simulator object (null if mainChecker non-null)
+    public static Simulator simulator = null;
 
     // Enable collecting coverage information
     public static int coverageInterval = -1;

@@ -1,20 +1,27 @@
 package tlc2;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import org.junit.Test;
 import util.TLCRuntime;
-import junit.framework.TestCase;
 
-public class TLCTest extends TestCase {
+public class TLCTest {
 
+	@Test
 	public void testHandleParametersAbsoluteInvalid() {
 		final TLC tlc = new TLC();
 		assertFalse(tlc.handleParameters(new String[] {"-fpmem", "-1", "MC"}));
 	}
 	
+	@Test
 	public void testHandleParametersAbsoluteValid() {
 		final TLC tlc = new TLC();
 		assertTrue(tlc.handleParameters(new String[] {"-fpmem", "101", "MC"}));
 	}
 	
+	@Test
 	public void testHandleParametersFractionInvalid() {
 		final TLC tlc = new TLC();
 		assertFalse(tlc.handleParameters(new String[] {"-fpmem", "-0.5", "MC"}));
@@ -23,6 +30,7 @@ public class TLCTest extends TestCase {
 	/**
 	 * Allocating to little should result in min default
 	 */
+	@Test
 	public void testHandleParametersAllocateLowerBound() {
 		final TLC tlc = new TLC();
 		assertTrue(tlc.handleParameters(new String[] {"-fpmem", "0", "MC"}));
@@ -34,6 +42,7 @@ public class TLCTest extends TestCase {
 	/**
 	 * Overallocating should result in max default
 	 */
+	@Test
 	public void testHandleParametersAllocateUpperBound() {
 		final TLC tlc = new TLC();
 		assertTrue(tlc.handleParameters(new String[] {"-fpmem", Long.toString(Long.MAX_VALUE), "MC"}));
@@ -45,6 +54,7 @@ public class TLCTest extends TestCase {
 	/**
 	 * .5 is valid
 	 */
+	@Test
 	public void testHandleParametersAllocateHalf() {
 		final TLC tlc = new TLC();
 		assertTrue(tlc.handleParameters(new String[] {"-fpmem", ".5", "MC"}));
@@ -56,6 +66,7 @@ public class TLCTest extends TestCase {
 	/**
 	 * .99 is valid
 	 */
+	@Test
 	public void testHandleParametersAllocate90() {
 		final TLC tlc = new TLC();
 		assertTrue(tlc.handleParameters(new String[] {"-fpmem", ".99", "MC"}));
@@ -67,6 +78,7 @@ public class TLCTest extends TestCase {
 	/**
 	 *  is valid
 	 */
+	@Test
 	public void testHandleParametersMaxSetSize() {
 		final int progDefault = TLCGlobals.setBound;
 		
@@ -92,5 +104,15 @@ public class TLCTest extends TestCase {
 		tlc = new TLC();
 		assertTrue(tlc.handleParameters(new String[] {"-maxSetSize", Integer.toString(Integer.MAX_VALUE), "MC"}));
 		assertTrue(TLCGlobals.setBound == Integer.MAX_VALUE);
+	}
+	
+	@Test
+	public void testRuntimeConversion() {
+		assertEquals("59s", TLC.convertRuntimeToHumanReadable(59000L));
+		assertEquals("59min 59s", TLC.convertRuntimeToHumanReadable(3599000L));
+		assertEquals("23h 59min", TLC.convertRuntimeToHumanReadable(86340000L));
+		assertEquals("1d 23h", TLC.convertRuntimeToHumanReadable(169200000L));
+		assertEquals("2d 23h", TLC.convertRuntimeToHumanReadable(255600000L));
+		assertEquals("99d 23h", TLC.convertRuntimeToHumanReadable(8636400000L));
 	}
 }
