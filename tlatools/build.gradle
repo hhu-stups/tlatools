@@ -29,6 +29,10 @@ sourceSets {
 	}
 }
 
+javadoc {
+	failOnError = false
+}
+
 task tlatools(dependsOn: build) << {
 	copy {
 		from('build/libs/')
