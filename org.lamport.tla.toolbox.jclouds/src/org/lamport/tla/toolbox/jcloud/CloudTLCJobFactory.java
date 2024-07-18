@@ -37,6 +37,7 @@ public class CloudTLCJobFactory implements TLCJobFactory {
 
 	private static final String AZURECOMPUTE = "Azure";
 	private static final String AWS_EC2 = "aws-ec2";
+	private static final String AWS_EC2_VM_PROPERTIES = "aws-ec2-props";
 
 	@Override
 	public Job getTLCJob(String aName, File aModelFolder, int numberOfWorkers, final Properties props, String tlcparams) {
@@ -45,6 +46,9 @@ public class CloudTLCJobFactory implements TLCJobFactory {
 		if (AWS_EC2.equals(aName)) {
 			return new CloudDistributedTLCJob(aName, aModelFolder, numberOfWorkers, props,
 					new EC2CloudTLCInstanceParameters(tlcparams, numberOfWorkers));
+		} else if (AWS_EC2_VM_PROPERTIES.equals(aName)) {
+			return new CloudDistributedTLCJob(aName, aModelFolder, numberOfWorkers, props,
+					new EC2PropertyCloudTLCInstanceParameters(tlcparams, numberOfWorkers));
 		} else if (AZURECOMPUTE.equals(aName)) {
 			return new CloudDistributedTLCJob(aName, aModelFolder, numberOfWorkers, props,
 					new AzureCloudTLCInstanceParameters(tlcparams, numberOfWorkers));
