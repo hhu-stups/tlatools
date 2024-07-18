@@ -26,3 +26,4 @@ tlatools/.gradle
 tlatools/build
 ajcore.*.txt
 local.*
+!**/gradle/wrapper/gradle-wrapper.jar
