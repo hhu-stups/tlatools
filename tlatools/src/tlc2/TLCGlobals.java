@@ -22,11 +22,11 @@ public class TLCGlobals
 {
 
     // The current version of TLC
-    public static String versionOfTLC = "Version 2.12 of 29 January 2018";
+    public static String versionOfTLC = "Version 2.13 of 18 July 2018";
     
     // The bound for set enumeration, used for pretty printing
     public static int enumBound = 2000;
-
+    
     // The bound for the cardinality of a set
     public static int setBound = 1000000;
 
@@ -54,7 +54,7 @@ public class TLCGlobals
 		return !lnCheck.equals("final");
 	}
 
-    public synchronized static void setNumWorkers(int n)
+	public synchronized static void setNumWorkers(int n)
     {
         numWorkers = n;
     }

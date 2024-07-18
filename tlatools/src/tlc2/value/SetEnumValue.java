@@ -6,7 +6,6 @@
 
 package tlc2.value;
 
-import tlc2.tool.ModelChecker;
 import tlc2.tool.FingerprintException;
 import tlc2.util.FP64;
 import util.Assert;
@@ -25,6 +24,11 @@ implements Enumerable, Reducible {
   public SetEnumValue(ValueVec elems, boolean isNorm) {
     this.elems = elems;
     this.isNorm = isNorm;
+  }
+  
+  public SetEnumValue() {
+    this.elems = new ValueVec(0);
+    this.isNorm = true;
   }
 
   public final byte getKind() { return SETENUMVALUE; }
@@ -196,12 +200,13 @@ implements Enumerable, Reducible {
   /* This method normalizes (destructively) this set. */
   public final boolean isNormalized() { return this.isNorm; }
 
-  public final void normalize() {
+  public final Value normalize() {
     try {
       if (!this.isNorm) {
         this.elems.sort(true);   // duplicates eliminated
         this.isNorm = true;
       }
+      return this;
     }
     catch (RuntimeException | OutOfMemoryError e) {
       if (hasSource()) { throw FingerprintException.getNewHead(this, e); }
@@ -429,6 +434,13 @@ implements Enumerable, Reducible {
       // used only for printing the value, it seems that correcting this should
       // not do any harm.  Therefore, LL added the following if statement
       // on 5 Mar 2012.
+      // Beware:
+      // normalize() mutates a SetEnumValue's state. Thus calling toString() 
+      // on a SetEnumValue mutates its state. By convention, toString methods
+      // generally do not mutate an instance's state (side-effect free) and
+      // and are thus safe to be called. Failing to adhere to this convention
+      // can lead to subtle bugs. E.g. think of a programmer who inspects an
+      // instance with a debugger unconsciously mutating the instance's state.
       if (!this.isNormalized()) {
           this.normalize();
       }
@@ -449,6 +461,12 @@ implements Enumerable, Reducible {
       if (hasSource()) { throw FingerprintException.getNewHead(this, e); }
       else { throw e; }
     }
+  }
+
+  public Value randomElement() {
+     int sz = size();
+     int index = (int) Math.floor(getRandom().nextDouble() * sz);
+     return this.elems.elementAt(index);
   }
 
   public final ValueEnumeration elements() {
@@ -478,4 +496,30 @@ implements Enumerable, Reducible {
     }
   }
 
+    @Override
+	public EnumerableValue getRandomSubset(final int kOutOfN) {
+    	final ValueVec vec = new ValueVec(kOutOfN);
+    	
+    	final ValueEnumeration ve = elements(kOutOfN);
+    	
+    	Value v = null;
+    	while ((v = ve.nextElement()) != null) {
+    		vec.addElement(v);
+    	}
+    	return new SetEnumValue(vec, false);
+	}
+
+	@Override
+	public ValueEnumeration elements(final int k) {
+		normalize();
+		return new EnumerableValue.SubsetEnumerator(k) {
+			@Override
+			public Value nextElement() {
+				if (!hasNext()) {
+					return null;
+				}
+				return elems.elementAt(nextIndex());
+			}
+		};
+	}
 }

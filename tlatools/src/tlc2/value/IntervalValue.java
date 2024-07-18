@@ -6,7 +6,6 @@
 
 package tlc2.value;
 
-import tlc2.tool.ModelChecker;
 import tlc2.tool.FingerprintException;
 import tlc2.util.FP64;
 import util.Assert;
@@ -106,6 +105,19 @@ implements Enumerable, Reducible {
     }
   }
 
+	/**
+	 * @return Converts this IntervalValue instance into a Value[]. This can be seen
+	 *         as the inverse to the performance optimization that the IntervalValue
+	 *         actually is.
+	 */
+	final Value[] asValues() {
+		final Value[] values = new Value[size()];
+		for (int i = 0; i < size(); i++) {
+			values[i] = IntValue.gen(this.low + i);
+		}
+		return values;
+	}
+  
   /* Return this - val.  */
   public final Value diff(Value val) {
     try {
@@ -193,7 +205,7 @@ implements Enumerable, Reducible {
 
   public final boolean isNormalized() { return true; }
 
-  public final void normalize() { /*nop*/ }
+  public final Value normalize() { /*nop*/return this; }
 
   public final boolean isDefined() { return true; }
 
@@ -246,6 +258,28 @@ implements Enumerable, Reducible {
     }
   }
 
+    @Override
+	public EnumerableValue getRandomSubset(final int kOutOfN) {
+    	final ValueVec vec = new ValueVec(kOutOfN);
+    	
+    	final ValueEnumeration ve = elements(kOutOfN);
+    	
+    	Value v = null;
+    	while ((v = ve.nextElement()) != null) {
+    		vec.addElement(v);
+    	}
+    	return new SetEnumValue(vec, false);
+	}
+
+	public Value elementAt(final int idx) {
+		if (0 <= idx && idx < size()) {
+			return IntValue.gen(low + idx);
+		}
+		Assert.fail(
+				"Attempted to retrieve out-of-bounds element from the interval value " + ppr(this.toString()) + ".");
+        return null; // make compiler happy
+	}
+    
   public final ValueEnumeration elements() {
     try {
       return new Enumerator();
@@ -269,5 +303,17 @@ implements Enumerable, Reducible {
     }
 
   }
-
+  
+	@Override
+	public ValueEnumeration elements(final int kOutOfN) {
+		return new EnumerableValue.SubsetEnumerator(kOutOfN) {
+			@Override
+			public Value nextElement() {
+				if (!hasNext()) {
+					return null;
+				}
+				return IntValue.gen(low + nextIndex());
+			}
+		};
+	}
 }

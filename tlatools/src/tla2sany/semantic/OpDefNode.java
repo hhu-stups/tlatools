@@ -35,6 +35,9 @@ import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Iterator;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
 import tla2sany.explorer.ExploreNode;
 import tla2sany.parser.SyntaxTreeNode;
 import tla2sany.st.Location;
@@ -44,9 +47,6 @@ import tla2sany.utilities.Vector;
 import tla2sany.xml.SymbolContext;
 import util.UniqueString;
 import util.WrongInvocationException;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
 
   /**
    * An OpDefNode can have one of the following kinds:
@@ -1238,6 +1238,31 @@ public class OpDefNode extends OpDefOrDeclNode
     if (stepNode != null) stepNode.walkGraph(semNodesTable);
   }
 
+	@Override
+	public String getSignature() {
+		final StringBuffer buf = new StringBuffer();
+		buf.append(getName().toString());
+		if (getArity() > 0 && getKind() != ASTConstants.BuiltInKind) {
+			buf.append("(");
+			//TODO This hack doesn't work for infix operators
+			final FormalParamNode[] params = getParams();
+			for (int i = 0; i < params.length - 1; i++) {
+				final FormalParamNode formalParamNode = params[i];
+				if (formalParamNode.getTreeNode() != null) {
+					final SyntaxTreeNode treeNode = (SyntaxTreeNode) formalParamNode.getTreeNode();
+					buf.append(treeNode.getHumanReadableImage());
+					buf.append(", ");
+				}
+			}
+			if (params[params.length - 1].getTreeNode() != null) {
+				final TreeNode treeNode = params[params.length - 1].getTreeNode();
+				buf.append(treeNode.getHumanReadableImage());
+			}
+			buf.append(")");
+		}
+		return buf.toString();
+	}
+
   /**
    * Displays this node as a String, implementing ExploreNode
    * interface; depth parameter is a bound on the depth of the portion
@@ -1318,6 +1343,25 @@ public class OpDefNode extends OpDefOrDeclNode
     return ret;
   }
 
+	@Override
+	public String getHumanReadableImage() {
+		// This ony gets pre-comments (directly in front of the operator definition).
+		// In-line comments - e.g. found in the standard modules - are not pre-comments.
+		final String comment = getComment();
+		
+		final StringBuffer buf = new StringBuffer(comment);
+		buf.append("\n");
+		
+		TreeNode[] ones = getTreeNode().one();
+		for (TreeNode treeNode : ones) {
+			// TODO This omits all whitespaces from the definition and is thus hard to read.
+			// I couldn't figure out a better way to obtain the original image though.
+			buf.append(treeNode.getHumanReadableImage());
+			buf.append(" ");
+		}
+		return buf.toString().trim();
+	}
+  
   protected String getNodeRef() {
     switch (getKind()) {
       case UserDefinedOpKind:

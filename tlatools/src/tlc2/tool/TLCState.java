@@ -7,6 +7,9 @@ package tlc2.tool;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
 
 import tla2sany.semantic.OpDeclNode;
 import tla2sany.semantic.SemanticNode;
@@ -18,6 +21,7 @@ import util.UniqueString;
 
 public abstract class TLCState implements Cloneable, Serializable {
   public long uid = -1;   // Must be set to a non-negative number
+  public short level = 0;
   
   // Set by subclasses. Cannot set until we know what the variables are.
   public static TLCState Empty = null;
@@ -41,10 +45,13 @@ public abstract class TLCState implements Cloneable, Serializable {
 
   public void read(ValueInputStream vis) throws IOException {
     this.uid = vis.readLongNat();
+    this.level = vis.readShortNat();
+    assert this.level >= 0; // Should never overflow.
   }
   
   public void write(ValueOutputStream vos) throws IOException {
     vos.writeLongNat(this.uid);
+    vos.writeShortNat(this.level);
   }
 
   public abstract TLCState bind(UniqueString name, Value value, SemanticNode expr);
@@ -58,8 +65,26 @@ public abstract class TLCState implements Cloneable, Serializable {
   public abstract void deepNormalize();
   public abstract long fingerPrint();
   public abstract boolean allAssigned();
+  public abstract Set<OpDeclNode> getUnassigned();
   public abstract TLCState createEmpty();
+  
+  /** 
+   * Returns a mapping of variable names to their assigned values in this state.
+   */ 
+  public Map<UniqueString, Value> getVals() {
+	final Map<UniqueString, Value> valMap = new HashMap<UniqueString, Value>();
+	for(int i = 0; i < vars.length; i++) {
+        UniqueString key = vars[i].getName();
+        Value val = this.lookup(key);
+        valMap.put(key, val);
+    }
+    return valMap;
+  }
 
+  public boolean isInitial() {
+	return this.level == 0;
+  }
+  
   /* Returns a string representation of this state.  */
   public abstract String toString();
   public abstract String toString(TLCState lastState);

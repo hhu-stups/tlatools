@@ -1,8 +1,13 @@
 package org.lamport.tla.toolbox.tool.tlc.launch;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.Hashtable;
 import java.util.List;
 import java.util.Properties;
@@ -22,6 +27,7 @@ import org.eclipse.core.runtime.IExtensionRegistry;
 import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.Platform;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.SubProgressMonitor;
 import org.eclipse.core.runtime.jobs.IJobChangeEvent;
@@ -29,8 +35,10 @@ import org.eclipse.core.runtime.jobs.ISchedulingRule;
 import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.core.runtime.jobs.JobChangeAdapter;
 import org.eclipse.debug.core.DebugException;
+import org.eclipse.debug.core.DebugPlugin;
 import org.eclipse.debug.core.ILaunch;
 import org.eclipse.debug.core.ILaunchConfiguration;
+import org.eclipse.debug.core.Launch;
 import org.eclipse.debug.core.model.IProcess;
 import org.eclipse.debug.core.model.IStreamsProxy;
 import org.eclipse.debug.core.model.LaunchConfigurationDelegate;
@@ -53,6 +61,7 @@ import org.lamport.tla.toolbox.tool.tlc.model.Assignment;
 import org.lamport.tla.toolbox.tool.tlc.model.Model;
 import org.lamport.tla.toolbox.tool.tlc.model.ModelWriter;
 import org.lamport.tla.toolbox.tool.tlc.model.TypedSet;
+import org.lamport.tla.toolbox.tool.tlc.output.IProcessOutputSink;
 import org.lamport.tla.toolbox.tool.tlc.util.ModelHelper;
 import org.lamport.tla.toolbox.util.AdapterFactory;
 import org.lamport.tla.toolbox.util.ResourceHelper;
@@ -100,13 +109,24 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
      */
     public static final String MODE_GENERATE = "generate";
 
+	private Launch launch;
+
     /**
      * 1. method called during the launch
      */
     public ILaunch getLaunch(ILaunchConfiguration configuration, String mode) throws CoreException
     {
-        // delegate to the super implementation
-        return super.getLaunch(configuration, mode);
+		// MAK 02/22/2018 changed super.getLaunch(...) - which returned null - to
+		// explicitly create the Launch instance here to get hold of the instance.
+		// Return null here causes
+		// org.eclipse.debug.internal.core.LaunchConfiguration.launch(String,
+		// IProgressMonitor, boolean, boolean) to create the instance but it doesn't
+		// correctly clean up the instance if our finalLaunchCheck below throws an
+		// error. This in turn causes calls to
+		// org.lamport.tla.toolbox.tool.tlc.model.Model.isRunning() to return true even
+		// though finalLaunchCheck threw an exception.
+    	this.launch = new Launch(configuration, mode, null);
+		return launch;
     }
 
     /**
@@ -523,7 +543,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
         // parse the MC file
         IParseResult parseResult = ToolboxHandle.parseModule(rootModule, new SubProgressMonitor(monitor, 1), false,
                 false);
-        Vector<TLAMarkerInformationHolder> detectedErrors = parseResult.getDetectedErrors();
+        final Vector<TLAMarkerInformationHolder> detectedErrors = parseResult.getDetectedErrors();
         boolean status = !AdapterFactory.isProblemStatus(parseResult.getStatus());
 
         monitor.worked(1);
@@ -574,6 +594,9 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 
                     } else
                     {
+                    	// see getLaunch(...) above
+                    	DebugPlugin.getDefault().getLaunchManager().removeLaunch(this.launch);
+                    	
                         // the reported error is not pointing to the MC file.
                         throw new CoreException(new Status(IStatus.ERROR, TLCActivator.PLUGIN_ID,
                                 "Fatal error during validation of the model. "
@@ -583,6 +606,9 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
                     }
                 } else
                 {
+                	// see getLaunch(...) above
+                   	DebugPlugin.getDefault().getLaunchManager().removeLaunch(this.launch);
+                   	
                     throw new CoreException(new Status(IStatus.ERROR, TLCActivator.PLUGIN_ID,
                             "Fatal error during validation of the model. "
                                     + "SANY discovered an error somewhere else than the MC file. "
@@ -725,6 +751,13 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 			        if (maxSetSize != TLCGlobals.setBound) {
 			        	tlcParams.append("-maxSetSize ");
 			        	tlcParams.append(String.valueOf(maxSetSize));
+			        	tlcParams.append(" ");
+			        }
+			        
+			        // add -lncheck final if requested.
+			        if (model.getAttribute(LAUNCH_DEFER_LIVENESS, false)) {
+			        	tlcParams.append("-lncheck ");
+			        	tlcParams.append("final");
 			        	tlcParams.append(" ");
 			        }
 			        
@@ -893,7 +926,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             this.model = model;
         }
 
-        public void done(IJobChangeEvent event)
+        public void done(final IJobChangeEvent event)
         {
             super.done(event);
 
@@ -964,9 +997,100 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 			refreshJob = new WorkspaceJob("Taking snapshot of " + model.getName() + "...") {
 				public IStatus runInWorkspace(final IProgressMonitor monitor) throws CoreException {
 					monitor.beginTask("Taking snapshot of " + model.getName() + "...", 1);
-					model.snapshot();
+					final Model snapshot = model.snapshot();
+					
+					// If the result is an ITLCJobStatus, it means that TLC is running with Cloud
+					// TLC. In other words, it is running remotely. Thus, we get the output from
+					// the remote cloud instance and feed it to the regular Toolbox sinks.
+					final IStatus status = event.getJob().getResult();
+					if (status instanceof ITLCJobStatus) {
+						
+						snapshot.setRunningRemotely(true);
+						
+						final List<IProcessOutputSink> sinks = getProcessOutputSinks(snapshot);
+						// Wrap in a job so that the parent job of which this joblistener is being
+						// called can terminate. Otherwise, the model remains in model checking state.
+						final Job j = new Job(
+								String.format("Consuming output of Cloud TLC for model %s", model.getName())) {
+							@Override
+							protected IStatus run(IProgressMonitor monitor) {
+								final ITLCJobStatus tlcJobStatus = (ITLCJobStatus) status;
+								// Read the output provided by the status and send it to all sinks. The sinks
+								// take care of updating the UI.
+								final InputStream output = tlcJobStatus.getOutput();
+								try {
+									final BufferedReader in = new BufferedReader(
+											new InputStreamReader(output));
+									String line;
+									while ((line = in.readLine()) != null) {
+										// sinks expect a newline to correctly handle the line.
+										for (IProcessOutputSink iProcessOutputSink : sinks) {
+											iProcessOutputSink.appendText(line + "\n");
+										}
+										
+										// Kill remote process when monitor gets c
+										if (monitor.isCanceled() && !PlatformUI.getWorkbench().isClosing()) {
+											tlcJobStatus.killTLC();
+											return Status.OK_STATUS;
+										}
+									}
+								} catch (IOException e) {
+									if (e.getClass().getName()
+											.equals("net.schmizz.sshj.transport.TransportException")) {
+										// Indicates TLC process has terminated.
+										return Status.OK_STATUS;
+									}
+									return new Status(IStatus.ERROR, TLCActivator.PLUGIN_ID, e.getMessage(), e);
+								} finally {
+									snapshot.setRunningRemotely(false);
+								}
+								return Status.OK_STATUS;
+							}
+							
+							/* (non-Javadoc)
+							 * @see org.eclipse.core.runtime.jobs.Job#belongsTo(java.lang.Object)
+							 */
+							@Override
+							public boolean belongsTo(final Object family) {
+								return snapshot == family;
+							}
+
+							@Override
+							protected void canceling() {
+								if (PlatformUI.getWorkbench().isClosing()) {
+									// Do not terminate the remote instance when the Toolbox gets closed.
+									super.canceling();
+									return;
+								}
+								if (status instanceof ITLCJobStatus && snapshot.isRunningRemotely()) {
+									final ITLCJobStatus tlcJobStatus = (ITLCJobStatus) status;
+									tlcJobStatus.killTLC();
+									snapshot.setRunningRemotely(false);
+								}
+								super.canceling();
+							}
+						};
+						j.schedule();
+					}
 					monitor.done();
 					return Status.OK_STATUS;
+				}
+				
+				private List<IProcessOutputSink> getProcessOutputSinks(final Model snapshot) {
+					final IConfigurationElement[] decls = Platform.getExtensionRegistry()
+							.getConfigurationElementsFor(IProcessOutputSink.EXTENSION_ID);
+					final List<IProcessOutputSink> sinks = new ArrayList<>(decls.length);
+					for (int i = 0; i < decls.length; i++) {
+						try {
+							final IProcessOutputSink sink = (IProcessOutputSink) decls[i]
+									.createExecutableExtension("class");
+							sink.initializeSink(snapshot, IProcessOutputSink.TYPE_OUT);
+							sinks.add(sink);
+						} catch (CoreException e) {
+							TLCActivator.logError("Error instatiating the IProcessSink extension", e);
+						}
+					}
+					return sinks;
 				}
 			};
 			refreshJob.setRule(model.getSpec().getProject());

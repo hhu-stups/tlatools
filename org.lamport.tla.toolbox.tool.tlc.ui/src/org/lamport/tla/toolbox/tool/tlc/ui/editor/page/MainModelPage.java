@@ -12,7 +12,9 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.List;
+import java.util.Set;
 import java.util.Vector;
+import java.util.function.Consumer;
 
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.IWorkspaceRunnable;
@@ -296,6 +298,9 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
         // constants from the model
         List<String> savedConstants = getModel().getAttribute(MODEL_PARAMETER_CONSTANTS, new Vector<String>());
         FormHelper.setSerializedInput(constantTable, savedConstants);
+        if (!savedConstants.isEmpty()) {
+        	expandSection(SEC_WHAT_IS_THE_MODEL);
+        }
 
         // recover from the checkpoint
         boolean recover = getModel().getAttribute(LAUNCH_RECOVER, LAUNCH_RECOVER_DEFAULT);
@@ -342,7 +347,10 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
         
         // comments/description/notes
         String commentsStr = getModel().getAttribute(MODEL_COMMENTS, EMPTY_STRING);
-       	commentsSource.setDocument(new Document(commentsStr));
+        commentsSource.setDocument(new Document(commentsStr));
+        if (!EMPTY_STRING.equals(commentsStr)) {
+        	expandSection(SEC_COMMENTS);
+        }
     }
 
     public void validatePage(boolean switchToErrorPage)
@@ -640,9 +648,14 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
         // to allow the No Spec option to be selected when there are variables.
         if (rootModuleNode != null)
         {
-            if (rootModuleNode.getVariableDecls().length == 0)
+            final Control errorMsgControl = UIHelper.getWidget(getDataBindingManager().getAttributeControl(MODEL_BEHAVIOR_NO_SPEC));
+			final String errorMsgKey = MODEL_BEHAVIOR_NO_SPEC + "ErrorMsgKey";
+			if (rootModuleNode.getVariableDecls().length == 0)
             {
                 setHasVariables(false);
+				modelEditor.addErrorMessage(errorMsgKey,
+						"\"What is the behavior spec?\" automatically set to \"No Behavior Spec\" because spec has no declared variables.", this.getId(),
+						IMessageProvider.INFORMATION, errorMsgControl);
 
                 // set selection to the NO SPEC field
                 if (!noSpecRadio.getSelection())
@@ -655,6 +668,7 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
             } else
             {
                 setHasVariables(true);
+				modelEditor.removeErrorMessage(errorMsgKey, errorMsgControl);
 
                 // if there are variables, the user
                 // may still want to choose no spec
@@ -675,18 +689,40 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
         // or not.
         // This must occur after the preceeding code in case
         // that code changes the selection.
-        Section whatToCheckSection = dm.getSection(SEC_WHAT_TO_CHECK).getSection();
+        final Section whatToCheckSection = dm.getSection(SEC_WHAT_TO_CHECK).getSection();
+		final Set<Section> resultPageSections = ((ResultPage) modelEditor.findPage(ResultPage.ID)).getSections(SEC_GENERAL, SEC_STATISTICS);
+		
+		final String hint = " (\"What is the behavior spec?\" above has no behavior spec)";
+		final String hintResults = " (\"What is the behavior spec?\" on \"Model Overview\" page has no behavior spec)";
+		if (noSpecRadio.getSelection()) {
+			whatToCheckSection
+					.setText(!whatToCheckSection.getText().endsWith(hint) ? whatToCheckSection.getText() + hint
+							: whatToCheckSection.getText());
+			whatToCheckSection.setExpanded(false);
+			whatToCheckSection.setEnabled(false);
 
-        if (noSpecRadio.getSelection())
-        {
-            whatToCheckSection.setExpanded(false);
-            whatToCheckSection.setEnabled(false);
+			resultPageSections.forEach(new Consumer<Section>() {
+				@Override
+				public void accept(Section sec) {
+					sec.setText(!sec.getText().endsWith(hintResults) ? sec.getText() + hintResults : sec.getText());
+					sec.setEnabled(false);
+					sec.setExpanded(false);
+				}
+			});
+		} else {
+			whatToCheckSection.setText(whatToCheckSection.getText().replace(hint, ""));
+			whatToCheckSection.setExpanded(true);
+			whatToCheckSection.setEnabled(true);
 
-        } else
-        {
-            whatToCheckSection.setExpanded(true);
-            whatToCheckSection.setEnabled(true);
-        }
+			resultPageSections.forEach(new Consumer<Section>() {
+				@Override
+				public void accept(Section sec) {
+					sec.setText(sec.getText().replace(hintResults, ""));
+					sec.setEnabled(true);
+					sec.setExpanded(true);
+				}
+			});
+		}
 
         // The following code is not needed now because we automatically change
         // the selection to No Spec if there are no variables.
@@ -736,6 +772,29 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
             }
         }
 
+		// Verify that the user provided email address is valid and can be used to send
+		// the model checking result to.
+		if (this.distributedCombo.getSelectionIndex() > 1) {
+			final String text = resultMailAddressText.getText();
+			try {
+				javax.mail.internet.InternetAddress.parse(text, true);
+			} catch (javax.mail.internet.AddressException exp) {
+				modelEditor.addErrorMessage("email address invalid",
+						"For Cloud TLC to work please enter a valid email address.", this.getId(),
+						IMessageProvider.ERROR,
+						UIHelper.getWidget(dm.getAttributeControl(LAUNCH_DISTRIBUTED_RESULT_MAIL_ADDRESS)));
+				setComplete(false);
+				expandSection(SEC_HOW_TO_RUN);
+			}
+			if ("".equals(text.trim())) {
+				modelEditor.addErrorMessage("email address missing",
+						"For Cloud TLC to work please enter an email address.", this.getId(), IMessageProvider.ERROR,
+						UIHelper.getWidget(dm.getAttributeControl(LAUNCH_DISTRIBUTED_RESULT_MAIL_ADDRESS)));
+				setComplete(false);
+				expandSection(SEC_HOW_TO_RUN);
+			}
+		}
+        
         mm.setAutoUpdate(true);
 
         super.validatePage(switchToErrorPage);
@@ -965,8 +1024,7 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
         twd.colspan = 2;
         top.setLayoutData(twd);
         
-        section = FormHelper.createSectionComposite(top, "Model description", "", toolkit, sectionFlags
-                | Section.EXPANDED, getExpansionListener());
+        section = FormHelper.createSectionComposite(top, "Model description", "", toolkit, sectionFlags, getExpansionListener());
         
         final ValidateableSectionPart commentsPart = new ValidateableSectionPart(section, this, SEC_COMMENTS);
         managedForm.addPart(commentsPart);
@@ -1133,8 +1191,8 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 
         // Constants
         ValidateableConstantSectionPart constantsPart = new ValidateableConstantSectionPart(right,
-                "What is the model?", "Specify the values of declared constants.", toolkit, sectionFlags
-                        | Section.EXPANDED, this, SEC_WHAT_IS_THE_MODEL);
+				"What is the model?", "Specify the values of declared constants.", toolkit, sectionFlags, this,
+				SEC_WHAT_IS_THE_MODEL);
         managedForm.addPart(constantsPart);
         constantTable = constantsPart.getTableViewer();
         dm.bindAttribute(MODEL_PARAMETER_CONSTANTS, constantTable, constantsPart);
@@ -1620,7 +1678,7 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
         gd = new GridData();
         gd.grabExcessHorizontalSpace = true;
         gd.horizontalIndent = 10;
-        gd.widthHint = 200;
+        gd.widthHint = 400;
         resultMailAddressText.setLayoutData(gd);
         resultMailAddressText.addModifyListener(howToRunListener);
         dm.bindAttribute(LAUNCH_DISTRIBUTED_RESULT_MAIL_ADDRESS, resultMailAddressText, howToRunPart);
@@ -1696,14 +1754,6 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 		stackLayout.topControl = composite;
 		distributedOptions.layout();
     }
-
-	/**
-	 * Expands the properties table.
-	 */
-	public void expandPropertiesSection() {
-		final SectionPart section = getDataBindingManager().getSection(SEC_WHAT_TO_CHECK_PROPERTIES);
-		section.getSection().setExpanded(true);
-	}
 
     /**
      * On a refresh, the checkpoint information is re-read 

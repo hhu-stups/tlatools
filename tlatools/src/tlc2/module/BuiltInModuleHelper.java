@@ -26,9 +26,15 @@
 
 package tlc2.module;
 
+import java.io.File;
 import java.lang.reflect.Field;
 
 public class BuiltInModuleHelper {
+	
+	public static final String BUNDLE_ID = "org.lamport.tlatools";
+
+	public static final String STANDARD_MODULES = "StandardModules";
+	public static final String STANDARD_MODULES_PATH = File.separator + "tla2sany" + File.separator;
 	
 	private BuiltInModuleHelper() {
 		// no instantiation
@@ -59,6 +65,8 @@ public class BuiltInModuleHelper {
 				} else if (clazz == TLC.class && value == TLC.serialVersionUID) {
 					return true;
 				} else if (clazz == TransitiveClosure.class && value == TransitiveClosure.serialVersionUID) {
+					return true;
+				} else if (clazz == Randomization.class && value == Randomization.serialVersionUID) {
 					return true;
 				}
 			}

@@ -6,11 +6,17 @@
 
 package tlc2.value;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.BitSet;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Random;
+import java.util.TreeMap;
 
-import tlc2.tool.ModelChecker;
-import tlc2.tool.FingerprintException;
 import tlc2.output.EC;
+import tlc2.tool.FingerprintException;
+import tlc2.util.Combinatorics;
 import util.Assert;
 
 public class SubsetValue extends EnumerableValue implements Enumerable {
@@ -153,7 +159,7 @@ public class SubsetValue extends EnumerableValue implements Enumerable {
     }
   }
 
-  public final void normalize() {
+  public final Value normalize() {
     try {
       if (this.pset == null || this.pset == DummyEnum) {
         this.set.normalize();
@@ -161,6 +167,7 @@ public class SubsetValue extends EnumerableValue implements Enumerable {
       else {
         this.pset.normalize();
       }
+      return this;
     }
     catch (RuntimeException | OutOfMemoryError e) {
       if (hasSource()) { throw FingerprintException.getNewHead(this, e); }
@@ -256,7 +263,276 @@ public class SubsetValue extends EnumerableValue implements Enumerable {
       if (hasSource()) { throw FingerprintException.getNewHead(this, e); }
       else { throw e; }
     }
-  }
+  }  
+  
+  	public Unrank getUnrank(final int kSubset) {
+		// Convert outer set only once.
+		final SetEnumValue convert = SetEnumValue.convert(set);
+		convert.normalize();
+		final ValueVec elems = convert.elems;
+
+		return new Unrank(kSubset, Combinatorics.bigSumChoose(elems.size(), kSubset).longValueExact(),
+				Combinatorics.pascalTableUpTo(elems.size(), kSubset), elems, kSubset);
+  	}
+ 
+	public EnumerableValue getRandomSetOfSubsets(final int numOfSubsetsRequested, final int maxLengthOfSubsets) {
+		// Convert outer set only once.
+		final SetEnumValue convert = SetEnumValue.convert(set);
+		convert.normalize();
+		final ValueVec elems = convert.elems;
+		final int size = elems.size();
+
+		// Calculate the sums of the rows of the Pascal Triangle up to
+		// maxLengthOfSubsets.
+		final long[] kss = new long[maxLengthOfSubsets + 1];
+		kss[0] = 1L;
+		// Sum the elems.size()'s row of the Pascal Triangle up to maxLengthOfSubsets.
+		// This corresponds to Combinatorics.bigSumChoose except that we also keep the
+		// intermediate results.
+		BigInteger sum = BigInteger.ONE; // 1 for k=0
+		for (int i = 1; i <= maxLengthOfSubsets; i++) {
+			kss[i] = Combinatorics.bigChoose(size, i).longValueExact();
+			sum = sum.add(BigInteger.valueOf(kss[i]));
+		}
+		assert sum.equals(Combinatorics.bigSumChoose(size, maxLengthOfSubsets));
+
+		// Extend existing Pascal Triangle by a table for the k's 2..maxLengthOfSubset
+		// for all n up to |S| (if needed, otherwise long[0]).
+		final long[] ppt = Combinatorics.pascalTableUpTo(size, maxLengthOfSubsets);
+
+		final ValueVec vec = new ValueVec(numOfSubsetsRequested);
+		for (int rank = 0; rank < kss.length; rank++) {
+			final BigDecimal divide = BigDecimal.valueOf(kss[rank]).divide(new BigDecimal(sum), 32,
+					BigDecimal.ROUND_HALF_DOWN);
+			// Small bias towards smaller/shorter k-Subsets because 0 gets rounded up to 1.
+			final long n = divide.multiply(BigDecimal.valueOf(numOfSubsetsRequested)).max(BigDecimal.ONE).toBigInteger()
+					.longValueExact();
+
+			// The last one (kSubsetSizes.length - 1) is generates the outstanding
+			// number of subsets (will be close to its calculated n anyway).
+			final RandomUnrank unrank = new RandomUnrank(rank,
+					rank == kss.length - 1 ? numOfSubsetsRequested - vec.size() : n, ppt, elems, maxLengthOfSubsets,
+					EnumerableValue.getRandom());
+
+			Value subset;
+			while ((subset = unrank.randomSubset()) != null && vec.size() < numOfSubsetsRequested) {
+				vec.addElement(subset);
+			}
+		}
+		assert vec.size() == numOfSubsetsRequested;
+		return new SetEnumValue(vec, false);
+	}
+
+	public class Unrank {
+
+		private final TreeMap<Long, Integer> sums = new TreeMap<>();
+		private final long[] partialPascalTable;
+		private final int maxK;
+
+		private final ValueVec elems;
+
+		private final int k; // rank of k-Subset
+
+		public Unrank(final int k, final long n, final long[] ppt, final ValueVec elems, final int maxK) {
+			this.k = k;
+			this.elems = elems;
+			this.partialPascalTable = ppt;
+			this.maxK = maxK - 1;
+
+			// Cache the sum of all binomials lt n for 0..elems.size choose k.
+			int choice = Math.max(k - 1, 0);
+			sums.put(-1L, choice); // As base for idx = 0 (see lowerEntry below);
+			long bin = 0L;
+			while ((bin = memoizedBinomial(choice, k)) < n) {
+				sums.put(bin, ++choice);
+			}
+		}
+
+		public Value subsetAt(long idx) {
+			// More subsets in this kSubset available.
+			final ValueVec vec = new ValueVec(k);
+
+			int y = k, choice = sums.lowerEntry(idx).getValue();
+			for (; choice >= 0 && k > 0; choice--) {
+				final long c = memoizedBinomial(choice, y);
+				if (c <= idx) {
+					idx -= c;
+					y--;
+					vec.addElement(this.elems.elementAt(choice));
+				}
+			}
+			return new SetEnumValue(vec, false);
+		}
+
+		protected long memoizedBinomial(final int n, final int k) {
+			if (k == 0 || k == n) {
+				return (long) 1;
+			} else if (k == 1 || k == n - 1) {
+				return (long) n;
+			} else if (n == 0 || k > n) {
+				// Cannot choose from zero elements or more elements than present.
+				return 0;
+			}
+			final int pti = Combinatorics.choosePairToInt(n, k);
+			if (pti < Combinatorics.CHOOSETABLE.length) {
+				return Combinatorics.choose(n, k);
+			}
+			return partialPascalTable[(n - Combinatorics.MAXCHOOSENUM - 1) * maxK + k - 2];
+		}
+	}
+
+	private class RandomUnrank extends Unrank {
+
+		// Primes taken from: https://primes.utm.edu/lists/2small/0bit.html
+		// TODO: 9223372036854775783L; // 2^63 - 25
+//		private static final long x = 549755813881L; // 2^39 - 7 
+		private static final long x = 34359738337L; // 2^35 - 31
+
+		private final long n;
+		private final long a;
+		private long i;
+
+		public RandomUnrank(final int k, final long n, final long[] ppt, final ValueVec elems, final int maxK,
+				final Random random) {
+			super(k, n, ppt, elems, maxK);
+			this.n = n;
+			this.a = Math.abs(random.nextLong()) % n;
+		}
+
+		public Value randomSubset() {
+			if (i < n) {
+				return subsetAt(((x * i++) + a) % n);
+			}
+			return null;
+		}
+	}
+
+	public EnumerableValue getRandomSetOfSubsets(final int numOfPicks, final double probability) {
+		final CoinTossingSubsetEnumerator enumerator = new CoinTossingSubsetEnumerator(numOfPicks, probability);
+		
+		// Using a set here instead of ValueVec preserves the set invariant (no
+		// duplicates). The alternative - a ValueVec which gets sorted to remove
+		// duplicates after the while loops is slower.
+		final int estimated = (int) (numOfPicks * probability);
+		final Collection<Value> sets = new HashSet<>(estimated);
+		Value val;
+		while ((val = enumerator.nextElement()) != null) {
+			sets.add(val);
+		}
+		
+		return new SetEnumValue(new ValueVec(sets), false);
+	}
+	
+	/**
+	 * @see SubsetValue#kElements(int)
+	 */
+	public final long numberOfKElements(final int k) {
+		final int size = this.set.size();
+		if (k < 0 || size < k || size > 62) {
+			throw new IllegalArgumentException(String.format("k=%s and n=%s", k, size));
+		}
+		if (k == 0 || k == size) {
+			return 1;
+		}
+		return Combinatorics.choose(size, k);
+	}
+	
+	/**
+	 * [S]^k (sometimes denoted S^[k]) == { t \in SUBSET S : Cardinality(t) = k }
+	 * @param k
+	 * @return
+	 */
+	public final ValueEnumeration kElements(final int k) {
+		if (k < 0 || this.set.size() < k) {
+			throw new IllegalArgumentException();
+		}
+		if (k == 0) {
+			return new ValueEnumeration() {
+				private boolean done = false;
+
+				@Override
+				public void reset() {
+					done = false;
+				}
+				
+				@Override
+				public Value nextElement() {
+					if (done) { return null; }
+					done = true;
+					return new SetEnumValue();
+				}
+			};
+		}
+
+		return new KElementEnumerator(k);
+	}
+	
+	public final class KElementEnumerator implements ValueEnumeration {
+		private final ValueVec elems;
+		private final int numKSubsetElems;
+		private final int k;
+		
+		private int index;
+		private int cnt;
+
+		public KElementEnumerator(final int k) {
+			this.k = k;
+			
+			this.numKSubsetElems = (int) numberOfKElements(k); 
+			if (numKSubsetElems < 0) {
+				throw new IllegalArgumentException("Subset too large.");
+			}
+			
+			final SetEnumValue convert = SetEnumValue.convert(set);
+			convert.normalize();
+			elems = convert.elems;
+
+			reset();
+		}
+		
+		@Override
+		public void reset() {
+			index = (1 << k) - 1;
+			cnt = 0;
+		}
+
+		// see "Compute the lexicographically next bit permutation" at
+		// http://graphics.stanford.edu/~seander/bithacks.html#NextBitPermutation
+		private int nextIndex() {
+			final int oldIdx = this.index;
+
+			final int t = (index | (index - 1)) + 1;
+			this.index = t | ((((t & -t) / (index & -index)) >> 1) - 1);
+
+			return oldIdx;
+		}
+
+		@Override
+		public Value nextElement() {
+			if (cnt >= numKSubsetElems) {
+				return null;
+			}
+			cnt++;
+
+			int bits = nextIndex();
+			final ValueVec vals = new ValueVec(Integer.bitCount(bits));
+			for (int i = 0; bits > 0 && i < elems.size(); i++) {
+				// Treat bits as a bitset and add the element of elem at current
+				// position i if the LSB of bits happens to be set.
+				if ((bits & 0x1) > 0) {
+					vals.addElement(elems.elementAt(i));
+				}
+				// ...right-shift zero-fill bits by one afterwards.
+				bits = bits >>> 1;
+			}
+			return new SetEnumValue(vals, false);
+		}
+		
+		public KElementEnumerator sort() {
+			this.elems.sort(true);
+			return this;
+		}
+	}
 
   public final ValueEnumeration elements() {
     try {
@@ -272,10 +548,11 @@ public class SubsetValue extends EnumerableValue implements Enumerable {
   }
 
   final class Enumerator implements ValueEnumeration {
-    ValueVec elems;
+    private ValueVec elems;
     private BitSet descriptor;
 
     public Enumerator() {
+    	//WARNING! Mutates the outer instance!?
       set = SetEnumValue.convert(set);
       set.normalize();
       this.elems = ((SetEnumValue)set).elems;
@@ -318,4 +595,105 @@ public class SubsetValue extends EnumerableValue implements Enumerable {
 
   }
 
+	@Override
+	public ValueEnumeration elements(final int k) {
+		final int sz = this.set.size();
+
+		// Use probabilistic CTSE if size of input set or k are too large. CoinTossing
+		// can yield duplicates though, thus k means number of picks.
+		if (sz >= 31 || k > (1 << 16)) {
+			return new CoinTossingSubsetEnumerator(k);
+		}
+		return new SubsetEnumerator(k);
+	}
+	
+	class SubsetEnumerator extends EnumerableValue.SubsetEnumerator {
+
+		private final ValueVec elems;
+
+		SubsetEnumerator(final int k) {
+			super(k, 1 << set.size());
+			final SetEnumValue convert = SetEnumValue.convert(set);
+      		convert.normalize();
+      		this.elems = convert.elems;
+		}
+
+		@Override
+		public Value nextElement() {
+			if (!hasNext()) {
+				return null;
+			}
+			int bits = nextIndex();
+			final ValueVec vals = new ValueVec(Integer.bitCount(bits));
+			for (int i = 0; bits > 0 && i < this.elems.size(); i++) {
+				// Treat bits as a bitset and add the element of this.elem at current
+				// position i if the LSB of bits happens to be set.
+				if ((bits & 0x1) > 0) {
+					vals.addElement(this.elems.elementAt(i));
+				}
+				// ...right-shift zero-fill bits by one afterwards.
+				bits = bits >>> 1;
+			}
+			return new SetEnumValue(vals, false);
+		}
+	}
+
+	/*
+	 * LL: I realized that efficiently choosing a random set of k elements in "SUBSET S"
+	 * is simple. Just compute S and randomly choose k elements SS of SUBSET S by
+	 * including each element of S in SS with probability 1/2.  This looks to me as
+	 * if it's completely equivalent to enumerating all the elements of SUBSET S and
+	 * choosing a random subset of those elements--except that if we want to choose
+	 * exactly k elements, then we'll have to throw away duplicates.
+	 */
+	class CoinTossingSubsetEnumerator implements ValueEnumeration {
+
+		private final ValueVec elems;
+		private final double probability;
+		private final int numOfPicks;
+		private int i;
+
+		public CoinTossingSubsetEnumerator(final int numOfPicks) {
+			this(numOfPicks, .5d);
+		}
+
+		public CoinTossingSubsetEnumerator(final int numOfPicks, final double probability) {
+			this.i = 0;
+			this.numOfPicks = numOfPicks;
+			this.probability = probability;
+
+			final SetEnumValue convert = SetEnumValue.convert(set);
+			convert.normalize();
+			this.elems = convert.elems;
+		}
+
+		// Repeated invocation can yield duplicate elements due to the probabilistic
+		// nature of CoinTossingSubsetEnumerator.
+		public Value nextElement() {
+			if (!hasNext()) {
+				return null;
+			}
+			final ValueVec vals = new ValueVec(elems.size());
+			for (int i = 0; i < elems.size(); i++) {
+				if (EnumerableValue.getRandom().nextDouble() < probability) {
+					vals.addElement(elems.elementAt(i));
+				}
+			}
+			this.i++;
+			return new SetEnumValue(vals, false);
+		}
+
+		private boolean hasNext() {
+			return this.i < this.numOfPicks;
+		}
+
+		@Override
+		public void reset() {
+			this.i = 0;
+		}
+
+		int getNumOfPicks() {
+			return numOfPicks;
+		}
+	}
 }

@@ -6,20 +6,22 @@
 
 package tlc2.value;
 
-import tlc2.tool.ModelChecker;
-import tlc2.tool.FingerprintException;
+import java.math.BigInteger;
+
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
+import tlc2.tool.FingerprintException;
 import util.Assert;
 import util.UniqueString;
 
-public class SetOfRcdsValue extends EnumerableValue implements Enumerable {
+public class SetOfRcdsValue extends SetOfFcnsOrRcdsValue implements Enumerable {
   public UniqueString[] names;      // The names of the fields.
   public Value[] values;            // The values of the fields.
   protected SetEnumValue rcdSet;
 
   /* Constructor */
   public SetOfRcdsValue(UniqueString[] names, Value[] values, boolean isNorm) {
+	  assert names.length == values.length; // see tlc2.tool.Tool.evalAppl(OpApplNode, Context, TLCState, TLCState, int) case for OPCODE_sor
     this.names = names;
     this.values = values;
     this.rcdSet = null;
@@ -156,6 +158,18 @@ public class SetOfRcdsValue extends EnumerableValue implements Enumerable {
     }
   }
 
+	@Override
+	protected boolean needBigInteger() {
+		long sz = 1;
+		for (int i = 0; i < values.length; i++) {
+			sz *= values[i].size();
+			if (sz < -2147483648 || sz > 2147483647) {
+				return true;
+			}
+		}
+		return false;
+	}
+
   public final boolean isNormalized() {
     try {
       if (this.rcdSet == null || this.rcdSet == DummyEnum) {
@@ -174,7 +188,7 @@ public class SetOfRcdsValue extends EnumerableValue implements Enumerable {
     }
   }
 
-  public final void normalize() {
+  public final Value normalize() {
     try {
       if (this.rcdSet == null || this.rcdSet == DummyEnum) {
         for (int i = 0; i < this.names.length; i++) {
@@ -184,6 +198,7 @@ public class SetOfRcdsValue extends EnumerableValue implements Enumerable {
       else {
         this.rcdSet.normalize();
       }
+      return this;
     }
     catch (RuntimeException | OutOfMemoryError e) {
       if (hasSource()) { throw FingerprintException.getNewHead(this, e); }
@@ -409,4 +424,88 @@ public class SetOfRcdsValue extends EnumerableValue implements Enumerable {
 
   }
 
+	@Override
+	protected tlc2.value.SetOfFcnsOrRcdsValue.SubsetEnumerator getSubsetEnumerator(int k, int n) {
+		return new SubsetEnumerator(k, n);
+	}
+	
+	class SubsetEnumerator extends SetOfFcnsOrRcdsValue.SubsetEnumerator {
+		
+		private final SetEnumValue[] convert;
+		private final int[] rescaleBy;
+
+		SubsetEnumerator(final int k, final int n) {
+			super(k, n);
+			
+			convert = new SetEnumValue[values.length];
+			rescaleBy = new int[values.length];
+			
+			int numElems = 1; // 1 to avoid div by zero in elementAt
+			for (int i = values.length - 1; i >= 0; i--) {
+				convert[i] = SetEnumValue.convert(values[i]);
+				rescaleBy[i] = numElems;
+				numElems *= convert[i].elems.size();
+			}
+		}
+
+		protected RecordValue elementAt(final int idx) {
+			assert 0 <= idx && idx < size();
+			
+			final Value[] val = new Value[names.length];
+			for (int i = 0; i < val.length; i++) {
+				final SetEnumValue sev = convert[i];
+				final int mod = sev.elems.size();
+				
+				final int rescaledIdx = (int) Math.floor(idx / rescaleBy[i]);
+				final int elementAt = rescaledIdx % mod;
+				
+				val[i] = sev.elems.elementAt(elementAt);
+			}
+			return new RecordValue(names, val, false);
+		}
+	}
+	
+	@Override
+	protected BigIntegerSubsetEnumerator getBigSubsetEnumerator(int k) {
+		return new BigIntegerSubsetEnumerator(k);
+	}
+	
+	class BigIntegerSubsetEnumerator extends SetOfFcnsOrRcdsValue.BigIntegerSubsetEnumerator {
+		
+		private final SetEnumValue[] convert;
+		private final BigInteger[] rescaleBy;
+		
+		public BigIntegerSubsetEnumerator(final int k) {
+			super(k);
+			
+			convert = new SetEnumValue[values.length];
+			rescaleBy = new BigInteger[values.length];
+			
+			BigInteger numElems = BigInteger.ONE; // 1 to avoid div by zero in elementAt
+			for (int i = values.length - 1; i >= 0; i--) {
+				convert[i] = SetEnumValue.convert(values[i]);
+				rescaleBy[i] = numElems;
+				numElems = numElems.multiply(BigInteger.valueOf(convert[i].elems.size()));
+			}
+			
+			// The size of the (enumerated) SetOfFcnsOrRcdsValue needs BigInteger.
+			this.sz = numElems;
+		}
+
+		@Override
+		protected Value elementAt(final BigInteger idx) {
+			final Value[] val = new Value[names.length];
+			for (int i = 0; i < val.length; i++) {
+				final SetEnumValue sev = convert[i];
+				final int mod = sev.elems.size();
+
+				final BigInteger d = idx.divide(rescaleBy[i]);
+				final BigInteger m = d.mod(BigInteger.valueOf(mod));
+				final int elementAt = m.intValueExact();
+
+				val[i] = sev.elems.elementAt(elementAt);
+			}
+			return new RecordValue(names, val, false);
+		}
+	}
 }

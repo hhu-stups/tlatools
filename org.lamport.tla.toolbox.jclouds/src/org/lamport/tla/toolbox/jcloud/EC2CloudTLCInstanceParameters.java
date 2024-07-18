@@ -75,7 +75,9 @@ public class EC2CloudTLCInstanceParameters extends CloudTLCInstanceParameters {
 		return new Status(Status.ERROR, "org.lamport.tla.toolbox.jcloud",
 				"Invalid credentials, please check the environment variables "
 						+ "(AWS_ACCESS_KEY_ID & AWS_SECRET_ACCESS_KEY) are correctly "
-						+ "set up and picked up by the Toolbox.");
+						+ "set up and picked up by the Toolbox."
+						+ "\n\nPlease visit the Toolbox help and read section 4 "
+						+ "of \"Cloud based distributed TLC\" on how to setup authentication.");
 	}
 
 	/* (non-Javadoc)
@@ -105,13 +107,13 @@ public class EC2CloudTLCInstanceParameters extends CloudTLCInstanceParameters {
 	 */
 	@Override
 	public String getImageId() {
-		// Ubuntu 64bit 16.04 Xenial
+		// Ubuntu 64bit 18.04 Xenial
 		// http://cloud-images.ubuntu.com/locator/ec2/
 		// See http://aws.amazon.com/amazon-linux-ami/instance-type-matrix/
 		// for paravirtual vs. hvm (if instance startup fails with funny errors
 		// such as symlinks failing to be created, you accidentally picked paravirtual.
-		 // "us-east-1,xenial,amd64,hvm:instance-store"
-		final String imageId = System.getProperty("aws-ec2.image", "ami-51025a2b");
+		 // "us-east-1,bionic,amd64,hvm:instance-store"
+		final String imageId = System.getProperty("aws-ec2.image", "ami-9fedbbe0");
 		return getRegion() + "/" + imageId;
 	}
 

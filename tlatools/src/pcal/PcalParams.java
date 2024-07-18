@@ -18,7 +18,7 @@ public final class PcalParams
     /**
      * Parameters to be updated on each new release.
      */
-    public static final String modDate = "18 Aug 2015";
+    public static final String modDate = "16 May 2016";
     public static final String version = "1.8";
     /**
      * SZ Mar 9, 2009:
@@ -91,6 +91,11 @@ public final class PcalParams
     * The file name if the -spec option is chosen.                         *
     ***********************************************************************/
 
+    public static boolean tlcTranslation() {
+    	return PcalParams.SpecOption || PcalParams.MyspecOption || PcalParams.Spec2Option
+                || PcalParams.Myspec2Option;
+    }
+    
     public static boolean WriteASTFlag = false ;
     /***********************************************************************
     * True if the -writeAST option is chosen.                              *
@@ -151,11 +156,11 @@ public final class PcalParams
       * Default initial value changed to "defaultInitValue"                *
       * by LL on 22 Aug 2007                                               *
       *********************************************************************/
-      { Vector line = new Vector() ;
+      { Vector<TLAToken> line = new Vector<TLAToken>() ;
 //        line.addElement(new TLAToken("{", 0, 0)) ;
 //        line.addElement(new TLAToken("}", 0, 0)) ;
         line.addElement(new TLAToken("defaultInitValue", 0, 0));
-        Vector vec = new Vector() ;
+        Vector<Vector<TLAToken>> vec = new Vector<Vector<TLAToken>>() ;
         vec.addElement(line) ;
         TLAExpr exp = new TLAExpr(vec) ;
         exp.normalize() ;

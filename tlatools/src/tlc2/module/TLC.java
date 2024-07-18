@@ -15,7 +15,6 @@ import tlc2.tool.EvalControl;
 import tlc2.tool.EvalException;
 import tlc2.tool.TLARegistry;
 import tlc2.util.IdThread;
-import tlc2.util.RandomGenerator;
 import tlc2.value.Applicable;
 import tlc2.value.BoolValue;
 import tlc2.value.FcnRcdValue;
@@ -38,14 +37,16 @@ public class TLC implements ValueConstants
 {
 	public static final long serialVersionUID = 20160822L;
 
-    private static RandomGenerator rng;
 	public static BufferedWriter OUTPUT;
 
     static
     {
+		// The following two entries in TLARegistry define a mapping from a TLA+ infix
+		// operator to a Java method, e.g. the TLA+ infix operator "@@" is mapped to and
+		// thus implemented by the Java method tlc2.module.TLC.CombineFcn(Value, Value)
+		// below.
         Assert.check(TLARegistry.put("MakeFcn", ":>") == null, EC.TLC_REGISTRY_INIT_ERROR, "MakeFcn");
         Assert.check(TLARegistry.put("CombineFcn", "@@") == null, EC.TLC_REGISTRY_INIT_ERROR, "CombineFcn");
-        rng = new RandomGenerator();
     }
 
     /**
@@ -337,6 +338,7 @@ public class TLC implements ValueConstants
                 Value.ppr(res.toString()) });
     }
 
+    // Returns a set of size n! where n = |s|.
     public static Value Permutations(Value s)
     {
         SetEnumValue s1 = SetEnumValue.convert(s);
@@ -354,20 +356,19 @@ public class TLC implements ValueConstants
             return new SetEnumValue(elems1, true);
         }
 
+        int factorial = 1;
         Value[] domain = new Value[len];
-        for (int i = 0; i < len; i++)
-        {
-            domain[i] = elems.elementAt(i);
-        }
         int[] idxArray = new int[len];
         boolean[] inUse = new boolean[len];
         for (int i = 0; i < len; i++)
         {
+            domain[i] = elems.elementAt(i);
             idxArray[i] = i;
             inUse[i] = true;
+            factorial = factorial * (i + 1);
         }
 
-        ValueVec fcns = new ValueVec();
+        ValueVec fcns = new ValueVec(factorial);
         _done: while (true)
         {
             Value[] vals = new Value[len];
@@ -391,10 +392,12 @@ public class TLC implements ValueConstants
                         break;
                     }
                 }
-                if (found)
+                if (found) {
                     break;
-                if (i == 0)
+                }
+                if (i == 0) {
                     break _done;
+                }
                 inUse[idxArray[i]] = false;
             }
             for (int j = i + 1; j < len; j++)
@@ -463,9 +466,7 @@ public class TLC implements ValueConstants
                 throw new EvalException(EC.TLC_MODULE_APPLYING_TO_WRONG_VALUE, new String[] { "RandomElement",
                         "a finite set", Value.ppr(val.toString()) });
             }
-            int sz = enumVal.size();
-            int index = (int) Math.floor(rng.nextDouble() * sz);
-            return enumVal.elems.elementAt(index);
+            return enumVal.randomElement();
         }
         }
     }

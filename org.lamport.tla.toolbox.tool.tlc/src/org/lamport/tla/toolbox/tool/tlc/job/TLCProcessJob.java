@@ -31,6 +31,7 @@ import org.lamport.tla.toolbox.util.ResourceHelper;
 
 import tlc2.TLC;
 import tlc2.tool.fp.FPSetFactory;
+import tlc2.tool.fp.NoopFPSet;
 import tlc2.tool.fp.OffHeapDiskFPSet;
 import util.TLCRuntime;
 
@@ -41,7 +42,8 @@ import util.TLCRuntime;
  */
 public class TLCProcessJob extends TLCJob
 {
-    protected IProcess process = null;
+    public static final int HEAP_SIZE_DEFAULT = 25;
+	protected IProcess process = null;
     private BroadcastStreamListener listener = null;
 
     /**
@@ -100,7 +102,7 @@ public class TLCProcessJob extends TLCJob
             final List<String> vmArgs = new ArrayList<String>();
 
             // get max heap size as fraction from model editor
-            final double maxHeapSize = launch.getLaunchConfiguration().getAttribute(LAUNCH_MAX_HEAP_SIZE, 50) / 100d;
+            final double maxHeapSize = launch.getLaunchConfiguration().getAttribute(LAUNCH_MAX_HEAP_SIZE, HEAP_SIZE_DEFAULT) / 100d;
 			final TLCRuntime instance = TLCRuntime.getInstance();
 			long absolutePhysicalSystemMemory = instance.getAbsolutePhysicalSystemMemory(maxHeapSize);
 
@@ -109,7 +111,13 @@ public class TLCProcessJob extends TLCJob
 			// TLC's default set.
 			// If the user happened to select OffHeapDiskFPSet, the -XX:MaxDirectMemorySize
 			// is set by getVMArguments.
-			final String clazz = launch.getLaunchConfiguration().getAttribute(LAUNCH_FPSET_IMPL, (String) null);
+			String clazz = launch.getLaunchConfiguration().getAttribute(LAUNCH_FPSET_IMPL, (String) null);
+			if (!hasSpec(launch.getLaunchConfiguration())) {
+				// If a spec has no behaviors, TLC won't need a fingerprint set. Thus, use the
+				// NoopFPSet whose initialization cost is next to nothing. Real fpsets on the
+				// other hand - such as OffHeapDiskFPSet - do heavy weight initialization at startup.
+				clazz = NoopFPSet.class.getName();
+			}
 			if (clazz == null || clazz.equals(OffHeapDiskFPSet.class.getName())) {
 				if (OffHeapDiskFPSet.isSupported()) {
 					// ...good, can use lock-free/scalabe fpset, but need to divide assigned memory
@@ -246,7 +254,7 @@ public class TLCProcessJob extends TLCJob
 							} catch (InterruptedException e) {
 								e.printStackTrace();
 								return new Status(IStatus.ERROR, TLCActivator.PLUGIN_ID,
-										"Error waiting for process termianation.", e);
+										"Error waiting for process termination.", e);
 							}
 						}
 						if (!process.isTerminated()) {

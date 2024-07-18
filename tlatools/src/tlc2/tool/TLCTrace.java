@@ -22,6 +22,7 @@ import tlc2.output.OutputCollector;
 import tlc2.output.StatePrinter;
 import tlc2.util.BufferedRandomAccessFile;
 import tlc2.util.LongVec;
+import tlc2.value.EnumerableValue;
 import util.FileUtil;
 
 public class TLCTrace {
@@ -352,7 +353,32 @@ public class TLCTrace {
 	public synchronized final void printTrace(final TLCState s1, final TLCState s2)
   throws IOException, WorkerException 
   {
+		// Re-Initialize the rng with the seed value recorded and used during the model
+		// checking phase. Otherwise, we won't be able to reconstruct the error trace
+		// because the set of initial states is likely to be different.
+		// This is only necessary though, if TLCGlobals.enumFraction was < 1 during
+		// the generation of inits.
+		EnumerableValue.resetRandom();
+		
 		ArrayList<TLCStateInfo> trace = new ArrayList<TLCStateInfo>(); // collecting the whole error trace
+		
+		if (s1.isInitial()) {
+			// Do not recreate the potentially expensive error trace - e.g. when the set of
+			// initial states is huge such as during inductive invariant checking. Instead
+			// use the two states s1 and s2 directly.
+			MP.printError(EC.TLC_BEHAVIOR_UP_TO_THIS_POINT);
+			TLCStateInfo s1Info = new TLCStateInfo(s1);
+			StatePrinter.printState(s1Info);
+			trace.add(s1Info);
+			if (s2 != null) {
+				// Create TLCStateInfo instance to include corresponding action in output.
+				TLCStateInfo s2Info = this.tool.getState(s2, s1);
+				StatePrinter.printState(s2Info, s1, 2);
+				trace.add(s2Info);
+			}
+			OutputCollector.setTrace(trace);
+			return;
+		}
 
 		MP.printError(EC.TLC_BEHAVIOR_UP_TO_THIS_POINT);
 		// Print the prefix leading to s1:

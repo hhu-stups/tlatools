@@ -129,7 +129,7 @@ public class MP
 
     private static MP instance = null;
 	private static MPRecorder recorder = new MPRecorder();
-    private Set warningHistory;
+    private final Set warningHistory;
     private static final String CONFIG_FILE_ERROR = "TLC found an error in the configuration file at line %1%\n";
     private static final SimpleDateFormat SDF = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss"); //$NON-NLS-1$ 
 	private static final DecimalFormat df = new DecimalFormat("###,###.###");
@@ -359,7 +359,15 @@ public class MP
             break;
 
         case EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT:
-            b.append("Successor state is not completely specified by the" + " next-state action.\n");
+			if (parameters.length == 3) {
+				b.append(
+						"Successor state is not completely specified by action %1% of the next-state relation. The following variable%2% not assigned: %3%.\n");
+			} else if (parameters.length == 2) {
+				b.append(
+						"Successor state is not completely specified by the next-state action. The following variable%1% not assigned: %2%.\n");
+			} else {
+				b.append("Successor state is not completely specified by the next-state action.\n");
+			}
             break;
         case EC.TLC_INVARIANT_VIOLATED_BEHAVIOR:
             b.append("Invariant %1% is violated.");
@@ -684,7 +692,11 @@ public class MP
             b.append("Implied-temporal checking--satisfiability problem has %1% branches.");
             break;
         case EC.TLC_LIVE_CANNOT_HANDLE_FORMULA:
-            b.append("TLC cannot handle the temporal formula %1%");
+        	if (parameters.length > 1) {
+        		b.append("TLC cannot handle the temporal formula %1%:\n%2%");
+        	} else {
+        		b.append("TLC cannot handle the temporal formula %1%");
+        	}
             break;
         case EC.TLC_LIVE_WRONG_FORMULA_FORMAT:
             b.append("Temporal formulas containing actions must be of forms <>[]A or []<>A.");
@@ -797,16 +809,19 @@ public class MP
             b.append("Finished in %1% at (").append(SDF.format(new Date())).append(")");
             break;
         case EC.TLC_MODE_MC:
-            b.append("Running breadth-first search Model-Checking with %1% worker%2% on %3% cores with %10%MB heap and %11%MB offheap memory (%4% %5% %6%, %7% %8% %9%).");
+            b.append("Running breadth-first search Model-Checking with seed %12% with %1% worker%2% on %3% cores with %10%MB heap and %11%MB offheap memory (%4% %5% %6%, %7% %8% %9%).");
             break;
         case EC.TLC_MODE_MC_DFS:
-            b.append("Running depth-first search Model-Checking with %1% worker%2% on %3% cores with %10%MB heap and %11%MB offheap memory (%4% %5% %6%, %7% %8% %9%).");
+            b.append("Running depth-first search Model-Checking with seed %12% with %1% worker%2% on %3% cores with %10%MB heap and %11%MB offheap memory (%4% %5% %6%, %7% %8% %9%).");
             break;
         case EC.TLC_MODE_SIMU:
             b.append("Running Random Simulation with seed %1% with %2% worker%3% on %4% cores with %11%MB heap and %12%MB offheap memory (%5% %6% %7%, %8% %9% %10%).");
             break;
         case EC.TLC_COMPUTING_INIT:
             b.append("Computing initial states...");
+            break;
+        case EC.TLC_COMPUTING_INIT_PROGRESS:
+            b.append("Computed %1% initial states...");
             break;
         case EC.TLC_INIT_GENERATED1:
             b.append("Finished computing initial states: %1% distinct state%2% generated.");
@@ -1089,7 +1104,9 @@ public class MP
             // post processing
             switch (messageClass) {
             case WARNING:
-                b.append("\n(Use the -nowarning option to disable this warning.)");
+            	if (instance.warningHistory.isEmpty()) {
+            		b.append("\n(Use the -nowarning option to disable this warning.)");
+            	}
                 break;
             case ERROR:
                 if (TLCGlobals.tool)
@@ -1134,7 +1151,7 @@ public class MP
      */
     public static String getError(int errorCode, String[] parameters)
     {
-    	recorder.record(errorCode, parameters);
+    	recorder.record(errorCode, (Object[]) parameters);
         return getMessage(ERROR, errorCode, parameters);
     }
 
@@ -1165,7 +1182,7 @@ public class MP
      */
     public static String getMessage(int errorCode, String[] parameters)
     {
-    	recorder.record(errorCode, parameters);
+    	recorder.record(errorCode, (Object[]) parameters);
         return getMessage(NONE, errorCode, parameters);
     }
 

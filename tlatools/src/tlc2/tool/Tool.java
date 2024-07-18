@@ -29,6 +29,7 @@ import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.util.Context;
+import tlc2.util.IdThread;
 import tlc2.util.Vect;
 import tlc2.value.Applicable;
 import tlc2.value.BoolValue;
@@ -72,8 +73,6 @@ import util.UniqueString;
  * It's instance serves as a spec handle
  * This is one of two places in TLC, where not all messages are retrieved from the message printer,
  * but constructed just here in the code.
- *
- * @version $Id$
  */
 public class Tool
     extends Spec
@@ -166,7 +165,7 @@ public class Tool
   }
 
   private final void getActions(SemanticNode next, Context con) {
-	  this.getActions(next, con, null);
+	  this.getActions(next, con, Action.UNNAMED_ACTION);
   }
 
   private final void getActions(SemanticNode next, Context con, final UniqueString actionName) {
@@ -415,15 +414,36 @@ public class Tool
   }
 
   private final void getInitStates(ActionItemList acts, TLCState ps, IStateFunctor states) {
-    if (acts.isEmpty()) {
-      states.addElement(ps.copy());
-    }
-    else {
-      // Assert.check(act.kind > 0 || act.kind == -1);
-      ActionItemList acts1 = acts.cdr();
-      this.getInitStates(acts.carPred(), acts1, acts.carContext(), ps, states);
-    }
-  }
+		if (acts.isEmpty()) {
+			states.addElement(ps.copy());
+			return;
+		} else if (ps.allAssigned()) {
+			// MAK 05/25/2018: If all values of the initial state have already been
+			// assigned, there is no point in further trying to assign values. Instead, all
+			// remaining statements (ActionItemList) can just be evaluated for their boolean
+			// value.
+			// This optimization is especially useful to check inductive invariants which
+			// require TLC to generate a very large set of initial states.
+			while (!acts.isEmpty()) {
+				final Value bval = this.eval(acts.carPred(), acts.carContext(), ps, TLCState.Empty, EvalControl.Init);
+				if (!(bval instanceof BoolValue)) {
+					//TODO Choose more fitting error message.
+					Assert.fail(EC.TLC_EXPECTED_EXPRESSION_IN_COMPUTING,
+							new String[] { "initial states", "boolean", bval.toString(), acts.pred.toString() });
+				}
+				if (!((BoolValue) bval).val) {
+					return;
+				}
+				// Move on to the next action in the ActionItemList.
+				acts = acts.cdr();
+			}
+			states.addElement(ps.copy());
+			return;
+		}
+		// Assert.check(act.kind > 0 || act.kind == -1);
+		ActionItemList acts1 = acts.cdr();
+		this.getInitStates(acts.carPred(), acts1, acts.carContext(), ps, states);
+	  }
 
   private final void getInitStatesAppl(OpApplNode init, ActionItemList acts,
                                        Context c, TLCState ps, IStateFunctor states) {
@@ -804,37 +824,66 @@ public class Tool
     }
   }
 
-  private final TLCState getNextStates(ActionItemList acts, TLCState s0, TLCState s1,
-                                       StateVec nss) {
-    TLCState resState = s1;
-
+  private final TLCState getNextStates(ActionItemList acts, final TLCState s0, final TLCState s1,
+                                       final StateVec nss) {
+    int kind = acts.carKind();
     if (acts.isEmpty()) {
       nss.addElement(s1);
-      resState = s1.copy();
-    }
-    else {
-      int kind = acts.carKind();
+      return s1.copy();
+    } else if (s1.allAssigned()) {
       SemanticNode pred = acts.carPred();
       Context c = acts.carContext();
-      ActionItemList acts1 = acts.cdr();
-      if (kind > 0) {
-        resState = this.getNextStates(pred, acts1, c, s0, s1, nss);
-      }
-      else if (kind == -1) {
-        resState = this.getNextStates(pred, acts1, c, s0, s1, nss);
-      }
-      else if (kind == -2) {
-        resState = this.processUnchanged(pred, acts1, c, s0, s1, nss);
-      }
-      else {
-        Value v1 = this.eval(pred, c, s0);
-        Value v2 = this.eval(pred, c, s1);
-        if (!v1.equals(v2)) {
-          resState = this.getNextStates(acts1, s0, s1, nss);
-        }
+      while (!acts.isEmpty()) {
+           if (kind > 0 || kind == -1) {
+               final Value bval = this.eval(pred, c, s0, s1, EvalControl.Clear);
+               if (!(bval instanceof BoolValue)) {
+                       // TODO Choose more fitting error message.
+                       Assert.fail(EC.TLC_EXPECTED_EXPRESSION_IN_COMPUTING,
+                                       new String[] { "next states", "boolean", bval.toString(), acts.pred.toString() });
+               }
+               if (!((BoolValue) bval).val) {
+                      return s1;
+               }
+           } else if (kind == -2) {
+        	   // Identical to default handling below (line 876). Ignored during this optimization.
+               return this.processUnchanged(pred, acts.cdr(), c, s0, s1, nss);
+           } else {
+               final Value v1 = this.eval(pred, c, s0);
+               final Value v2 = this.eval(pred, c, s1);
+               if (v1.equals(v2)) {
+                   return s1;
+               }
+           }
+           // Move on to the next action in the ActionItemList.
+           acts = acts.cdr();
+           pred = acts.carPred();
+           c = acts.carContext();
+           kind = acts.carKind();
+       }
+       nss.addElement(s1);
+       return s1.copy();
+    }
+
+    SemanticNode pred = acts.carPred();
+    Context c = acts.carContext();
+    ActionItemList acts1 = acts.cdr();
+    if (kind > 0) {
+      return this.getNextStates(pred, acts1, c, s0, s1, nss);
+    }
+    else if (kind == -1) {
+      return this.getNextStates(pred, acts1, c, s0, s1, nss);
+    }
+    else if (kind == -2) {
+      return this.processUnchanged(pred, acts1, c, s0, s1, nss);
+    }
+    else {
+      Value v1 = this.eval(pred, c, s0);
+      Value v2 = this.eval(pred, c, s1);
+      if (!v1.equals(v2)) {
+        return this.getNextStates(acts1, s0, s1, nss);
       }
     }
-    return resState;
+    return s1;
   }
 
   private final TLCState getNextStatesAppl(OpApplNode pred, ActionItemList acts, Context c,
@@ -2981,6 +3030,7 @@ public class Tool
 
   /* Reconstruct the next state of state s whose fingerprint is fp. */
   public final TLCStateInfo getState(long fp, TLCState s) {
+	  IdThread.setCurrentState(s);
     for (int i = 0; i < this.actions.length; i++) {
       Action curAction = this.actions[i];
       StateVec nextStates = this.getNextStates(curAction, s);
@@ -2997,6 +3047,7 @@ public class Tool
 
   /* Reconstruct the info for s1.   */
   public final TLCStateInfo getState(TLCState s1, TLCState s) {
+	  IdThread.setCurrentState(s);
     for (int i = 0; i < this.actions.length; i++) {
       Action curAction = this.actions[i];
       StateVec nextStates = this.getNextStates(curAction, s);
@@ -3012,21 +3063,22 @@ public class Tool
 
   /* Return the set of all permutations under the symmetry assumption. */
   public final MVPerm[] getSymmetryPerms() {
-    String name = this.config.getSymmetry();
-    if (name.length() == 0) return null;
-    Object symm = this.defns.get(name);
+    final String name = this.config.getSymmetry();
+    if (name.length() == 0) { return null; }
+    final Object symm = this.defns.get(name);
     if (symm == null) {
       Assert.fail(EC.TLC_CONFIG_SPECIFIED_NOT_DEFINED, new String[] { "symmetry function", name});
     }
     if (!(symm instanceof OpDefNode)) {
       Assert.fail("The symmetry function " + name + " must specify a set of permutations.");
     }
-    Value fcns = this.eval(((OpDefNode)symm).getBody(), Context.Empty, TLCState.Empty);
+    // This calls tlc2.module.TLC.Permutations(Value) and returns a Value of |fcns|
+    // = n! where n is the capacity of the symmetry set.
+    final Value fcns = this.eval(((OpDefNode)symm).getBody(), Context.Empty, TLCState.Empty);
     if (!(fcns instanceof Enumerable)) {
       Assert.fail("The symmetry operator must specify a set of functions.");
     }
-    ValueEnumeration Enum = ((Enumerable)fcns).elements();
-    return MVPerm.permutationSubgroup(Enum);
+    return MVPerm.permutationSubgroup((Enumerable) fcns);
   }
 
   public boolean hasSymmetry() {

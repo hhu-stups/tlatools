@@ -7,9 +7,12 @@
 package tlc2.tool;
 
 import java.io.IOException;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import tla2sany.modanalyzer.SpecObj;
 import tla2sany.semantic.ExprNode;
+import tla2sany.semantic.OpDeclNode;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
@@ -24,6 +27,7 @@ import tlc2.util.IStateWriter;
 import tlc2.util.ObjLongTable;
 import tlc2.util.SetOfStates;
 import tlc2.util.statistics.BucketStatistics;
+import util.Assert;
 import util.DebugPrinter;
 import util.FileUtil;
 import util.FilenameToStream;
@@ -73,11 +77,11 @@ public class ModelChecker extends AbstractChecker
      * @param specObj external SpecObj added to enable to work on existing specification 
      * Modified on 6 Apr 2010 by Yuan Yu to add fpMemSize parameter.
      */
-    public ModelChecker(String specFile, String configFile, String dumpFile, final boolean asDot, boolean deadlock, String fromChkpt,
+    public ModelChecker(String specFile, String configFile, String metadir, final IStateWriter stateWriter, boolean deadlock, String fromChkpt,
             FilenameToStream resolver, SpecObj specObj, final FPSetConfiguration fpSetConfig) throws EvalException, IOException
     {
         // call the abstract constructor
-        super(specFile, configFile, dumpFile, asDot, deadlock, fromChkpt, true, resolver, specObj);
+        super(specFile, configFile, metadir, stateWriter, deadlock, fromChkpt, true, resolver, specObj);
 
         // SZ Feb 20, 2009: this is a selected alternative
         this.theStateQueue = new DiskStateQueue(this.metadir);
@@ -190,6 +194,7 @@ public class ModelChecker extends AbstractChecker
         }
 
         report("init processed");
+        
         // Finished if there is no next state predicate:
         if (this.actions.length == 0)
         {
@@ -340,13 +345,23 @@ public class ModelChecker extends AbstractChecker
 		// allocating memory for StateVec (which depending on the number of init
 		// states can grow to be GBs) and the subsequent loop over StateVec.
 		final DoInitFunctor functor = new DoInitFunctor();
-		this.tool.getInitStates(functor);
+		try {
+			this.tool.getInitStates(functor);
+		} catch (DoInitFunctor.InvariantViolatedException ive) {
+			this.errState = functor.errState;
+			return functor.returnValue;
+		} catch (Assert.TLCRuntimeException e) {
+			this.errState = functor.errState;
+			throw e;
+		}
 		
 		// Iff one of the init states' checks violates any properties, the
 		// functor will record it.
 		if (functor.errState != null) {
 			this.errState = functor.errState;
-			throw functor.e;
+			if (functor.e != null) {
+				throw functor.e;
+			}
 		}
 		
 		// Return whatever the functor has recorded.
@@ -409,13 +424,27 @@ public class ModelChecker extends AbstractChecker
                 SUCCESSORS: for (int j = 0; j < sz; j++)
                 {
 					succState = nextStates.elementAt(j);
+					succState.level =  (short) ((short) 1 + curState.level);
+					assert succState.level >= 1;
 					// Check if succState is a legal state.
                     if (!this.tool.isGoodState(succState))
                     {
                     	synchronized (this) {
                     		if (this.setErrState(curState, succState, false))
                     		{
-                    			MP.printError(EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT);
+								final Set<OpDeclNode> unassigned = succState.getUnassigned();
+								if (this.actions.length == 1) {
+									MP.printError(EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT,
+											new String[] { unassigned.size() > 1 ? "s are" : " is",
+													unassigned.stream().map(n -> n.getName().toString())
+															.collect(Collectors.joining(", ")) });
+								} else {
+									MP.printError(EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT,
+											new String[] { this.actions[i].getName().toString(),
+													unassigned.size() > 1 ? "s are" : " is",
+													unassigned.stream().map(n -> n.getName().toString())
+															.collect(Collectors.joining(", ")) });
+								}
                     			this.trace.printTrace(curState, succState);
                     			this.theStateQueue.finishAll();
                     			this.notify();
@@ -435,7 +464,7 @@ public class ModelChecker extends AbstractChecker
 						long fp = succState.fingerPrint();
 						seen = this.theFPSet.put(fp);
                         // Write out succState when needed:
-                        this.allStateWriter.writeState(curState, succState, !seen);
+                        this.allStateWriter.writeState(curState, succState, !seen, this.actions[i]);
                         if (!seen)
                         {
 							// Write succState to trace only if it satisfies the
@@ -983,6 +1012,10 @@ public class ModelChecker extends AbstractChecker
 	 */
 	private class DoInitFunctor implements IStateFunctor {
 
+		@SuppressWarnings("serial")
+		public class InvariantViolatedException extends RuntimeException {
+		}
+		
 		/**
 		 * Non-Null iff a violation occurred.
 		 */
@@ -1000,6 +1033,9 @@ public class ModelChecker extends AbstractChecker
 		 * @see tlc2.tool.IStateFunctor#addElement(tlc2.tool.TLCState)
 		 */
 		public Object addElement(final TLCState curState) {
+			if (Long.bitCount(numberOfInitialStates) == 1 && numberOfInitialStates > 1) {
+				MP.printMessage(EC.TLC_COMPUTING_INIT_PROGRESS, Long.toString(numberOfInitialStates));
+			}
 			numberOfInitialStates++;
 			
 			// getInitStates() does not support aborting init state generation
@@ -1016,7 +1052,9 @@ public class ModelChecker extends AbstractChecker
 				// Check if the state is a legal state
 				if (!tool.isGoodState(curState)) {
 					MP.printError(EC.TLC_INITIAL_STATE, new String[]{ "current state is not a legal state", curState.toString() });
-					return returnValue;
+					this.errState = curState;
+					returnValue = false;
+					throw new InvariantViolatedException();
 				}
 				boolean inModel = tool.isInModel(curState);
 				boolean seen = false;
@@ -1043,8 +1081,9 @@ public class ModelChecker extends AbstractChecker
 							MP.printError(EC.TLC_INVARIANT_VIOLATED_INITIAL,
 									new String[] { tool.getInvNames()[j].toString(), curState.toString() });
 							if (!TLCGlobals.continuation) {
+								this.errState = curState;
 								returnValue = false;
-								return returnValue;
+								throw new InvariantViolatedException();
 							}
 						}
 					}
@@ -1053,18 +1092,25 @@ public class ModelChecker extends AbstractChecker
 							// We get here because of implied-inits violation:
 							MP.printError(EC.TLC_PROPERTY_VIOLATED_INITIAL,
 									new String[] { tool.getImpliedInitNames()[j], curState.toString() });
+							this.errState = curState;
 							returnValue = false;
-							return returnValue;
+							throw new InvariantViolatedException();
 						}
 					}
 				}
+			} catch (InvariantViolatedException | Assert.TLCRuntimeException e) {
+				// IVE gets thrown above when an Invariant is violated. TLCRuntimeException gets
+				// thrown when Tool fails to evaluate a statement because of e.g. too large sets
+				// or type errors such as in DoInitFunctorInvariantMinimalErrorStackTest test.
+				this.errState = curState;
+				this.e = e;
+				throw e;
+			} catch (OutOfMemoryError e) {
+				MP.printError(EC.SYSTEM_OUT_OF_MEMORY_TOO_MANY_INIT);
+				returnValue = false;
+				return returnValue;
 			} catch (Throwable e) {
 				// Assert.printStack(e);
-				if (e instanceof OutOfMemoryError) {
-					MP.printError(EC.SYSTEM_OUT_OF_MEMORY_TOO_MANY_INIT);
-					returnValue = false;
-					return returnValue;
-				}
 				this.errState = curState;
 				this.e = e;
 			}
@@ -1072,3 +1118,4 @@ public class ModelChecker extends AbstractChecker
 		}
 	}
 }
+	

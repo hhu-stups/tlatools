@@ -6,6 +6,7 @@
 package tlc2.value;
 
 import java.io.Serializable;
+import java.util.Collection;
 
 import tlc2.TLCGlobals;
 import util.WrongInvocationException;
@@ -32,7 +33,14 @@ public class ValueVec implements Cloneable, Serializable {
     this.elementData = elems;
     this.elementCount = elems.length;
   }
-  
+
+    public ValueVec(Collection<Value> elems) {
+    	this(elems.size());
+    	for (Value value : elems) {
+			addElement(value);
+		}
+    }
+
   public final void addElement(Value val) {
     if (this.elementCount == this.elementData.length) {
       ensureCapacity(this.elementCount+1);
@@ -160,7 +168,7 @@ public class ValueVec implements Cloneable, Serializable {
     return false;
   }
 
-  public final void sort(boolean noDup) {
+  public final ValueVec sort(boolean noDup) {
     int newCount = (this.elementCount == 0) ? 0 : 1;
     for (int i = 1; i < this.elementCount; i++) {
       Value elem = this.elementData[i];
@@ -186,6 +194,7 @@ public class ValueVec implements Cloneable, Serializable {
       }
     }
     this.elementCount = newCount;
+    return this;
   }
   
   public final String toString() {
@@ -202,5 +211,11 @@ public class ValueVec implements Cloneable, Serializable {
     sb.append("}");    
     return sb.toString();
   }
+
+	public Value[] toArray() {
+		final Value[] copy = new Value[elementCount];
+		System.arraycopy(elementData, 0, copy, 0, elementCount);
+		return copy;
+	}
 
 }

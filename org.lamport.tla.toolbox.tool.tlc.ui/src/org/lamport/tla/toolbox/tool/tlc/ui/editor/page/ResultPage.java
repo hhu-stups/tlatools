@@ -4,13 +4,20 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.text.SimpleDateFormat;
+import java.util.Arrays;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.TimeZone;
 import java.util.Vector;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
 
 import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IWorkspace;
@@ -24,6 +31,8 @@ import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.jface.action.Action;
 import org.eclipse.jface.resource.JFaceResources;
 import org.eclipse.jface.text.Document;
+import org.eclipse.jface.text.IDocumentPartitioner;
+import org.eclipse.jface.text.ITextOperationTarget;
 import org.eclipse.jface.text.source.SourceViewer;
 import org.eclipse.jface.viewers.IStructuredContentProvider;
 import org.eclipse.jface.viewers.ITableColorProvider;
@@ -33,6 +42,8 @@ import org.eclipse.jface.viewers.LabelProvider;
 import org.eclipse.jface.viewers.TableViewer;
 import org.eclipse.jface.viewers.Viewer;
 import org.eclipse.swt.SWT;
+import org.eclipse.swt.events.KeyEvent;
+import org.eclipse.swt.events.KeyListener;
 import org.eclipse.swt.events.PaintEvent;
 import org.eclipse.swt.events.PaintListener;
 import org.eclipse.swt.events.SelectionEvent;
@@ -63,6 +74,10 @@ import org.eclipse.ui.forms.widgets.Section;
 import org.eclipse.ui.forms.widgets.TableWrapData;
 import org.eclipse.ui.forms.widgets.TableWrapLayout;
 import org.eclipse.ui.progress.UIJob;
+import org.lamport.tla.toolbox.editor.basic.TLAEditorActivator;
+import org.lamport.tla.toolbox.editor.basic.TLAFastPartitioner;
+import org.lamport.tla.toolbox.editor.basic.TLAPartitionScanner;
+import org.lamport.tla.toolbox.editor.basic.TLASourceViewerConfiguration;
 import org.lamport.tla.toolbox.tool.tlc.model.Model;
 import org.lamport.tla.toolbox.tool.tlc.output.data.CoverageInformationItem;
 import org.lamport.tla.toolbox.tool.tlc.output.data.ITLCModelLaunchDataPresenter;
@@ -104,10 +119,10 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
     private SourceViewer progressOutput;
     private SourceViewer expressionEvalResult;
     private SourceViewer expressionEvalInput;
+    private long startTimestamp;
     private Text startTimestampText;
     // startTime is provided by the TLCModelLaunchDataProvider's getStartTime()
     // method.
-    private long startTime = 0;
     private Text finishTimestampText;
     private Text tlcModeText;
     private Text lastCheckpointTimeText;
@@ -116,7 +131,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
     private Text fingerprintCollisionProbabilityText;
     private TableViewer coverage;
     private TableViewer stateSpace;
-
+	private final Map<String, Section> sections = new HashMap<String, Section>();
     private final Lock disposeLock = new ReentrantLock(true);
 
     // listener on changes to the tlc output font preference
@@ -180,8 +195,8 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
 	                    ResultPage.this.expressionEvalResult.getTextWidget().setText(dataProvider.getCalcOutput());
 	                    break;
 	                case START_TIME:
-	                    final long startTimestamp = dataProvider.getStartTimestamp();
-	                    if (startTimestamp < 0) {
+	                    ResultPage.this.startTimestamp = dataProvider.getStartTimestamp();
+	                    if (ResultPage.this.startTimestamp < 0) {
 							// Leave the starttime text empty on a negative
 							// timestamp. A negative one indicates that the
 							// model has never been checked. See Long.MIN_VALUE in
@@ -189,8 +204,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
 	                    	ResultPage.this.startTimestampText.setText("");
 	                    	break;
 	                    }
-						ResultPage.this.startTimestampText.setText(new Date(startTimestamp).toString());
-	                    ResultPage.this.startTime = dataProvider.getStartTime();
+						ResultPage.this.startTimestampText.setText(new Date(ResultPage.this.startTimestamp).toString());
 	                    break;
 	                case END_TIME:
 	                    long finishTimestamp = dataProvider.getFinishTimestamp();
@@ -361,7 +375,12 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
 		}
 
 		// constant expression
-		expressionEvalInput.setDocument(new Document(getModel().getEvalExpression()));
+		final Document document = new Document(getModel().getEvalExpression());
+		final IDocumentPartitioner partitioner = new TLAFastPartitioner(
+				TLAEditorActivator.getDefault().getTLAPartitionScanner(), TLAPartitionScanner.TLA_PARTITION_TYPES);
+		document.setDocumentPartitioner(TLAPartitionScanner.TLA_PARTITIONING, partitioner);
+		partitioner.connect(document);
+		expressionEvalInput.setDocument(document);
 	}
 
     /**
@@ -378,7 +397,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
     			return;
     		}
     		this.startTimestampText.setText("");
-    		this.startTime = 0;
+    		this.startTimestamp = 0;
     		this.finishTimestampText.setText("");
     		this.tlcModeText.setText("");
     		this.lastCheckpointTimeText.setText("");
@@ -472,6 +491,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
         section = FormHelper.createSectionComposite(body, "General", ""
         /* "The current progress of model-checking"*/, toolkit, sectionFlags & ~Section.DESCRIPTION,
                 getExpansionListener());
+        sections.put(SEC_GENERAL, section);
         twd = new TableWrapData(TableWrapData.FILL);
         twd.colspan = 1;
 
@@ -519,6 +539,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
         section = FormHelper.createSectionComposite(body, "Statistics", "",
         /*"The current progress of model-checking",*/
         toolkit, (sectionFlags | Section.COMPACT) & ~Section.DESCRIPTION, getExpansionListener());
+        sections.put(SEC_STATISTICS, section);
         twd = new TableWrapData(TableWrapData.FILL);
         twd.colspan = 1;
         section.setLayoutData(twd);
@@ -540,6 +561,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
         // extra empty line would appear below the title.
         section = FormHelper.createSectionComposite(body, "Evaluate Constant Expression", "", toolkit, sectionFlags
                 & ~Section.DESCRIPTION, getExpansionListener());
+        sections.put(SEC_EXPRESSION, section);
 
         Composite resultArea = (Composite) section.getClient();
         GridLayout gLayout = new GridLayout(2, false);
@@ -554,8 +576,31 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
         expressionComposite.setLayout(gLayout);
 
         toolkit.createLabel(expressionComposite, "Expression: ");
-        expressionEvalInput = FormHelper.createFormsSourceViewer(toolkit, expressionComposite, expressionFieldFlags);
+		expressionEvalInput = FormHelper.createFormsSourceViewer(toolkit, expressionComposite, expressionFieldFlags,
+				new TLASourceViewerConfiguration());
+		expressionEvalInput.getTextWidget().addKeyListener(new KeyListener() {
+			@Override
+			public void keyPressed(KeyEvent e) {
+				if (isUndoKeyPress(e)) {
+					expressionEvalInput.doOperation(ITextOperationTarget.UNDO);
+				} else if (isRedoKeyPress(e)) {
+					expressionEvalInput.doOperation(ITextOperationTarget.REDO);
+				}
+			}
 
+			private boolean isRedoKeyPress(KeyEvent e) {
+				return ((e.stateMask & SWT.CONTROL) > 0) && ((e.keyCode == 'y') || (e.keyCode == 'Y'));
+			}
+
+			private boolean isUndoKeyPress(KeyEvent e) {
+				return ((e.stateMask & SWT.CONTROL) > 0) && ((e.keyCode == 'z') || (e.keyCode =='Z'));
+			}
+
+			@Override
+			public void keyReleased(KeyEvent e) {
+			}
+		});
+		
         // We want the value section to get larger as the window
         // gets larger but not the expression section.
         Composite valueComposite = toolkit.createComposite(resultArea);
@@ -569,7 +614,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
         // this causes the text box to be extremely
         // tall instead of having a scroll bar.
         gd = new GridData(SWT.FILL, SWT.FILL, true, false);
-        gd.minimumWidth = 500;
+        gd.widthHint = 500;
         gd.heightHint = 80;
         expressionEvalResult.getTextWidget().setLayoutData(gd);
         // The expression section should not grab excess horizontal
@@ -612,10 +657,11 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
         section = FormHelper.createSectionComposite(body, "User Output",
                 "TLC output generated by evaluating Print and PrintT expressions.", toolkit, sectionFlags,
                 getExpansionListener());
+        sections.put(SEC_OUTPUT, section);
         Composite outputArea = (Composite) section.getClient();
         outputArea.setLayout(new GridLayout());
         // output viewer
-        userOutput = FormHelper.createFormsOutputViewer(toolkit, outputArea, textFieldFlags);
+        userOutput = FormHelper.createFormsOutputViewer(toolkit, outputArea, textFieldFlags | SWT.WRAP);
 
         // We dont want this item to fill excess
         // vertical space because then in some cases
@@ -623,7 +669,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
         // tall instead of having a scroll bar.
         gd = new GridData(SWT.FILL, SWT.LEFT, true, false);
         gd.heightHint = 300;
-        gd.minimumWidth = 300;
+        gd.widthHint = 300;
         userOutput.getControl().setLayoutData(gd);
         userOutput.getControl().setFont(JFaceResources.getFont(ITLCPreferenceConstants.I_TLC_OUTPUT_FONT));
 
@@ -634,8 +680,9 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
         // are passed in. If the bit were not changed to 0, an
         // extra empty line would appear below the title.
         section = FormHelper.createSectionComposite(body, "Progress Output", "",
-        /* "The current progress of model-checking",*/
+       /* "The current progress of model-checking",*/
         toolkit, sectionFlags & ~Section.DESCRIPTION, getExpansionListener());
+        sections.put(SEC_PROGRESS, section);
         section.setExpanded(false);
         Composite progressArea = (Composite) section.getClient();
         progressArea = (Composite) section.getClient();
@@ -787,7 +834,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
             }
         });
 
-        this.stateSpace.setLabelProvider(new StateSpaceLabelProvider());
+        this.stateSpace.setLabelProvider(new StateSpaceLabelProvider(this));
         getSite().setSelectionProvider(this.stateSpace);
         return statespaceComposite;
     }
@@ -893,10 +940,14 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
         public final static int COL_DISTINCT = 3;
         public final static int COL_LEFT = 4;
 
-        private static final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss"); // $NON-NLS-1$
 		private boolean doHighlight = false;
+		private final ResultPage resultPage;
 
-        /* (non-Javadoc)
+        public StateSpaceLabelProvider(ResultPage resultPage) {
+			this.resultPage = resultPage;
+		}
+
+		/* (non-Javadoc)
          * @see org.eclipse.jface.viewers.ITableLabelProvider#getColumnImage(java.lang.Object, int)
          */
         public Image getColumnImage(Object element, int columnIndex)
@@ -934,7 +985,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
                 StateSpaceInformationItem item = (StateSpaceInformationItem) element;
                 switch (columnIndex) {
                 case COL_TIME:
-                    return sdf.format(item.getTime());
+                    return formatInterval(resultPage.startTimestamp, item.getTime().getTime());
                 case COL_DIAMETER:
                     if (item.getDiameter() >= 0)
                     {
@@ -993,6 +1044,15 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
 
 		public void unsetHighlightUnexplored() {
 			doHighlight = false;
+		}
+
+		private static String formatInterval(final long firstTS, final long secondTS) {
+			final long interval = secondTS - firstTS;
+			final long hr = TimeUnit.MILLISECONDS.toHours(interval);
+			final long min = TimeUnit.MILLISECONDS.toMinutes(interval - TimeUnit.HOURS.toMillis(hr));
+			final long sec = TimeUnit.MILLISECONDS
+					.toSeconds(interval - TimeUnit.HOURS.toMillis(hr) - TimeUnit.MINUTES.toMillis(min));
+			return String.format("%02d:%02d:%02d", hr, min, sec);
 		}
    }
 
@@ -1207,7 +1267,7 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
                         data[0] = 0;
                         times[0] = 0;
 
-                        long startTime = resultPage.startTime;
+                        long startTime = resultPage.startTimestamp;
                         TLCUIActivator.getDefault().logDebug("first reported time - starttime = "
                                 + (ssInfo[0].getTime().getTime() - startTime));
                         if (startTime > ssInfo[0].getTime().getTime() - 1000)
@@ -1337,4 +1397,9 @@ public class ResultPage extends BasicFormPage implements ITLCModelLaunchDataPres
         return title + " " + getGraphTitleSuffix(resultPage);
     }
 
+	public Set<Section> getSections(String ...sectionIDs) {
+		final Set<String> set = new HashSet<String>(Arrays.asList(sectionIDs));
+		return this.sections.entrySet().stream().filter(e -> set.contains(e.getKey())).map(Map.Entry::getValue)
+				.collect(Collectors.toSet());
+	}
 }

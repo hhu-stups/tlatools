@@ -37,6 +37,7 @@ import org.eclipse.jface.action.Separator;
 import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.preference.IPreferenceStore;
 import org.eclipse.jface.text.BadLocationException;
+import org.eclipse.jface.text.FindReplaceDocumentAdapter;
 import org.eclipse.jface.text.IDocument;
 import org.eclipse.jface.text.IRegion;
 import org.eclipse.jface.text.ITextSelection;
@@ -80,6 +81,7 @@ import org.eclipse.ui.texteditor.ITextEditorActionConstants;
 import org.eclipse.ui.texteditor.ITextEditorActionDefinitionIds;
 import org.eclipse.ui.texteditor.TextOperationAction;
 import org.lamport.tla.toolbox.editor.basic.actions.ToggleCommentAction;
+import org.lamport.tla.toolbox.editor.basic.pcal.IPCalReservedWords;
 import org.lamport.tla.toolbox.editor.basic.proof.IProofFoldCommandIds;
 import org.lamport.tla.toolbox.editor.basic.proof.TLAProofFoldingStructureProvider;
 import org.lamport.tla.toolbox.editor.basic.proof.TLAProofPosition;
@@ -99,7 +101,6 @@ import pcal.TLAtoPCalMapping;
  * Basic editor for TLA+
  *
  * @author Simon Zambrovski
- * @version $Id$
  */
 public class TLAEditor extends TextEditor
 {
@@ -108,6 +109,11 @@ public class TLAEditor extends TextEditor
 	 * saved.
 	 */
 	public static final String SAVE_EVENT = "TLAEditor/save";
+	/**
+	 * The IEventBroker topic identifying the event sent out while the editor is
+	 * being saved.
+	 */
+	public static final String PRE_SAVE_EVENT = "TLAEditor/presave";
 	
 	public static final String ID = "org.lamport.tla.toolbox.editor.basic.TLAEditor";
     private IContextService contextService = null;
@@ -445,6 +451,8 @@ public class TLAEditor extends TextEditor
      */
     public void doSave(IProgressMonitor progressMonitor)
     {
+        service.send(PRE_SAVE_EVENT, this);
+        
         final IEditorInput editorInput = this.getEditorInput();
 		IDocument doc = this.getDocumentProvider().getDocument(editorInput);
         String text = doc.get();
@@ -545,6 +553,7 @@ public class TLAEditor extends TextEditor
 
         } // end if (historyStart > -1)
         
+        super.doSave(progressMonitor);
         
 		// Send out a save event through the event bus. There might be parties
 		// interested in this, e.g. to regenerate the pretty printed pdf.
@@ -554,8 +563,6 @@ public class TLAEditor extends TextEditor
         	final IFile spec = fei.getFile();
         	service.post(SAVE_EVENT, spec);
         }
-        
-        super.doSave(progressMonitor);
     }
 
     /**
@@ -742,7 +749,8 @@ public class TLAEditor extends TextEditor
         }
     }
 
-    public Object getAdapter(@SuppressWarnings("rawtypes") Class required)
+    @SuppressWarnings("unchecked")
+	public Object getAdapter(@SuppressWarnings("rawtypes") Class required)
     {
         /* adapt to projection support */
         if (projectionSupport != null)
@@ -901,6 +909,25 @@ public class TLAEditor extends TextEditor
     public ISourceViewer publicGetSourceViewer() {
         return this.getSourceViewer();
     }
+    
+    
+	public boolean hasPlusCal() {
+		try {
+			// Search the document for the string "--algorithm" or "--fair".
+	        final IDocument doc = this.getDocumentProvider().getDocument(this.getEditorInput());
+			final FindReplaceDocumentAdapter search = new FindReplaceDocumentAdapter(doc);
+			IRegion find = search.find(0, IPCalReservedWords.ALGORITHM, true, true, false, false);
+			if (find != null) {
+				return true;
+			}
+			find = search.find(0, "--" + IPCalReservedWords.FAIR, true, true, false, false);
+			if (find != null) {
+				return true;
+			}
+		} catch (BadLocationException e) {
+		}
+		return false;
+	}
     
     /**
      * Simon's comments, explaining exactly what this class is doing:

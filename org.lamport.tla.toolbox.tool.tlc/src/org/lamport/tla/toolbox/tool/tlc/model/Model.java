@@ -146,7 +146,7 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		public static class ChangeEvent {
 
 			public enum State {
-				RUNNING, NOT_RUNNING, DELETED;
+				RUNNING, NOT_RUNNING, DELETED, REMOTE_RUNNING, REMOTE_NOT_RUNNING;
 				
 				public boolean in(State ... states) {
 					for (State state : states) {
@@ -261,13 +261,21 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		}
 	}
 
-	public void rename(String newModelName) {
+	public void rename(String newModelName, IProgressMonitor monitor) throws CoreException {
 		final Collection<Model> snapshots = getSnapshots();
 		
+		// Rename the model directory to the new name.
+		final IFolder modelDir = getTargetDirectory();
+		if (modelDir != null && modelDir.exists()) {
+			final IPath src = modelDir.getFullPath();
+			final IPath dst = src.removeLastSegments(1).append(newModelName);
+			modelDir.move(dst, true, monitor);
+		}
+
 		renameLaunch(getSpec(), sanitizeName(newModelName));
 		
 		for (Model snapshot : snapshots) {
-			snapshot.rename(newModelName + snapshot.getSnapshotSuffix());
+			snapshot.rename(newModelName + snapshot.getSnapshotSuffix(), monitor);
 		}
 	}
 	
@@ -378,6 +386,17 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		}
 	}
 
+	private boolean isRunningRemotely = false;
+	
+	public boolean isRunningRemotely() {
+		return this.isRunningRemotely;
+	}
+
+	public void setRunningRemotely(boolean isRunning) {
+		this.isRunningRemotely = isRunning;
+		notifyListener(new StateChangeListener.ChangeEvent(this, isRunning ? State.REMOTE_RUNNING : State.REMOTE_NOT_RUNNING));
+	}
+
 	/*
 	 * Snapshot related methods.
 	 */
@@ -399,7 +418,7 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	}
 	
 	public Collection<Model> getSnapshots() {
-		return getSpec().getModels(getName() + SNAPSHOT_REGEXP, true).values();
+		return getSpec().getModels(Pattern.quote(getName()) + SNAPSHOT_REGEXP, true).values();
 	}
 
 	public boolean isSnapshot() {
@@ -407,7 +426,7 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	}
 
 	public boolean hasSnapshots() {
-		return !getSpec().getModels(getName() + SNAPSHOT_REGEXP, true).isEmpty();
+		return !getSpec().getModels(Pattern.quote(getName()) + SNAPSHOT_REGEXP, true).isEmpty();
 	}
 
 	public Model getSnapshotFor() {
@@ -499,7 +518,9 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	
 	public boolean hasStateGraphDump() {
 		final String name = getName().concat(DOT_FILE_EXT);
-		final IFile file = getFolder().getFile(name);
+		// Convert to java.io.File rather than Eclipse's IFile. For the latter
+		// file.exists might return null if Eclipse's internal FS cache is stale.
+		final File file = getFolder().getFile(name).getLocation().toFile();
 		return file.exists();
 	}
 
@@ -721,11 +742,14 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	}
 	
     /**
-     * Retrieves the working directory for the model
-     * <br>Note, this is a handle operation only, the resource returned may not exist
-     * @param config 
-     * @return the Folder.
-     */
+	 * Retrieves the working directory for the model. Returns null if the model has
+	 * not run yet. In other words, gets created by running TLC.<br>
+	 * Note, this is a handle operation only, the resource returned may not exist
+	 * 
+	 * @param config
+	 * @return the Folder.
+	 * @see Model#getFolder()
+	 */
 	public IFolder getTargetDirectory() {
         return (IFolder) getSpec().getProject().findMember(getName());
 	}
@@ -1052,13 +1076,9 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		return launch;
 	}
 	
-	public void launch(String mode, IProgressMonitor subProgressMonitor, boolean build) {
-		try {
-			Assert.isTrue(this.workingCopy == null, "Cannot launch dirty model, save first.");
-			this.launch = this.launchConfig.launch(mode, subProgressMonitor, build);
-		} catch (CoreException shouldNotHappen) {
-			TLCActivator.logError(shouldNotHappen.getMessage(), shouldNotHappen);
-		}
+	public void launch(String mode, IProgressMonitor subProgressMonitor, boolean build) throws CoreException {
+		Assert.isTrue(this.workingCopy == null, "Cannot launch dirty model, save first.");
+		this.launch = this.launchConfig.launch(mode, subProgressMonitor, build);
 	}
 
 	public Model save(final IProgressMonitor monitor) {

@@ -8,6 +8,13 @@
 (* subset of the positive integers.  An element e belongs to bag B iff e  *)
 (* is in the domain of B, in which case bag B contains B[e] copies of e.  *)
 (**************************************************************************)
+(**************************************************************************)
+(* All these definitions other than SubBag are overridden by TLC in the   *)
+(* Java class tlc2.module.Bags. Each operator is overridden by the Java   *)
+(* method with the same name, except that the mapping for TLA+ infix      *)
+(* operators is defined in the static block at the beginning of the Java  *)
+(* class.                                                                 *)
+(**************************************************************************)
 EXTENDS TLC
 LOCAL INSTANCE Naturals
 
@@ -22,7 +29,7 @@ BagToSet(B) == DOMAIN B
   (* The set of elements at least one copy of which is in B.              *)
   (************************************************************************)
 
-SetToBag(S) == [e \in S |-> 1]  
+SetToBag(S) == [e \in S |-> 1]
   (************************************************************************)
   (* The bag that contains one copy of every element of the set S.        *)
   (************************************************************************)
@@ -42,7 +49,7 @@ B1 (+) B2  ==
       (IF e \in DOMAIN B1 THEN B1[e] ELSE 0) 
     + (IF e \in DOMAIN B2 THEN B2[e] ELSE 0) ]
   
-B1 (-) B2  == 
+B1 (-) B2  ==
   (************************************************************************)
   (* The bag B1 with the elements of B2 removed--that is, with one copy   *)
   (* of an element removed from B1 for each copy of the same element in   *)

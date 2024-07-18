@@ -7,7 +7,6 @@
 package tlc2.value;
 
 import tla2sany.semantic.SymbolNode;
-import tlc2.tool.ModelChecker;
 import tlc2.tool.FingerprintException;
 import tlc2.output.EC;
 import tlc2.output.MP;
@@ -17,7 +16,7 @@ import tlc2.util.FP64;
 import util.Assert;
 
 public class TupleValue extends Value implements Applicable {
-  public Value[] elems;          // the elements of this tuple.
+  public final Value[] elems;          // the elements of this tuple.
 
   /* Constructor */
   public TupleValue(Value[] elems) { this.elems = elems; }
@@ -267,7 +266,7 @@ public class TupleValue extends Value implements Applicable {
   /* The normalization of the value. */
   public final boolean isNormalized() { return true; }
 
-  public final void normalize() { /*nop*/ }
+  public final Value normalize() { /*nop*/return this; }
 
   public final boolean isDefined() {
     try {

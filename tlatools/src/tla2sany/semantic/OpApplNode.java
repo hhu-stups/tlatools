@@ -19,16 +19,19 @@ package tla2sany.semantic;
 import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Iterator;
+import java.util.TreeSet;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 
 import tla2sany.explorer.ExploreNode;
 import tla2sany.parser.SyntaxTreeNode;
 import tla2sany.st.TreeNode;
 import tla2sany.utilities.Strings;
 import tla2sany.xml.SymbolContext;
+import tlc2.value.TupleValue;
+import tlc2.value.Value;
 import util.UniqueString;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
 
 /**
  * OpApplNodes represent all kinds of operator applications in TLA+,
@@ -1235,6 +1238,37 @@ public class OpApplNode extends ExprNode implements ExploreNode {
            + toStringBody(depth) + sEO ;
   }
 
+    @Override
+	public String toString(final Value aValue) {
+		if (aValue instanceof TupleValue && allParams.size() == ((TupleValue) aValue).size()) {
+			final StringBuffer result = new StringBuffer();
+			
+			// The values in aValue are ordered by the varloc of the variable names (see
+			// tlc2.tool.TLCStateMut.bind(UniqueString, Value, SemanticNode). Thus, sort
+			// allParams - which are unordered - under same varloc order.
+			final TreeSet<SymbolNode> s = new TreeSet<SymbolNode>(new java.util.Comparator<SymbolNode>() {
+				@Override
+				public int compare(SymbolNode o1, SymbolNode o2) {
+					return Integer.compare(o1.getName().getVarLoc(), o2.getName().getVarLoc());
+				}
+			});
+			s.addAll(allParams);
+			
+			int idx = 0;
+			for (final SymbolNode sn : s) {
+				result.append("/\\ ");
+				result.append(sn.getName().toString());
+
+				final Value value = ((TupleValue) aValue).elems[idx++];
+				result.append(" = ");
+				result.append(Value.ppr(value));
+				result.append("\n");
+			}
+			return result.toString();
+		}
+		return super.toString(aValue);
+	}
+  
   @Override
   protected Element getLevelElement(Document doc, SymbolContext context) {
     Element e = doc.createElement("OpApplNode");

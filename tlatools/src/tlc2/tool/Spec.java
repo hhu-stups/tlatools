@@ -184,7 +184,6 @@ public class Spec implements ValueConstants, ToolGlobals, Serializable
             }
             // The following statement moved here by LL on 11 March 2011
             MP.printMessage(EC.TLC_STARTING);
-
         }
 
         // SZ Feb 20, 2009:

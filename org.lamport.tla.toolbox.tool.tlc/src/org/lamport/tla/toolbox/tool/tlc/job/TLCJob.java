@@ -120,29 +120,24 @@ public abstract class TLCJob extends AbstractJob implements IModelConfigurationC
         ILaunchConfiguration config = launch.getLaunchConfiguration();
 
         // deadlock
-        boolean checkDeadlock = config.getAttribute(IModelConfigurationConstants.MODEL_CORRECTNESS_CHECK_DEADLOCK,
-                IModelConfigurationDefaults.MODEL_CORRECTNESS_CHECK_DEADLOCK_DEFAULT);
-        if (!checkDeadlock) /* "!" added by LL on 22 Aug 2009 */
+        if (!checkDeadlock()) /* "!" added by LL on 22 Aug 2009 */
         {
             arguments.add("-deadlock");
         }
 
         // adjust checkpointing
-       	arguments.add("-checkpoint");
-       	arguments.add(String.valueOf(CHECKPOINT_INTERVAL));
+        if (checkPoint()) {
+        	arguments.add("-checkpoint");
+        	arguments.add(String.valueOf(CHECKPOINT_INTERVAL));
+        }
 
-        boolean hasSpec = config.getAttribute(MODEL_BEHAVIOR_SPEC_TYPE, MODEL_BEHAVIOR_TYPE_DEFAULT) != IModelConfigurationDefaults.MODEL_BEHAVIOR_TYPE_NO_SPEC;
-
+        final boolean hasSpec = hasSpec(config);
         if (hasSpec)
         {
-            boolean runAsModelCheck = config.getAttribute(IModelConfigurationConstants.LAUNCH_MC_MODE,
-                    IModelConfigurationDefaults.LAUNCH_MC_MODE_DEFAULT);
-            if (runAsModelCheck)
+            if (runAsModelCheck())
             {
                 // look for advanced model checking parameters
-                boolean isDepthFirst = config.getAttribute(IModelConfigurationConstants.LAUNCH_DFID_MODE,
-                        IModelConfigurationDefaults.LAUNCH_DFID_MODE_DEFAULT);
-                if (isDepthFirst)
+                if (isDepthFirst())
                 {
                     // for depth-first run, look for the depth
                     int dfidDepth = config.getAttribute(IModelConfigurationConstants.LAUNCH_DFID_DEPTH,
@@ -183,9 +178,7 @@ public abstract class TLCJob extends AbstractJob implements IModelConfigurationC
         // recover from checkpoint
         if (hasSpec)
         {
-            boolean recover = config.getAttribute(IModelConfigurationConstants.LAUNCH_RECOVER,
-                    IModelConfigurationDefaults.LAUNCH_RECOVER_DEFAULT);
-            if (recover)
+            if (recover())
             {
                 IResource[] checkpoints = config.getAdapter(Model.class).getCheckpoints(false);
                 if (checkpoints.length > 0)
@@ -225,14 +218,14 @@ public abstract class TLCJob extends AbstractJob implements IModelConfigurationC
         }
         
         // Visualize state graph
-        final boolean visualizeStateGraph = launch.getLaunchConfiguration().getAttribute(LAUNCH_VISUALIZE_STATEGRAPH, false);
-        if (visualizeStateGraph && hasSpec) {
+		if (visualizeStateGraph() && hasSpec) {
 			// Visualize state graph when requested and a behavior spec is given. A behavior
-			// spec is required for TLC to create states.
-        	arguments.add("-dump");
-        	arguments.add("dot");
-        	arguments.add(modelName);
-        }
+			// spec is required for TLC to create states. Default to always colorize edges and 
+			// not to add action edge labels.
+			arguments.add("-dump");
+			arguments.add("dot,colorize");
+			arguments.add(modelName);
+		}
       
         arguments.add("-config");
         arguments.add(cfgFile.getName()); // configuration file
@@ -273,6 +266,41 @@ public abstract class TLCJob extends AbstractJob implements IModelConfigurationC
 
         return (String[]) arguments.toArray(new String[arguments.size()]);
     }
+    
+	// Allow subclasses to veto command line parameters if needed.
+
+	protected boolean recover() throws CoreException {
+		return launch.getLaunchConfiguration().getAttribute(IModelConfigurationConstants.LAUNCH_RECOVER,
+				IModelConfigurationDefaults.LAUNCH_RECOVER_DEFAULT);
+	}
+
+	protected boolean isDepthFirst() throws CoreException {
+		return launch.getLaunchConfiguration().getAttribute(IModelConfigurationConstants.LAUNCH_DFID_MODE,
+				IModelConfigurationDefaults.LAUNCH_DFID_MODE_DEFAULT);
+	}
+
+	protected boolean runAsModelCheck() throws CoreException {
+		return launch.getLaunchConfiguration().getAttribute(IModelConfigurationConstants.LAUNCH_MC_MODE,
+				IModelConfigurationDefaults.LAUNCH_MC_MODE_DEFAULT);
+	}
+
+	protected boolean checkPoint() {
+		return true;
+	}
+
+	protected boolean checkDeadlock() throws CoreException {
+		return launch.getLaunchConfiguration().getAttribute(
+				IModelConfigurationConstants.MODEL_CORRECTNESS_CHECK_DEADLOCK,
+				IModelConfigurationDefaults.MODEL_CORRECTNESS_CHECK_DEADLOCK_DEFAULT);
+	}
+
+	protected boolean visualizeStateGraph() throws CoreException {
+		return launch.getLaunchConfiguration().getAttribute(LAUNCH_VISUALIZE_STATEGRAPH, false);
+	}
+	
+	protected boolean hasSpec(final ILaunchConfiguration config) throws CoreException {
+		return config.getAttribute(MODEL_BEHAVIOR_SPEC_TYPE, MODEL_BEHAVIOR_TYPE_DEFAULT) != IModelConfigurationDefaults.MODEL_BEHAVIOR_TYPE_NO_SPEC;
+	}
 
 	/**
      * Returns the action that tells all registered result

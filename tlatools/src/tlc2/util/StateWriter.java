@@ -3,6 +3,7 @@ package tlc2.util;
 import java.io.IOException;
 import java.io.PrintWriter;
 
+import tlc2.tool.Action;
 import tlc2.tool.TLCState;
 import util.FileUtil;
 
@@ -14,15 +15,30 @@ public class StateWriter implements IStateWriter
 {
     protected final PrintWriter writer;
     protected int stateNum;
+	private String fname;
 
     public StateWriter(String fname) throws IOException
     {
-        // SZ Feb 24, 2009: stream creation moved
+        this.fname = fname;
         this.writer = new PrintWriter(FileUtil.newBFOS(fname));
         this.stateNum = 1;
     }
 
     /* (non-Javadoc)
+     * @see tlc2.util.IStateWriter#getDumpFileName()
+     */
+    public String getDumpFileName() {
+    	return this.fname;
+    }
+
+	/* (non-Javadoc)
+	 * @see tlc2.util.IStateWriter#isNoop()
+	 */
+	public boolean isNoop() {
+		return false;
+	}
+
+	/* (non-Javadoc)
 	 * @see tlc2.util.IStateWriter#writeState(tlc2.tool.TLCState)
 	 */
     public synchronized void writeState(TLCState state)
@@ -42,6 +58,13 @@ public class StateWriter implements IStateWriter
     	}
     }
 
+    public synchronized void writeState(final TLCState state, final TLCState successor, final boolean successorStateIsNew, Action action)
+    {
+    	if (successorStateIsNew) {
+    		this.writeState(state);
+    	}
+    }
+    
     /* (non-Javadoc)
      * @see tlc2.util.IStateWriter#writeState(tlc2.tool.TLCState, tlc2.tool.TLCState, boolean, tlc2.util.IStateWriter.Visualization)
      */

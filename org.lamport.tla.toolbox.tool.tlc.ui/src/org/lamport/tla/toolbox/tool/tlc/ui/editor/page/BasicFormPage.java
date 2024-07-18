@@ -458,7 +458,7 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
     /**
      * Handle the problem markers 
      */
-    public void handleProblemMarkers(boolean switchToErrorPage)
+    private void handleProblemMarkers(boolean switchToErrorPage)
     {
         // delegate to the editor
         ((ModelEditor) getEditor()).handleProblemMarkers(switchToErrorPage);
@@ -508,6 +508,15 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
     {
         getDataBindingManager().expandSection(sectionId);
     }
+
+	/**
+	 * Expands the given sections.
+	 */
+	public void expandSections(final String[] sections) {
+		for (String section : sections) {
+			expandSection(section);
+		}
+	}
 
     /**
      * Enables or disables the page
@@ -882,7 +891,7 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
          */
         public boolean isEnabled()
         {
-            return getModel().isRunning();
+            return getModel().isRunning() || getModel().isRunningRemotely();
         }
     }
 

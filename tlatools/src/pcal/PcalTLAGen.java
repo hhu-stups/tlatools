@@ -77,7 +77,7 @@ public class PcalTLAGen
     private TLAExpr self = null; // changed by LL on 22 jan 2011 from: private String self = null; /* for current process */
     private boolean selfIsSelf = false; 
     
-    private Vector vars = new Vector(); /* list of all disambiguated vars */
+    private final Vector<String> vars = new Vector<String>(); /* list of all disambiguated vars */
     private Vector pcV = new Vector(); /* sublist of vars of variables representing 
                                           procedure parameters and procedure variables */
     private Vector psV = new Vector(); /* sublist of vars local to a process set */
@@ -120,10 +120,10 @@ public class PcalTLAGen
      * @return A vector of strings.
      * @throws PcalTLAGenException
      */
-    public Vector generate(AST ast, PcalSymTab symtab, Vector report) throws PcalTLAGenException
+    public Vector<String> generate(AST ast, PcalSymTab symtab, Vector report) throws PcalTLAGenException
     {
         TLAtoPCalMapping map = PcalParams.tlaPcalMapping;
-        mappingVector = new Vector(50);
+        mappingVector = new Vector<String>(50);
         /*
          * Add the reports of renaming to the output.
          */
@@ -885,8 +885,19 @@ public class PcalTLAGen
         boolean hasMultipleVars = false;
         while (i < ast.ass.size())
         {
-            int iFirst = i;
             AST.SingleAssign sF = (AST.SingleAssign) ast.ass.elementAt(i);
+            
+           /*
+             * Added by LL and MK on 16 May 2018:
+             * Report an error if the variable being assigned is not a 
+             * variable declared in the algorithm (either not declared
+             * at all or is a constant, bound identifier, ...).
+             */
+			if (!this.vars.contains(sF.lhs.var)) {
+				throw new PcalTLAGenException("Assignment to undeclared variable " + sF.lhs.var, sF);
+			}
+
+            int iFirst = i; 
             int iLast = i;
             boolean hasAssignmentWithNoSubscript = false;
             boolean lastAssignmentHasNoSubscript = EmptyExpr(sF.lhs.sub);

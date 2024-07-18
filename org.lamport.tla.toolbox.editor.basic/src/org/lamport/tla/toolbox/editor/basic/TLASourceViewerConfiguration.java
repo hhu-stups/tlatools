@@ -1,9 +1,18 @@
 package org.lamport.tla.toolbox.editor.basic;
 
+import java.lang.reflect.Field;
+
 import org.eclipse.jface.preference.IPreferenceStore;
+import org.eclipse.jface.resource.JFaceResources;
+import org.eclipse.jface.text.DefaultInformationControl;
 import org.eclipse.jface.text.IDocument;
+import org.eclipse.jface.text.IInformationControl;
+import org.eclipse.jface.text.IInformationControlCreator;
+import org.eclipse.jface.text.ITextHover;
 import org.eclipse.jface.text.TextAttribute;
 import org.eclipse.jface.text.contentassist.ContentAssistant;
+import org.eclipse.jface.text.contentassist.ICompletionProposal;
+import org.eclipse.jface.text.contentassist.ICompletionProposalSorter;
 import org.eclipse.jface.text.contentassist.IContentAssistant;
 import org.eclipse.jface.text.presentation.IPresentationReconciler;
 import org.eclipse.jface.text.presentation.PresentationReconciler;
@@ -14,19 +23,28 @@ import org.eclipse.jface.text.rules.DefaultDamagerRepairer;
 import org.eclipse.jface.text.rules.Token;
 import org.eclipse.jface.text.source.IAnnotationHover;
 import org.eclipse.jface.text.source.ISourceViewer;
+import org.eclipse.swt.custom.StyledText;
+import org.eclipse.swt.widgets.Composite;
+import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.editors.text.TextSourceViewerConfiguration;
+import org.lamport.tla.toolbox.editor.basic.pcal.PCalCompletionProcessor;
+import org.lamport.tla.toolbox.editor.basic.pcal.PCalHover;
 import org.lamport.tla.toolbox.editor.basic.tla.TLAAnnotationHover;
 import org.lamport.tla.toolbox.editor.basic.tla.TLACompletionProcessor;
 
 /**
  * Configuration of the source viewer for TLA+ editor 
  * @author Simon Zambrovski
- * @version $Id$
  */
 public class TLASourceViewerConfiguration extends TextSourceViewerConfiguration
 {
 
     private final TLAEditor editor;
+
+	public TLASourceViewerConfiguration() {
+		super();
+		this.editor = null;
+	}
 
     /**
      * Constructs configuration based on a preference store  
@@ -108,18 +126,53 @@ public class TLASourceViewerConfiguration extends TextSourceViewerConfiguration
      */
     public IContentAssistant getContentAssistant(ISourceViewer sourceViewer)
     {
-
         ContentAssistant assistant = new ContentAssistant();
         assistant.setDocumentPartitioning(getConfiguredDocumentPartitioning(sourceViewer));
         assistant.setContentAssistProcessor(new TLACompletionProcessor(), IDocument.DEFAULT_CONTENT_TYPE);
+        assistant.setContentAssistProcessor(new PCalCompletionProcessor(), TLAPartitionScanner.TLA_PCAL);
+        assistant.enableColoredLabels(true);
         assistant.enableAutoActivation(true);
         assistant.setAutoActivationDelay(500);
+		assistant.setInformationControlCreator(new IInformationControlCreator() {
+			public IInformationControl createInformationControl(final Shell parent) {
+				return new DefaultInformationControl(parent, (DefaultInformationControl.IInformationPresenter) null);
+			}
+		});
+		assistant.setSorter(new ICompletionProposalSorter() {
+			public int compare(ICompletionProposal p1, ICompletionProposal p2) {
+				return 0;
+			}
+		});
         assistant.setProposalPopupOrientation(IContentAssistant.PROPOSAL_OVERLAY);
         assistant.setContextInformationPopupOrientation(IContentAssistant.CONTEXT_INFO_ABOVE);
         assistant.setContextInformationPopupBackground(TLAEditorActivator.getDefault().getTLAColorProvider().getColor(
                 TLAColorProvider.CONTENT_ASSIST_BACKGROUNG));
         return assistant;
     }
+
+	/* (non-Javadoc)
+	 * @see org.eclipse.ui.editors.text.TextSourceViewerConfiguration#getTextHover(org.eclipse.jface.text.source.ISourceViewer, java.lang.String)
+	 */
+	@Override
+	public ITextHover getTextHover(ISourceViewer sourceViewer, String contentType) {
+		if (TLAPartitionScanner.TLA_PCAL.equals(contentType)) {
+			return new PCalHover();
+		}
+		return new ToolboxHover();
+	}
+	
+	/* (non-Javadoc)
+	 * @see org.eclipse.jface.text.source.SourceViewerConfiguration#getInformationControlCreator(org.eclipse.jface.text.source.ISourceViewer)
+	 */
+	@Override
+	public IInformationControlCreator getInformationControlCreator(ISourceViewer sourceViewer) {
+		// We want the hover popup to use a monospaced font.
+		return new IInformationControlCreator() {
+			public IInformationControl createInformationControl(final Shell parent) {
+				return new MonospacedDefaultInformationControl(parent);
+			}
+		};
+	}
 
     /**
      * Ruler annotation
@@ -156,4 +209,25 @@ public class TLASourceViewerConfiguration extends TextSourceViewerConfiguration
         return new String[] { "\\*", "" };
     }
 
+    public static class MonospacedDefaultInformationControl extends DefaultInformationControl {
+    	public MonospacedDefaultInformationControl(final Shell parent) {
+    		super(parent, (DefaultInformationControl.IInformationPresenter) null);
+    	}
+
+		@Override
+		protected void createContent(Composite parent) {
+			super.createContent(parent);
+			try {
+				final Field f = DefaultInformationControl.class.getDeclaredField("fText");
+				f.setAccessible(true);
+				final StyledText fText = (StyledText) f.get(this); // IllegalAccessException
+				
+				fText.setFont(JFaceResources.getFont(JFaceResources.TEXT_FONT));
+			} catch (NoSuchFieldException e) {
+			} catch (SecurityException e) {
+			} catch (IllegalArgumentException e) {
+			} catch (IllegalAccessException e) {
+			}
+		}
+    }
 }

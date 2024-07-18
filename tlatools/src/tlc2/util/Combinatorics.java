@@ -10,43 +10,43 @@ import util.Assert;
 public class Combinatorics {
 
   public static final int MAXCHOOSENUM = 62;
-  private static final int CHOOSETABLESIZE = 
-                           (MAXCHOOSENUM-3)*(MAXCHOOSENUM-4)/2+MAXCHOOSENUM-3;
-  private static long[] CHOOSETABLE = new long[CHOOSETABLESIZE];
+	public static final int CHOOSETABLESIZE = (MAXCHOOSENUM - 3) * (MAXCHOOSENUM - 4) / 2 + MAXCHOOSENUM - 3;
+	public static long[] CHOOSETABLE = new long[CHOOSETABLESIZE];
   private static long[] SUMCHOOSETABLE = new long[CHOOSETABLESIZE];
 
   public static long choose(int n, int m) {
+		if (n < 0 || m < 0) {
     Assert.check(((m >= 0) && (n >= 0) && (n >= m)), EC.TLC_CHOOSE_ARGUMENTS_WRONG, "choose");
-    if (m == 0 || m == n)
+		}
+		if (m == 0 || m == n) {
       return (long)1;
-    else if (m == 1 || m == n-1)
+		} else if (m == 1 || m == n - 1) {
       return (long)n;
-    else {
+		} else if (n == 0 || m > n) {
+			// Cannot choose from zero elements or more elements than present.
+			return 0;
+		} else {
       int j = choosePairToInt(n, m);
       if (j < CHOOSETABLESIZE) {
 	return CHOOSETABLE[j];
       }
-      Assert.fail(EC.TLC_CHOOSE_UPPER_BOUND, String.valueOf(MAXCHOOSENUM));
-      return 0;   // make compiler happy
+			return binomial(n, m); // calculate on demand
     }
   }
 
-  public static long sumChoose(int n, int m) 
-  {
+	public static long sumChoose(int n, int m) {
       Assert.check(((m>=0) && (n>=0) && (n>=m)), EC.TLC_CHOOSE_ARGUMENTS_WRONG, "sumChoose");
-      if (m == 0)
+		if (m == 0) {
           return (long)1;
-      else if (m == n)
+		} else if (m == n) {
           return ((long)1 << n);
-      else if (m == 1)
+		} else if (m == 1) {
           return (long)n;
-      else if (m == n-1)
+		} else if (m == n - 1) {
           return ((long)2 << n) - n;
-      else 
-      {
+		} else {
           int j = choosePairToInt(n,m);
-          if (j < CHOOSETABLESIZE) 
-          {
+			if (j < CHOOSETABLESIZE) {
               return SUMCHOOSETABLE[j];
           }
           Assert.fail(EC.TLC_CHOOSE_UPPER_BOUND, String.valueOf(MAXCHOOSENUM));
@@ -55,7 +55,7 @@ public class Combinatorics {
       }
   }
 	     
-  private static int choosePairToInt(int n, int m) {
+	public static int choosePairToInt(int n, int m) {
     return ((n-3)*(n-4))/2 + m -2;
   }
 
@@ -74,8 +74,7 @@ public class Combinatorics {
 	n++;
 	m = 2;
 	sum = 1+n;
-      }
-      else 
+			} else
 	m++;
     }
   }
@@ -122,6 +121,20 @@ public class Combinatorics {
   }
 
   public static BigInteger bigChoose(int n, int m) {
+		if (n < MAXCHOOSENUM && m < MAXCHOOSENUM) {
+			return BigInteger.valueOf(choose(n, m));
+		}
+
+		BigInteger binomial = BigInteger.ONE;
+		for (int i = 1, j = n; i <= m; i++, j--) {
+			final BigInteger bj = BigInteger.valueOf(j);
+			final BigInteger bi = BigInteger.valueOf(i);
+			binomial = binomial.multiply(bj).divide(bi);
+		}
+		return binomial;
+	}
+	
+	public static BigInteger slowBigChoose(int n, int m) {
     BigInteger num = fact(n);
     BigInteger denom = fact(n - m).multiply(fact(m));
 
@@ -135,8 +148,7 @@ public class Combinatorics {
       result = BigInt.BigZero;
       for (int i = 0; i <= m; i++) 
 	result = result.add(bigChoose(n, i));
-    }
-    else {
+		} else {
       result = BigInt.BigOne;
       result = result.shiftLeft(n);
       for (int i = m+1; i <= n; i++) 
@@ -153,6 +165,51 @@ public class Combinatorics {
     }
     return new String(sb);
   }
+
+	// https://blog.plover.com/math/choose.html
+	public static final long binomial(int n, int k) {
+		if (k > n) {
+			return 0;
+		}
+		if (k > n - k) {
+			// Optimize to n choose n - k.
+			k = n - k;
+		}
+
+		long binomial = 1L;
+		for (int i = 1, m = n; i <= k; i++, m--) {
+			binomial = binomial * m / i;
+		}
+		return binomial;
+	}
+
+	public static long[] pascalTableUpTo(final int maxN, final int maxK) {
+		if (maxN > MAXCHOOSENUM) {
+			final long[] ppt = new long[((maxN - MAXCHOOSENUM) * (maxK - 1))];
+			int idx = 0;
+
+			// Initialize first "row" of extension table from existing triangle.
+			int i = MAXCHOOSENUM + 1;
+			for (int j = 2; j <= maxK; j++) {
+				ppt[idx++] = choose(i, j);
+			}
+			// Subsequent rows initialize from previous row.
+			final int k = maxK - 1;
+			for (int j = 1; j < (maxN - MAXCHOOSENUM); j++) {
+				for (int l = 0; l < k; l++) {
+					if (l == 0) {
+						ppt[idx] = i++ + ppt[idx - k];
+					} else {
+						ppt[idx] = ppt[idx - k] + ppt[idx - k - 1];
+					}
+					idx++;
+				}
+			}
+			return ppt;
+		}
+		return new long[0];
+	}
+
 
 // SZ Jul 14, 2009: Dead code. not used.
 //  public static void main(String argv[]) {

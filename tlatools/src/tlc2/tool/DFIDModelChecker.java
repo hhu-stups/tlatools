@@ -3,10 +3,13 @@
 package tlc2.tool;
 
 import java.io.IOException;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 import tla2sany.modanalyzer.SpecObj;
 import tla2sany.semantic.ExprNode;
+import tla2sany.semantic.OpDeclNode;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
@@ -43,11 +46,11 @@ public class DFIDModelChecker extends AbstractChecker
      * Constructor for running DFID   
      * @param resolver 
      */
-    public DFIDModelChecker(String specFile, String configFile, String dumpFile, boolean asDot, boolean deadlock, String fromChkpt,
+    public DFIDModelChecker(String specFile, String configFile, String metadir, final IStateWriter stateWriter, boolean deadlock, String fromChkpt,
             boolean preprocess, FilenameToStream resolver, SpecObj specObj) throws EvalException, IOException
     {
         // call the abstract constructor
-        super(specFile, configFile, dumpFile, asDot, deadlock, fromChkpt, preprocess, resolver, specObj);
+        super(specFile, configFile, metadir, stateWriter, deadlock, fromChkpt, preprocess, resolver, specObj);
 
         this.theInitStates = null;
         this.theInitFPs = null;
@@ -371,7 +374,20 @@ public class DFIDModelChecker extends AbstractChecker
                     {
 						synchronized (this) {
 							if (this.setErrState(curState, succState, false)) {
-								this.printTrace(EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT, null, curState, succState);
+								final Set<OpDeclNode> unassigned = succState.getUnassigned();
+								String[] parameters;
+								if (this.actions.length == 1) {
+									parameters = new String[] { unassigned.size() > 1 ? "s are" : " is",
+											unassigned.stream().map(n -> n.getName().toString())
+													.collect(Collectors.joining(", ")) };
+								} else {
+									parameters = new String[] { this.actions[i].getName().toString(),
+											unassigned.size() > 1 ? "s are" : " is",
+											unassigned.stream().map(n -> n.getName().toString())
+													.collect(Collectors.joining(", ")) };
+								}
+								this.printTrace(EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT,
+										parameters, curState, succState);
 							}
 						}
                         return allSuccNonLeaf;
