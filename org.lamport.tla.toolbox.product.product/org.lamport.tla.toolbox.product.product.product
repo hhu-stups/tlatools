@@ -1,22 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <?pde version="3.5"?>
 
-<product name="TLA+ Toolbox" uid="org.lamport.tla.toolbox.product.product" id="org.lamport.tla.toolbox.product.standalone.product" application="org.lamport.tla.toolbox.application" version="1.5.7.qualifier" useFeatures="true" includeLaunchers="true">
+<product name="TLA+ Toolbox" uid="org.lamport.tla.toolbox.product.product" id="org.lamport.tla.toolbox.product.standalone.product" application="org.lamport.tla.toolbox.application" version="1.6.0.qualifier" useFeatures="true" includeLaunchers="true">
 
    <aboutInfo>
       <image path="/org.lamport.tla.toolbox.product.standalone/images/splash_small.png"/>
       <text>
          TLA+ Toolbox provides a user interface for TLA+ Tools. 
 
-This is Version 1.5.7 of 18 July 2018 and includes:
+This is Version 1.6.0 of Day Month 20?? and includes:
   - SANY Version 2.1 of 23 July 2017
-  - TLC Version 2.13 of 18 July 2018
-  - PlusCal Version 1.8 of 16 May 2018
+  - TLC Version 2.14 of 10 July 2019
+  - PlusCal Version 1.9 of 10 July 2019
   - TLATeX Version 1.0 of 20 September 2017
 
 Don&apos;t forget to click on help.  You can learn about features that you never knew about or have forgotten.
 
 Please send us reports of problems or suggestions; see https://groups.google.com/d/forum/tlaplus .
+
+Some icons used in the Toolbox were provided by www.flaticon.com .
       </text>
    </aboutInfo>
 
@@ -29,15 +31,16 @@ openFile
 -name
 &quot;TLA+ Toolbox&quot;
       </programArgs>
-      <programArgsLin>--launcher.GTK_version 2
+      <programArgsLin>--launcher.GTK_version 3
       </programArgsLin>
-      <vmArgs>--add-modules=java.se.ee
--XX:+IgnoreUnrecognizedVMOptions
--Xmx1000m
+      <vmArgs>-XX:+IgnoreUnrecognizedVMOptions
+-Xmx1024m
+-XX:+UseParallelGC
 -Dorg.eclipse.equinox.http.jetty.http.port=10996
 -Dosgi.splashPath=platform:/base/
--Dosgi.requiredJavaVersion=1.8
+-Dosgi.requiredJavaVersion=11.0
 -Dosgi.instance.area.default=@user.home/.tlaplus/
+-Dosgi.clean=true
       </vmArgs>
       <vmArgsMac>-XstartOnFirstThread -Dorg.eclipse.swt.internal.carbon.smallFonts
       </vmArgsMac>
@@ -45,19 +48,27 @@ openFile
 
    <windowImages i16="/org.lamport.tla.toolbox/icons/full/etool16/tla_launch_check_wiz_16.png" i32="/org.lamport.tla.toolbox/icons/full/etool16/tla_launch_check_wiz_32.png" i48="/org.lamport.tla.toolbox/icons/full/etool16/tla_launch_check_wiz_48.png" i64="/org.lamport.tla.toolbox/icons/full/etool16/tla_launch_check_wiz_64.png" i128="/org.lamport.tla.toolbox/icons/full/etool16/tla_launch_check_wiz_128.png" i256="/org.lamport.tla.toolbox/icons/full/etool16/tla_launch_check_wiz_256.png"/>
 
-
    <launcher name="toolbox">
+      <linux icon="/icons/toolbox_application-256.xpm"/>
+      <macosx icon="/icons/toolbox_application.icns"/>
       <win useIco="false">
-         <bmp/>
+         <bmp
+            winSmallHigh="/icons/toolbox_application-16_32bit.bmp"
+            winSmallLow="/icons/toolbox_application-16_8bit.bmp"
+            winMediumHigh="/icons/toolbox_application-32_32bit.bmp"
+            winMediumLow="/icons/toolbox_application-32_8bit.bmp"
+            winLargeHigh="/icons/toolbox_application-48_32bit.bmp"
+            winLargeLow="/icons/toolbox_application-48_8bit.bmp"
+            winExtraLargeHigh="/icons/toolbox_application-256_32bit.bmp"/>
       </win>
    </launcher>
 
    <intro introId="org.lamport.tla.toolbox.product.standalone.intro"/>
 
    <vm>
-      <linux include="false">org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-1.8</linux>
-      <macos include="false">org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-1.8</macos>
-      <windows include="false">org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-1.8</windows>
+      <linux include="false">org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-11</linux>
+      <macos include="false">org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-11</macos>
+      <windows include="false">org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-11</windows>
    </vm>
 
    <plugins>
@@ -69,25 +80,26 @@ openFile
 
    <configurations>
       <plugin id="aws-ec2" autoStart="true" startLevel="4" />
-      <plugin id="azurecompute" autoStart="true" startLevel="4" />
+      <plugin id="azurecompute-arm" autoStart="true" startLevel="4" />
       <plugin id="com.jcraft.jsch" autoStart="true" startLevel="4" />
       <plugin id="ec2" autoStart="true" startLevel="4" />
       <plugin id="jclouds-core" autoStart="true" startLevel="4" />
       <plugin id="org.eclipse.core.runtime" autoStart="true" startLevel="4" />
       <plugin id="org.eclipse.equinox.common" autoStart="true" startLevel="2" />
       <plugin id="org.eclipse.equinox.ds" autoStart="true" startLevel="2" />
+      <plugin id="org.eclipse.equinox.event" autoStart="true" startLevel="2" />
       <plugin id="org.eclipse.equinox.http.jetty" autoStart="true" startLevel="3" />
       <plugin id="org.eclipse.equinox.http.registry" autoStart="true" startLevel="3" />
-      <plugin id="org.eclipse.equinox.event" autoStart="true" startLevel="2" />
       <plugin id="org.eclipse.equinox.simpleconfigurator" autoStart="true" startLevel="1" />
-      <plugin id="org.eclipse.update.configurator"/>
+      <plugin id="org.eclipse.update.configurator" autoStart="false" startLevel="10" />
       <plugin id="org.lamport.tla.toolbox.jclouds" autoStart="true" startLevel="4" />
+      <plugin id="packet" autoStart="true" startLevel="4" />
       <plugin id="sts" autoStart="true" startLevel="4" />
-      <property name="eclipse.buildId" value="1.5.7" />
+      <property name="eclipse.buildId" value="1.6.0" />
    </configurations>
 
    <repositories>
-      <repository location="http://lamport.org/tlatoolbox/toolboxUpdate/" enabled="true" />
+      <repository location="http://lamport.org/tlatoolbox/branches/1.6.0/toolboxUpdate/" enabled="true" />
       <repository location="http://lamport.org/tlatoolbox/ci/toolboxUpdate/" enabled="false" />
    </repositories>
 

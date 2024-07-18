@@ -4,7 +4,6 @@
 
 package util;
 
-import tlc2.output.EC;
 import tlc2.output.MP;
 
 /**
@@ -17,7 +16,6 @@ public class Assert
     /**
      * Unconditioned way to throw an exception
      * @param reason the explaining message to be enclosed into the exception
-     * @deprecated Use {@link EC} constants instead
      */
     public static void fail(String reason) throws RuntimeException
     {
@@ -31,7 +29,7 @@ public class Assert
      */
     public static void fail(int errorCode, String[] parameters)
     {
-        throw new TLCRuntimeException(errorCode, MP.getMessage(errorCode, parameters));
+        throw new TLCRuntimeException(errorCode, parameters, MP.getMessage(errorCode, parameters));
     }
     
     /**
@@ -41,7 +39,7 @@ public class Assert
      */
     public static void fail(int errorCode, String parameter)
     {
-        throw new TLCRuntimeException(errorCode, MP.getMessage(errorCode, parameter));
+        throw new TLCRuntimeException(errorCode, new String[] {parameter}, MP.getMessage(errorCode, parameter));
     }
 
     /**
@@ -74,7 +72,7 @@ public class Assert
     {
         if (!condition) 
         {
-            throw new TLCRuntimeException(errorCode, MP.getMessage(errorCode, parameters));
+            throw new TLCRuntimeException(errorCode, parameters, MP.getMessage(errorCode, parameters));
         }
     }
 
@@ -89,7 +87,7 @@ public class Assert
     {
         if (!condition) 
         {
-            throw new TLCRuntimeException(errorCode, MP.getMessage(errorCode, parameter));
+            throw new TLCRuntimeException(errorCode, new String[] {parameter}, MP.getMessage(errorCode, parameter));
         }
     }
 
@@ -129,9 +127,11 @@ public class Assert
         }
     }
 
-    public static class TLCRuntimeException extends RuntimeException {
+    @SuppressWarnings("serial")
+	public static class TLCRuntimeException extends RuntimeException {
 
 		public final int errorCode;
+		public String[] parameters = null;
 
 		public TLCRuntimeException(String errorMsg) {
 			super(errorMsg);
@@ -146,6 +146,11 @@ public class Assert
 		public TLCRuntimeException(int errorCode, String message, Throwable cause) {
 			super(message, cause);
 			this.errorCode = errorCode;
+		}
+
+		public TLCRuntimeException(int errorCode, String[] parameters, String message) {
+			this(errorCode, message);
+			this.parameters = parameters;
 		}
     }
 }

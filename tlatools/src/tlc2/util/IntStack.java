@@ -57,4 +57,13 @@ public interface IntStack {
 	 * Removes all elements from the stack
 	 */
 	void reset();
+
+	// Some implementors support peak operations.
+	default long peakLong() {
+		throw new UnsupportedOperationException("Not implemented");
+	}
+	
+	default int peakInt() {
+		throw new UnsupportedOperationException("Not implemented");
+	}
 }

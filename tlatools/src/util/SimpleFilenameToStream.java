@@ -36,7 +36,6 @@ public class SimpleFilenameToStream implements FilenameToStream {
 
 	private static final ClassLoader cl = SimpleFilenameToStream.class.getClassLoader();
 
-	private static final String TMPDIR = System.getProperty("java.io.tmpdir");
 	private static final String STANDARD_MODULES = "tla2sany"
 			+ '/' + STANDARD_MODULES_FOLDER + '/';
 
@@ -51,6 +50,10 @@ public class SimpleFilenameToStream implements FilenameToStream {
 	  libraryPaths = getLibraryPaths(getInstallationBasePath(), null);
   }
 
+  public SimpleFilenameToStream(final String libraryPath) {
+	  this(new String[] {libraryPath});
+  }
+  
 /**
  * August 2014 - TL
  * This constructor was on the interface but was not implemented.
@@ -75,7 +78,7 @@ public class SimpleFilenameToStream implements FilenameToStream {
     final String path = url.toString();
 	try {
     	// convert to URI which handles paths correctly (even OS dependently)
-    	if(!isInJar(path)) {
+    	if(!FilenameToStream.isInJar(path)) {
     	final URI uri = new URI(path);
     		return new File(uri).getAbsolutePath();
     	}
@@ -90,10 +93,6 @@ public class SimpleFilenameToStream implements FilenameToStream {
     }
     return path;
    }
-
-  private static boolean isInJar(String aString) {
-	return aString.startsWith("jar:");
-  }
 
   /**
    * August 2014 - TL
@@ -189,6 +188,7 @@ public class SimpleFilenameToStream implements FilenameToStream {
     * field in util/ToolIO.                                                *
     ***********************************************************************/
     int idx = 0;
+    InputStream is;
     while (true)
     {
         if ((idx == 0) && (ToolIO.getUserDir() != null)) {
@@ -202,29 +202,10 @@ public class SimpleFilenameToStream implements FilenameToStream {
         	//
         	// This would be a lot simpler if TLC would not depend on
         	// File but on InputStream instead
-        	if(isInJar(prefix)) {
-					InputStream is = cl
-							.getResourceAsStream(STANDARD_MODULES
-									+ name);
-
+        	if(FilenameToStream.isInJar(prefix)) {
+				is = cl.getResourceAsStream(STANDARD_MODULES + name);
 				if(is != null) {
-					try {
-						sourceFile = new File(TMPDIR + File.separator + name);
-						sourceFile.deleteOnExit();
-
-						FileOutputStream fos = new FileOutputStream(sourceFile);
-
-						byte buf[] = new byte[1024];
-						int len;
-						while ((len = is.read(buf)) > 0) {
-							fos.write(buf, 0, len);
-						}
-						fos.close();
-						is.close();
-					} catch (IOException e) {
-						// must not happen
-						e.printStackTrace();
-					}
+					sourceFile = read(name, is);
 				}
         	} else {
         		sourceFile = new File( prefix + name );
@@ -233,13 +214,46 @@ public class SimpleFilenameToStream implements FilenameToStream {
         // Debug
         // System.out.println("Looking for file " + sourceFile);
         if ( sourceFile.exists() )  break;
-        if (idx >= libraryPaths.length) break;
+        if (idx >= libraryPaths.length) {
+			// As a last resort, try to load resource from the Java classpath. Give up, if it
+			// fails.
+			// The use case for this strategy is to load additional TLA+ module collections
+			// - e.g. community-driven ones - which ship a single jar containing the .tla
+			// operator definitions as well as Java module overwrites as .class files.
+        	is = cl.getResourceAsStream(name);
+        	if(is != null) {
+				return read(name, is);
+			} else {
+				break;
+			}
+        }
         prefix = libraryPaths[idx++];
     } // end while
 
     return sourceFile;
 
   } // end locate()
+
+  private File read(String name, InputStream is) {
+    final File sourceFile = new File(TMPDIR + File.separator + name);
+	sourceFile.deleteOnExit();
+	try {
+
+		final FileOutputStream fos = new FileOutputStream(sourceFile);
+
+		byte buf[] = new byte[1024];
+		int len;
+		while ((len = is.read(buf)) > 0) {
+			fos.write(buf, 0, len);
+		}
+		fos.close();
+		is.close();
+	} catch (IOException e) {
+		// must not happen
+		e.printStackTrace();
+	}
+	return sourceFile;
+  }
 
   /**
    * Returns a file

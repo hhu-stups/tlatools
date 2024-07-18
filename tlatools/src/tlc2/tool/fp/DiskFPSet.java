@@ -19,6 +19,7 @@ import javax.management.NotCompliantMBeanException;
 import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.tool.TLCTrace;
+import tlc2.tool.TLCTrace.Enumerator;
 import tlc2.tool.fp.management.DiskFPSetMXWrapper;
 import tlc2.tool.management.TLCStandardMBean;
 import tlc2.util.BufferedRandomAccessFile;
@@ -210,7 +211,7 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 	/* (non-Javadoc)
 	 * @see tlc2.tool.fp.FPSet#init(int, java.lang.String, java.lang.String)
 	 */
-	public void init(int numThreads, String aMetadir, String filename)
+	public FPSet init(int numThreads, String aMetadir, String filename)
 			throws IOException {
 		
 		// Make it possible to pass in alternative location for the .fp and
@@ -265,6 +266,7 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 					new String[] { this.fpFilename, e.getMessage() });
 			throw new IOException(message);
 		}
+		return this;
 	}
 
 	/* (non-Javadoc)
@@ -368,8 +370,9 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 	 * @return true iff fp is on disk
 	 */
 	final boolean diskLookup(long fp) throws IOException {
-		if (this.index == null)
+		if (this.index == null) {
 			return false;
+		}
 		
 		// Increment disk lookup counter
 		this.diskLookupCnt.increment();
@@ -382,11 +385,13 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 		long hiVal = this.index[hiPage];
 
 		// Test boundary cases (if not inside interval)
-		if (fp < loVal || fp > hiVal)
+		if (fp < loVal || fp > hiVal) {
 			return false;
-		if (fp == hiVal) // why not check loVal? memLookup would have found it already!	
+		}
+		if (fp == hiVal) {// why not check loVal? memLookup would have found it already!	
 			return true;
-		double dfp = (double) fp;
+		}
+		final double dfp = (double) fp;
 
 		// a) find disk page that would potentially contain the fp. this.index contains 
 		// the first fp of each disk page
@@ -398,10 +403,10 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 			 * 
 			 * loVal <= fp < hiVal exists x: loPage < x < hiPage
 			 */
-			double dhi = (double) hiPage;
-			double dlo = (double) loPage;
-			double dhiVal = (double) hiVal;
-			double dloVal = (double) loVal;
+			final double dhi = (double) hiPage;
+			final double dlo = (double) loPage;
+			final double dhiVal = (double) hiVal;
+			final double dloVal = (double) loVal;
 			
 			int midPage = (loPage + 1)
 					+ (int) ((dhi - dlo - 1.0) * (dfp - dloVal) / (dhiVal - dloVal));
@@ -410,7 +415,7 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 
 			Assert.check(loPage < midPage && midPage < hiPage,
 					EC.SYSTEM_INDEX_ERROR);
-			long v = this.index[midPage];
+			final long v = this.index[midPage];
 			if (fp < v) {
 				hiPage = midPage;
 				hiVal = v;
@@ -422,6 +427,11 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 				return true;
 			}
 		}
+		return diskLookupBinarySearch(fp, indexLength, loPage, hiPage, loVal, hiVal, dfp);
+	}
+
+	private final boolean diskLookupBinarySearch(final long fp, final int indexLength, final int loPage, final int hiPage, long loVal, long hiVal,
+			final double dfp) throws IOException {
 		// no page is in between loPage and hiPage at this point
 		Assert.check(hiPage == loPage + 1, EC.SYSTEM_INDEX_ERROR);
 
@@ -435,18 +445,11 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 		try {
 			// b0) open file for reading that is associated with current thread
 			BufferedRandomAccessFile raf;
-			int id = IdThread.GetId(this.braf.length);
+			final int id = IdThread.GetId(this.braf.length);
 			if (id < this.braf.length) {
 				raf = this.braf[id];
 			} else {
-				synchronized (this.brafPool) {
-					if (this.poolIndex < this.brafPool.length) {
-						raf = this.brafPool[this.poolIndex++];
-					} else {
-						raf = new BufferedRandomAccessFile(
-								this.fpFilename, "r");
-					}
-				}
+				raf = poolOpen();
 			}
 			
 			// b1) do interpolated binary search on disk page determined by a)
@@ -468,7 +471,7 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 				} else {
 					diskSeekCache.increment();
 				}
-				long v = raf.readLong();
+				final long v = raf.readLong();
 
 				if (fp < v) {
 					hiEntry = midEntry;
@@ -483,15 +486,9 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 			}
 			// b2) done doing disk search -> close file (finally candidate? => not really because if we exit with error, TLC exits)
 			if (id >= this.braf.length) {
-				synchronized (this.brafPool) {
-					if (this.poolIndex > 0) {
-						this.brafPool[--this.poolIndex] = raf;
-					} else {
-						raf.close();
-					}
-				}
+				poolClose(raf);
 			}
-		} catch (IOException e) {
+		} catch (final IOException e) {
 			if(midEntry * LongSize < 0) {
 			 // LL modified error message on 7 April 2012
 				MP.printError(EC.GENERAL, new String[]{"looking up a fingerprint, and" + 
@@ -502,6 +499,27 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 			throw e;
 		}
 		return diskHit;
+	}
+
+	private final BufferedRandomAccessFile poolOpen() throws IOException {
+		synchronized (this.brafPool) {
+			if (this.poolIndex < this.brafPool.length) {
+				return this.brafPool[this.poolIndex++];
+			} else {
+				return new BufferedRandomAccessFile(
+						this.fpFilename, "r");
+			}
+		}
+	}
+
+	private final void poolClose(final BufferedRandomAccessFile raf) throws IOException {
+		synchronized (this.brafPool) {
+			if (this.poolIndex > 0) {
+				this.brafPool[--this.poolIndex] = raf;
+			} else {
+				raf.close();
+			}
+		}
 	}
 
 	/**
@@ -601,7 +619,7 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 	/* (non-Javadoc)
 	 * @see tlc2.tool.fp.FPSet#checkFPs()
 	 */
-	public double checkFPs() throws IOException {
+	public long checkFPs() throws IOException {
 		// It seems pointless to acquire the locks when checkFPs is only
 		// executed after model checking has finished. Lock the disk
 		// fingerprint sets though. Acquiring the locks is cheap.
@@ -625,7 +643,7 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 			}
 		}
 		braf.close();
-		return (1.0 / dis);
+		return dis;
 	}
 
 	/* (non-Javadoc)
@@ -763,19 +781,13 @@ public abstract class DiskFPSet extends FPSet implements FPSetStatistic {
 	/* (non-Javadoc)
 	 * @see tlc2.tool.fp.FPSet#recover()
 	 */
-	public final void recover() throws IOException {
-		long recoverPtr = TLCTrace.getRecoverPtr();
-		final RandomAccessFile braf = new BufferedRandomAccessFile(
-				TLCTrace.getFilename(), "r");
-		while (braf.getFilePointer() < recoverPtr) {
-			// drop readLongNat
-			if (braf.readInt() < 0)
-				braf.readInt();
-			
-			long fp = braf.readLong();
+	public final void recover(TLCTrace trace) throws IOException {
+		final Enumerator elements = trace.elements();
+		while (elements.nextPos() != -1) {
+			long fp = elements.nextFP();
 			this.recoverFP(fp);
 		}
-		braf.close();
+		elements.close();
 	}
 
 	private String getChkptName(String fname, String name) {

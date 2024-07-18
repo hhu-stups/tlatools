@@ -35,6 +35,7 @@
 		<module>org.lamport.tlatools.consumer.distributed</module>
 
 		<!-- bundles -->
+		<module>org.lamport.tla.toolbox.rss</module>
 		<module>org.lamport.tla.toolbox</module>
 		<module>org.lamport.tla.toolbox.jclouds</module>
 		<module>org.lamport.tla.toolbox.jnlp</module>
@@ -76,6 +77,8 @@
 		<!-- product related -->
 		<module>org.lamport.tla.toolbox.product.product</module>
 
+		<!-- Finally run UI tests on fully built product (AUT) -->
+		<module>org.lamport.tla.toolbox.product.uitest</module>
 	</modules>
 
 	<!-- tycho requires maven >= 3.0 -->
@@ -88,7 +91,8 @@
 		<!-- http://maven.apache.org/general.html#encoding-warning  -->
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-		<tycho-version>1.1.0</tycho-version>
+		<!-- https://wiki.eclipse.org/Tycho/Release_Notes/1.4 -->
+		<tycho-version>1.4.0</tycho-version>
 
 		<!-- no default here -->
 		<tycho.test.vm.argline>-Xmx500m -Xdebug -Xrunjdwp:transport=dt_socket,address=1044,server=y,suspend=n</tycho.test.vm.argline>
@@ -115,10 +119,44 @@
 		<!-- Report into the tlaplus organization at SonarQube. -->
 		<!-- Organizations support reporting different branches. -->
 		<sonar.organization>tlaplus</sonar.organization>
+		
+		<!-- Align toolbox.version with the version in 
+			 org.lamport.tla.toolbox.product.product.product
+			 product.version. -->
+		<toolbox.version>1.6.0</toolbox.version>
+
+		<!-- This is used in org.lamport.tla.toolbox.product.uitest but
+			has been placed at the top level should it need be referenced
+			in other POMs. This property is only referenced during the AUT
+			unpacking if it is occurring on mac - the AUT unpacks out of
+			the ZIP ok on Linux and Windows-->
+		<jdk-bundle-plugin-version>11.0.3.1</jdk-bundle-plugin-version>
 	</properties>
 
 	<build>
 		<plugins>
+			<!-- Fail the build early and with a clear error message if the Java 11 
+				dependency isn't satisfied. https://github.com/tlaplus/tlaplus/issues/278 -->
+		    <plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-enforcer-plugin</artifactId>
+				<version>3.0.0-M2</version>
+				<executions>
+					<execution>
+						<id>enforce-java</id>
+						<goals>
+							<goal>enforce</goal>
+						</goals>
+						<configuration>
+							<rules>
+								<requireJavaVersion>
+									<version>11</version>
+								</requireJavaVersion>
+							</rules>
+						</configuration>
+					</execution>
+				</executions>
+		    </plugin>
 			<!-- enable tycho build extension -->
 			<plugin>
 				<groupId>org.eclipse.tycho</groupId>
@@ -230,12 +268,12 @@
 					</target>
 					
 					<!-- Need to specify mininum Java version. This defines what
-					     java.* packages are available during dependency resolution. The default
-					     is Java 1.4 which e.g. does not come with "java.security.sasl", a
+					     java.* packages are available during dependency resolution.
+					     Java 1.4, e.g. does not come with "java.security.sasl", a
 					     package that is indirectly referenced by the toolbox (indirectly via
 					     org.apache.mina.core).
 					     see http://dev.eclipse.org/mhonarc/lists/cbi-dev/msg00166.html --> 
-		 			<executionEnvironment>JavaSE-1.8</executionEnvironment>
+		 			<executionEnvironment>JavaSE-11</executionEnvironment>
 
 					<!-- configure the p2 target environments for multi-platform build -->
 					<environments>

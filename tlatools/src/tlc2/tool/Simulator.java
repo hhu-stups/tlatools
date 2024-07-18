@@ -6,50 +6,46 @@
 package tlc2.tool;
 
 import java.io.IOException;
-import java.io.PrintWriter;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.TimerTask;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.LongAdder;
 
-import tla2sany.modanalyzer.SpecObj;
-import tla2sany.semantic.SemanticNode;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.output.StatePrinter;
+import tlc2.tool.SimulationWorker.SimulationWorkerError;
+import tlc2.tool.SimulationWorker.SimulationWorkerResult;
+import tlc2.tool.coverage.CostModelCreator;
+import tlc2.tool.impl.Tool;
 import tlc2.tool.liveness.ILiveCheck;
 import tlc2.tool.liveness.LiveCheck;
 import tlc2.tool.liveness.LiveCheck1;
 import tlc2.tool.liveness.LiveException;
 import tlc2.tool.liveness.NoOpLiveCheck;
-import tlc2.util.ObjLongTable;
 import tlc2.util.RandomGenerator;
 import tlc2.util.statistics.DummyBucketStatistics;
-import tlc2.value.Value;
+import tlc2.value.IValue;
+import util.Assert.TLCRuntimeException;
 import util.FileUtil;
 import util.FilenameToStream;
 
-public class Simulator implements Cancelable {
+public class Simulator {
 
-	public static boolean EXPERIMENTAL_LIVENESS_SIMULATION = Boolean.getBoolean(Simulator.class.getName() + ".experimentalLiveness");
-	
+	public static boolean EXPERIMENTAL_LIVENESS_SIMULATION = Boolean
+			.getBoolean(Simulator.class.getName() + ".experimentalLiveness");
 
 	/* Constructors */
-	/**
-	 * SZ Feb 20, 2009: added the possibility to pass the SpecObject, this is
-	 * compatibility constructor
-	 * @throws IOException 
-	 *
-	 * @deprecated use
-	 *             {@link Simulator#Simulator(String, String, String, boolean, int, long, RandomGenerator, long, boolean, FilenameToStream, SpecObj)}
-	 *             instead and pass the <code>null</code> as SpecObj
-	 */
-	public Simulator(String specFile, String configFile, String traceFile, boolean deadlock, int traceDepth,
-			long traceNum, RandomGenerator rng, long seed, boolean preprocess, FilenameToStream resolver) throws IOException {
-		this(specFile, configFile, traceFile, deadlock, traceDepth, traceNum, rng, seed, preprocess, resolver, null);
-	}
 
 	// SZ Feb 20, 2009: added the possibility to pass the SpecObject
 	public Simulator(String specFile, String configFile, String traceFile, boolean deadlock, int traceDepth,
-			long traceNum, RandomGenerator rng, long seed, boolean preprocess, FilenameToStream resolver,
-			SpecObj specObj) throws IOException {
+			long traceNum, RandomGenerator rng, long seed, FilenameToStream resolver,
+			int numWorkers) throws IOException {
 		int lastSep = specFile.lastIndexOf(FileUtil.separatorChar);
 		String specDir = (lastSep == -1) ? "" : specFile.substring(0, lastSep + 1);
 		specFile = specFile.substring(lastSep + 1);
@@ -60,14 +56,9 @@ public class Simulator implements Cancelable {
 
 		this.tool = new Tool(specDir, specFile, configFile, resolver);
 
-		this.tool.init(preprocess, specObj); // parse and process the spec
-
 		this.checkDeadlock = deadlock;
 		this.checkLiveness = !this.tool.livenessIsTrue();
-		this.actions = this.tool.getActions();
 		this.invariants = this.tool.getInvariants();
-		this.impliedActions = this.tool.getImpliedActions();
-		this.numOfGenStates = 0;
 		if (traceDepth != -1) {
 			// this.actionTrace = new Action[traceDepth]; // SZ: never read
 			// locally
@@ -81,241 +72,284 @@ public class Simulator implements Cancelable {
 		this.rng = rng;
 		this.seed = seed;
 		this.aril = 0;
-		this.astCounts = new ObjLongTable(10);
+		this.numWorkers = numWorkers;
+		this.workers = new ArrayList<>(numWorkers);
 		// Initialization for liveness checking
 		if (this.checkLiveness) {
 			if (EXPERIMENTAL_LIVENESS_SIMULATION) {
 				final String tmpDir = System.getProperty("java.io.tmpdir");
-				liveCheck = new LiveCheck(this.tool, new Action[0], tmpDir, new DummyBucketStatistics());
+				liveCheck = new LiveCheck(this.tool, tmpDir, new DummyBucketStatistics());
 			} else {
 				liveCheck = new LiveCheck1(this.tool);
 			}
 		} else {
 			liveCheck = new NoOpLiveCheck(tool, specDir);
 		}
+
+		if (TLCGlobals.isCoverageEnabled()) {
+        	CostModelCreator.create(this.tool);
+        }
+		
+		//TODO Eventually derive Simulator from AbstractChecker.
+		AbstractChecker.scheduleTermination(new TimerTask() {
+			@Override
+			public void run() {
+				Simulator.this.stop();
+			}
+		});
 	}
 
 	/* Fields */
 	private final ILiveCheck liveCheck;
-	private final Tool tool;
-	private final Action[] actions; // the sub actions
+	private final ITool tool;
 	private final Action[] invariants; // the invariants to be checked
-	private final Action[] impliedActions; // the implied-actions to be checked
 	private final boolean checkDeadlock; // check deadlock?
 	private final boolean checkLiveness; // check liveness?
-	private long numOfGenStates;
+
+	// The total number of states/traces generated by all workers. May be written to
+	// concurrently, so we use a LongAdder to reduce potential contention.
+	private final LongAdder numOfGenStates = new LongAdder();
+	private final LongAdder numOfGenTraces = new LongAdder();
+
 	// private Action[] actionTrace; // SZ: never read locally
 	private final String traceFile;
+
+	// The maximum length of a simulated trace.
 	private final long traceDepth;
+
+	// The maximum number of total traces to generate.
 	private final long traceNum;
+
+	// The number of worker threads to use for simulation.
+	private int numWorkers = 1;
+
 	private final RandomGenerator rng;
 	private final long seed;
 	private long aril;
-	private final ObjLongTable astCounts;
-	private boolean isCancelled; // SZ Feb 24, 2009: cancellation added
-	private Value[] localValues = new Value[4];
+	private IValue[] localValues = new IValue[4];
+
+	// The set of all initial states for the given spec. This should be only be
+	// computed once and re-used whenever a new random trace is generated. This
+	// variable should not be written to concurrently, but is allowed to be read
+	// concurrently.
+	private StateVec initStates = new StateVec(0);
+
+	// Each simulation worker pushes their results onto this shared queue.
+	private BlockingQueue<SimulationWorkerResult> workerResultQueue = new LinkedBlockingQueue<>();
+	
+    /**
+     * Timestamp of when simulation started.
+     */
+	private final long startTime = System.currentTimeMillis();
+	
+	private final List<SimulationWorker> workers;
+		 
+	 /**
+	 * Returns whether a given error code is considered "continuable". That is, if
+	 * any worker returns this error, should we consider continuing to run the
+	 * simulator. These errors are considered "fatal" since they most likely
+	 * indicate an error in the way the spec is written.
+	 */
+	private boolean isNonContinuableError(int ec) {
+		return ec == EC.TLC_INVARIANT_EVALUATION_FAILED || 
+			   ec == EC.TLC_ACTION_PROPERTY_EVALUATION_FAILED ||
+			   ec == EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT;
+	}
+	
+	/**
+	 * Shut down all of the given workers and make sure they have stopped.
+	 */
+	private void shutdownAndJoinWorkers(final List<SimulationWorker> workers) throws InterruptedException {
+		for (SimulationWorker worker : workers) {
+			worker.interrupt();
+			worker.join();
+		}
+	}
 
 	/*
-	 * This method does simulation on a TLA+ spec. Its argument specifies the
-	 * main module of the TLA+ spec.
+	 * This method does random simulation on a TLA+ spec.
+	 * 
+	 * It runs until en error is encountered or we have generated the maximum number of traces.
+	 * 
+   * @return an error code, or <code>EC.NO_ERROR</code> on success
 	 */
-	public void simulate() throws Exception {
-		StateVec theInitStates = null;
+	public int simulate() throws Exception {
 		TLCState curState = null;
 
-		if (isCancelled) {
-			return;
-		}
-		// Compute the initial states:
+		//
+		// Compute the initial states.
+		//
 		try {
+
 			// The init states are calculated only ever once and never change
 			// in the loops below. Ideally the variable would be final.
-			theInitStates = this.tool.getInitStates();
-			this.numOfGenStates = theInitStates.size();
-			for (int i = 0; i < theInitStates.size(); i++) {
-				curState = theInitStates.elementAt(i);
+			this.initStates = this.tool.getInitStates();
+
+			// This counter should always be initialized at zero.
+			assert (this.numOfGenStates.longValue() == 0);
+			this.numOfGenStates.add(this.initStates.size());
+			
+			MP.printMessage(EC.TLC_COMPUTING_INIT_PROGRESS, this.numOfGenStates.toString());
+
+			// Check all initial states for validity.
+			for (int i = 0; i < this.initStates.size(); i++) {
+				curState = this.initStates.elementAt(i);
 				if (this.tool.isGoodState(curState)) {
 					for (int j = 0; j < this.invariants.length; j++) {
 						if (!this.tool.isValid(this.invariants[j], curState)) {
-							// We get here because of invariant violation:
-							MP.printError(EC.TLC_INVARIANT_VIOLATED_INITIAL,
+							// We get here because of invariant violation.
+							return MP.printError(EC.TLC_INVARIANT_VIOLATED_INITIAL,
 									new String[] { this.tool.getInvNames()[j], curState.toString() });
-							return;
 						}
 					}
 				} else {
-					MP.printError(EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_INITIAL, curState.toString());
-					return;
+					return MP.printError(EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_INITIAL, curState.toString());
 				}
 			}
 		} catch (Exception e) {
-			// Assert.printStack(e);
+			final int errorCode;
 			if (curState != null) {
-				MP.printError(EC.TLC_INITIAL_STATE,
+				errorCode = MP.printError(EC.TLC_INITIAL_STATE,
 						new String[] { (e.getMessage() == null) ? e.toString() : e.getMessage(), curState.toString() });
 			} else {
-				MP.printError(EC.GENERAL, e); // LL changed call 7 April 2012
+				errorCode = MP.printError(EC.GENERAL, e); // LL changed call 7 April 2012
 			}
 
 			this.printSummary();
-			return;
+			return errorCode;
 		}
-		if (this.numOfGenStates == 0) {
-			MP.printError(EC.TLC_NO_STATES_SATISFYING_INIT);
-			return;
+
+		if (this.numOfGenStates.longValue() == 0) {
+			return MP.printError(EC.TLC_NO_STATES_SATISFYING_INIT);
 		}
+
 		// It appears deepNormalize brings the states into a canonical form to
 		// speed up equality checks.
-		theInitStates.deepNormalize();
+		this.initStates.deepNormalize();
 
-		// Start progress report thread:
+		//
+		// Start progress report thread.
+		//
 		final ProgressReport report = new ProgressReport();
 		report.start();
 
-		// Start simulating:
-		final StateVec stateTrace = new StateVec((int) traceDepth);
-		int idx = 0;
-		try {
-			// The two loops essentially do:
-			// a) Pick one of the initial states for as long as the bahavior's length is less than traceCnt
-			// b) Randomly pick an action to generate the successor states (more than 1) to the current initial state
-			// c) Check all of the generated successors for their validity
-			// d) Randomly pick a generated successor and make it curState
-			for (int traceCnt = 1; traceCnt <= this.traceNum; traceCnt++) {
-				this.aril = rng.getAril();
-				stateTrace.clear();
+		//
+		// Start simulating.
+		//
+		this.aril = rng.getAril();
+		
+		// Start up multiple simulation worker threads, each with their own unique seed.
+		final Set<Integer> runningWorkers = new HashSet<>();
+		for (int i = 0; i < this.numWorkers; i++) {			
+			final SimulationWorker worker = new SimulationWorker(i, this.tool, initStates, this.workerResultQueue,
+					this.rng.nextLong(), this.traceDepth, this.traceNum, this.checkDeadlock, this.traceFile,
+					this.liveCheck, this.numOfGenStates, this.numOfGenTraces);		
 
-				// a) Randomly select a state from the set of init states.
-				curState = this.randomState(theInitStates);
-				boolean inConstraints = this.tool.isInModel(curState);
+			worker.start();
+			workers.add(worker);
+			runningWorkers.add(i);
+		}
 
-				for (int traceIdx = 0; traceIdx < this.traceDepth; traceIdx++) {
-					// Add the curState to the trace regardless of its inModel
-					// property.
-					stateTrace.addElement(curState);
+		int errorCode = EC.NO_ERROR;
+		
+		// Continuously consume results from all worker threads.
+		while (true) {
+			final SimulationWorkerResult result = workerResultQueue.take();
 
-					if (!inConstraints) {
-						break;
+			// If the result is an error, print it.
+			if (result.isError()) {
+				SimulationWorkerError error = result.error();
+				
+				// We assume that if a worker threw an unexpected exception, there is a bug
+				// somewhere, so we print out the exception and terminate. In the case of a
+				// liveness error, which is reported as an exception, we also terminate.
+				if (error.exception != null) {
+					if (error.exception instanceof LiveException) {
+						// In case of a liveness error, there is no need to print out
+						// the behavior since the liveness checker should take care of that itself.
+						this.printSummary();
+						errorCode = ((LiveException)error.exception).errorCode;
+					} else if (error.exception instanceof TLCRuntimeException) {
+						final TLCRuntimeException exception = (TLCRuntimeException)error.exception;
+						printBehavior(exception, error.state, error.stateTrace);
+						errorCode = exception.errorCode;
+					} else {
+						printBehavior(EC.GENERAL, new String[] { MP.ECGeneralMsg("", error.exception) }, error.state,
+								error.stateTrace);
+						errorCode = EC.GENERAL;
 					}
-
-					// b) Get the curState's successor states
-					StateVec nextStates = this.randomNextStates(curState);
-					if (nextStates == null) {
-						if (this.checkDeadlock) {
-							// We get here because of deadlock:
-							this.printBehavior(EC.TLC_DEADLOCK_REACHED, null, curState, stateTrace);
-							if (!TLCGlobals.continuation) {
-								return;
-							}
-						}
-						break;
-					}
-
-					// c) Check all generated next states before all but one are
-					// discarded
-					for (int i = 0; i < nextStates.size(); i++) {
-						this.numOfGenStates++;
-						TLCState state = nextStates.elementAt(i);
-
-						if (TLCGlobals.coverageInterval >= 0) {
-							((TLCStateMutSource) state).addCounts(this.astCounts);
-						}
-
-						if (!this.tool.isGoodState(state)) {
-							this.printBehavior(EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT, null, state, stateTrace);
-							return;
-						} else {
-							try {
-								for (idx = 0; idx < this.invariants.length; idx++) {
-									if (!this.tool.isValid(this.invariants[idx], state)) {
-										// We get here because of invariant
-										// violation:
-										this.printBehavior(EC.TLC_INVARIANT_VIOLATED_BEHAVIOR,
-												new String[] { this.tool.getInvNames()[idx] }, state, stateTrace);
-										if (!TLCGlobals.continuation) {
-											return;
-										}
-									}
-								}
-							} catch (Exception e) {
-								// Assert.printStack(e);
-								this.printBehavior(EC.TLC_INVARIANT_EVALUATION_FAILED,
-										new String[] { this.tool.getInvNames()[idx], e.getMessage() }, state, stateTrace);
-								return;
-							}
-
-							try {
-								for (idx = 0; idx < this.impliedActions.length; idx++) {
-									if (!this.tool.isValid(this.impliedActions[idx], curState, state)) {
-										// We get here because of implied-action
-										// violation:
-
-										this.printBehavior(EC.TLC_ACTION_PROPERTY_VIOLATED_BEHAVIOR,
-												new String[] { this.tool.getImpliedActNames()[idx] }, state, stateTrace);
-										if (!TLCGlobals.continuation) {
-											return;
-										}
-									}
-								}
-							} catch (Exception e) {
-								// Assert.printStack(e);
-								this.printBehavior(EC.TLC_ACTION_PROPERTY_EVALUATION_FAILED,
-										new String[] { this.tool.getImpliedActNames()[idx], e.getMessage() }, state,
-										stateTrace);
-								return;
-							}
-						}
-					}
-					// At this point all generated successor states have been checked for
-					// their respective validity (isGood/isValid/impliedActions/...).
-					// d) Then randomly select one of them and make it curState
-					// for the next iteration of the loop.
-					TLCState s1 = this.randomState(nextStates);
-					inConstraints = (this.tool.isInModel(s1) && this.tool.isInActions(curState, s1));
-					curState = s1;
+					break;
 				}
 				
-				// Check if the current trace satisfies liveness properties.
-				liveCheck.checkTrace(stateTrace);
+				// Print the trace for all other errors.
+				printBehavior(error);
+				
+				// For certain, "fatal" errors, we shut down all workers and terminate,
+				// regardless of the "continue" parameter, since these errors likely indicate a bug in the spec.
+				if (isNonContinuableError(error.errorCode)) {
+					errorCode = error.errorCode;
+					break;
+				}
+				
+				// If the 'continue' option is false, then we always terminate on the
+				// first error, shutting down all workers. Otherwise, we continue receiving
+				// results from the worker threads.
+				if (!TLCGlobals.continuation) {
+					errorCode = error.errorCode;
+					break;
+				}
 
-				// Write the trace out if desired. The trace is printed in the
-				// format of TLA module, so that it can be read by TLC again.
-				if (this.traceFile != null) {
-					String fileName = this.traceFile + traceCnt;
-					// TODO is it ok here?
-					PrintWriter pw = new PrintWriter(FileUtil.newBFOS(fileName));
-					pw.println("---------------- MODULE " + fileName + " -----------------");
-					for (idx = 0; idx < stateTrace.size(); idx++) {
-						pw.println("STATE_" + (idx + 1) + " == ");
-						pw.println(stateTrace.elementAt(idx) + "\n");
-					}
-					pw.println("=================================================");
-					pw.close();
+				if (errorCode == EC.NO_ERROR)
+				{
+					errorCode = EC.GENERAL;
 				}
 			}
-		} catch (Throwable e) {
-			// Assert.printStack(e);
-			if (e instanceof LiveException) {
-				this.printSummary();
-			} else {
-				// LL modified error message on 7 April 2012
-				this.printBehavior(EC.GENERAL, new String[] { MP.ECGeneralMsg("", e) }, curState, stateTrace);
-			}
-		} finally {
-			report.isRunning = false;
-			synchronized (report) {
-				report.notify();
+			// If the result is OK, this indicates that the worker has terminated, so we
+			// make note of this. If all of the workers have terminated, there is no need to
+			// continue waiting for results, so we should terminate.
+			else {
+				runningWorkers.remove(result.workerId());
+				if(runningWorkers.isEmpty()) {
+					break;
+				}
 			}
 		}
+		
+		// Shut down all workers.
+		this.shutdownAndJoinWorkers(workers);
+
+		// Do a final progress report.
+		report.isRunning = false;
+		synchronized (report) {
+			report.notify();
+		}
+		// Wait for the progress reporter thread to finish.
+		report.join();
+
+		return errorCode;
+	}
+
+
+	public final void printBehavior(final TLCRuntimeException exception, final TLCState state, final StateVec stateTrace) {
+		MP.printTLCRuntimeException(exception);
+		printBehavior(state, stateTrace);
+	}
+
+	public final void printBehavior(SimulationWorkerError error) {
+		printBehavior(error.errorCode, error.parameters, error.state, error.stateTrace);
 	}
 
 	/**
 	 * Prints out the simulation behavior, in case of an error. (unless we're at
 	 * maximum depth, in which case don't!)
 	 */
-	public final void printBehavior(int errorCode, String[] parameters, TLCState state, final StateVec stateTrace) {
-
+	public final void printBehavior(final int errorCode, final String[] parameters, final TLCState state, final StateVec stateTrace) {
 		MP.printError(errorCode, parameters);
+		printBehavior(state, stateTrace);
+		this.printSummary();
+	}
+	
+	public final void printBehavior(final TLCState state, final StateVec stateTrace) {
 		if (this.traceDepth == Long.MAX_VALUE) {
 			MP.printMessage(EC.TLC_ERROR_STATE);
 			StatePrinter.printState(state);
@@ -328,58 +362,18 @@ public class Simulator implements Cancelable {
 			}
 			StatePrinter.printState(state, null, stateTrace.size() + 1);
 		}
-		this.printSummary();
 	}
 
-	/**
-	 * This method returns a state that is randomly chosen from the set of
-	 * states. It returns null if the set of states is empty.
-	 */
-	public final TLCState randomState(StateVec states) throws EvalException {
-		int len = states.size();
-		if (len > 0) {
-			int index = (int) Math.floor(this.rng.nextDouble() * len);
-			return states.elementAt(index);
-		}
-		return null;
-	}
-
-	/*
-	 * (non-Javadoc)
-	 * @see tlc2.tool.Cancelable#setCancelFlag(boolean)
-	 */
-	public void setCancelFlag(boolean flag) {
-		this.isCancelled = flag;
-	}
-
-	/**
-	 * This method returns the set of next states generated by a randomly chosen
-	 * action. It returns null if there is no possible next state.
-	 */
-	public final StateVec randomNextStates(TLCState state) {
-		int len = this.actions.length;
-		int index = (int) Math.floor(this.rng.nextDouble() * len);
-		int p = this.rng.nextPrime();
-		for (int i = 0; i < len; i++) {
-			StateVec pstates = this.tool.getNextStates(this.actions[index], state);
-			if (!pstates.empty()) {
-				return pstates;
-			}
-			index = (index + p) % len;
-		}
-		return null;
-	}
-
-	public Value getLocalValue(int idx) {
+	public IValue getLocalValue(int idx) {
 		if (idx < this.localValues.length) {
 			return this.localValues[idx];
 		}
 		return null;
 	}
 
-	public void setLocalValue(int idx, Value val) {
+	public void setLocalValue(int idx, IValue val) {
 		if (idx >= this.localValues.length) {
-			Value[] vals = new Value[idx + 1];
+			IValue[] vals = new IValue[idx + 1];
 			System.arraycopy(this.localValues, 0, vals, 0, this.localValues.length);
 			this.localValues = vals;
 		}
@@ -394,14 +388,13 @@ public class Simulator implements Cancelable {
 
 		/*
 		 * This allows the toolbox to easily display the last set of state space
-		 * statistics by putting them in the same form as all other progress
-		 * statistics.
+		 * statistics by putting them in the same form as all other progress statistics.
 		 */
 		if (TLCGlobals.tool) {
-			MP.printMessage(EC.TLC_PROGRESS_SIMU, String.valueOf(this.numOfGenStates));
+			MP.printMessage(EC.TLC_PROGRESS_SIMU, String.valueOf(numOfGenStates.longValue()));
 		}
 
-		MP.printMessage(EC.TLC_STATS_SIMU, new String[] { String.valueOf(this.numOfGenStates),
+		MP.printMessage(EC.TLC_STATS_SIMU, new String[] { String.valueOf(numOfGenStates.longValue()),
 				String.valueOf(this.seed), String.valueOf(this.aril) });
 	}
 
@@ -409,21 +402,8 @@ public class Simulator implements Cancelable {
 	 * Reports coverage
 	 */
 	public final void reportCoverage() {
-		if (TLCGlobals.coverageInterval >= 0) {
-			MP.printMessage(EC.TLC_COVERAGE_START);
-			ObjLongTable counts = this.tool.getPrimedLocs();
-			ObjLongTable.Enumerator keys = this.astCounts.keys();
-			Object key;
-			while ((key = keys.nextElement()) != null) {
-				String loc = ((SemanticNode) key).getLocation().toString();
-				counts.add(loc, astCounts.get(key));
-			}
-			Object[] skeys = counts.sortStringKeys();
-			for (int i = 0; i < skeys.length; i++) {
-				long val = counts.get(skeys[i]);
-				MP.printMessage(EC.TLC_COVERAGE_VALUE, new String[] { skeys[i].toString(), String.valueOf(val) });
-			}
-			MP.printMessage(EC.TLC_COVERAGE_END);
+		if (TLCGlobals.isCoverageEnabled()) {
+            CostModelCreator.report(this.tool, this.startTime );
 		}
 	}
 
@@ -431,9 +411,9 @@ public class Simulator implements Cancelable {
 	 * Reports progress information
 	 */
 	final class ProgressReport extends Thread {
-		
+
 		volatile boolean isRunning = true;
-		
+
 		public void run() {
 			int count = TLCGlobals.coverageInterval / TLCGlobals.progressInterval;
 			try {
@@ -441,8 +421,7 @@ public class Simulator implements Cancelable {
 					synchronized (this) {
 						this.wait(TLCGlobals.progressInterval);
 					}
-					MP.printMessage(EC.TLC_PROGRESS_SIMU, String.valueOf(numOfGenStates));
-
+					MP.printMessage(EC.TLC_PROGRESS_SIMU, String.valueOf(numOfGenStates.longValue()));
 					if (count > 1) {
 						count--;
 					} else {
@@ -454,6 +433,12 @@ public class Simulator implements Cancelable {
 				// SZ Jul 10, 2009: changed from error to bug
 				MP.printTLCBug(EC.TLC_REPORTER_DIED, null);
 			}
+		}
+	}
+
+	public void stop() {
+		for (SimulationWorker worker : workers) {
+			worker.interrupt();
 		}
 	}
 }

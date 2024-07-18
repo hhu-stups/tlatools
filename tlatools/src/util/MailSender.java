@@ -3,6 +3,7 @@ package util;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -13,8 +14,6 @@ import java.util.List;
 import java.util.Properties;
 import java.util.Scanner;
 
-import javax.activation.DataHandler;
-import javax.activation.FileDataSource;
 import javax.naming.NamingException;
 import javax.naming.directory.Attribute;
 import javax.naming.directory.Attributes;
@@ -23,7 +22,6 @@ import javax.naming.directory.InitialDirContext;
 import model.ModelInJar;
 import tlc2.output.MP;
 
-// Requires Java >=6 due to javax.activation only part starting with 6
 public class MailSender {
 
 	public static final String MODEL_NAME = "modelName";

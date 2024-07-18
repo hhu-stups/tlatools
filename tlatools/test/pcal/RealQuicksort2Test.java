@@ -46,6 +46,8 @@ public class RealQuicksort2Test extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "853", "612", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "11"));
+
+		assertZeroUncovered();
 	}
 }
 /*

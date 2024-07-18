@@ -3,22 +3,29 @@ package org.lamport.tla.toolbox.tool.tlc.ui.view;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Vector;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 import org.eclipse.core.runtime.Assert;
+import org.eclipse.core.runtime.Platform;
 import org.eclipse.debug.core.ILaunchConfiguration;
 import org.eclipse.jface.action.Action;
+import org.eclipse.jface.action.ToolBarManager;
 import org.eclipse.jface.dialogs.Dialog;
 import org.eclipse.jface.dialogs.IDialogSettings;
+import org.eclipse.jface.resource.FontRegistry;
+import org.eclipse.jface.resource.ImageDescriptor;
 import org.eclipse.jface.resource.JFaceResources;
 import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.Document;
 import org.eclipse.jface.text.IDocument;
 import org.eclipse.jface.text.source.SourceViewer;
+import org.eclipse.jface.util.IPropertyChangeListener;
 import org.eclipse.jface.viewers.CellLabelProvider;
 import org.eclipse.jface.viewers.ColumnViewerToolTipSupport;
 import org.eclipse.jface.viewers.ILazyTreeContentProvider;
@@ -35,8 +42,6 @@ import org.eclipse.swt.custom.SashForm;
 import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.events.ControlAdapter;
 import org.eclipse.swt.events.ControlEvent;
-import org.eclipse.swt.events.DisposeEvent;
-import org.eclipse.swt.events.DisposeListener;
 import org.eclipse.swt.events.MouseEvent;
 import org.eclipse.swt.events.MouseListener;
 import org.eclipse.swt.events.SelectionAdapter;
@@ -52,12 +57,16 @@ import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Listener;
 import org.eclipse.swt.widgets.ScrollBar;
 import org.eclipse.swt.widgets.Scrollable;
+import org.eclipse.swt.widgets.ToolBar;
 import org.eclipse.swt.widgets.Tree;
 import org.eclipse.swt.widgets.TreeColumn;
+import org.eclipse.ui.ISharedImages;
+import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.forms.widgets.Form;
 import org.eclipse.ui.forms.widgets.FormToolkit;
 import org.eclipse.ui.forms.widgets.Section;
 import org.eclipse.ui.part.ViewPart;
+import org.eclipse.ui.texteditor.ITextEditor;
 import org.lamport.tla.toolbox.Activator;
 import org.lamport.tla.toolbox.tool.tlc.model.Formula;
 import org.lamport.tla.toolbox.tool.tlc.model.Model;
@@ -77,9 +86,11 @@ import org.lamport.tla.toolbox.tool.tlc.output.data.TLCVariableValue;
 import org.lamport.tla.toolbox.tool.tlc.output.source.TLCOutputSourceRegistry;
 import org.lamport.tla.toolbox.tool.tlc.traceexplorer.TraceExplorerComposite;
 import org.lamport.tla.toolbox.tool.tlc.ui.TLCUIActivator;
+import org.lamport.tla.toolbox.tool.tlc.ui.editor.TLACoverageEditor;
 import org.lamport.tla.toolbox.tool.tlc.ui.preference.ITLCPreferenceConstants;
-import org.lamport.tla.toolbox.tool.tlc.ui.util.ActionClickListener;
-import org.lamport.tla.toolbox.tool.tlc.ui.util.ActionClickListener.LoaderTLCState;
+import org.lamport.tla.toolbox.tool.tlc.ui.util.RecordToSourceCoupler;
+import org.lamport.tla.toolbox.tool.tlc.ui.util.RecordToSourceCoupler.LoaderTLCState;
+import org.lamport.tla.toolbox.tool.tlc.ui.util.ExpandableSpaceReclaimer;
 import org.lamport.tla.toolbox.tool.tlc.ui.util.FormHelper;
 import org.lamport.tla.toolbox.tool.tlc.ui.util.TLCUIHelper;
 import org.lamport.tla.toolbox.tool.tlc.util.ModelHelper;
@@ -98,12 +109,23 @@ import tlc2.output.MP;
  */
 public class TLCErrorView extends ViewPart
 {
+	public static final String ID = "toolbox.tool.tlc.view.TLCErrorView";
+
 	private static final SimpleDateFormat sdf = new SimpleDateFormat("MMM dd,yyyy HH:mm:ss");
+	
+	private static final String JFACE_ERROR_TRACE_ID = ITLCPreferenceConstants.I_TLC_ERROR_TRACE_FONT + "_private";
+	private static final String CELL_TEXT_PROTOTYPE = "{|qgyA!#93^<[?";
 
 	private static final String INNER_WEIGHTS_KEY = "INNER_WEIGHTS_KEY";
 	private static final String OUTER_WEIGHTS_KEY = "OUTER_WEIGHTS_KEY";
-
-	public static final String ID = "toolbox.tool.tlc.view.TLCErrorView";
+	private static final String MID_WEIGHTS_KEY = "MID_WEIGHTS_KEY";
+  
+	private static final String SYNCED_TRAVERSAL_KEY = "SYNCED_TRAVERSAL_KEY";
+	
+	private static final String DEFAULT_TOOL_TIP
+		= "Click on a row to see in viewer below.\nDouble-click to go to corresponding action in spec \u2014 "
+			+ "while holding\n   down " + (Platform.getOS().equals(Platform.OS_MACOSX) ? "\u2318" : "CTRL")
+			+ " to go to the original PlusCal code, if present.";
 
     /**
      * This is the pattern of an error message resulting from evaluating the constant
@@ -111,7 +133,6 @@ public class TLCErrorView extends ViewPart
      */
     private static final Pattern CONSTANT_EXPRESSION_ERROR_PATTERN = Pattern.compile("Evaluating assumption PrintT\\("
             + TLCModelLaunchDataProvider.CONSTANT_EXPRESSION_OUTPUT_PATTERN.toString() + "\\)", Pattern.DOTALL);
-
 
     private static final IDocument EMPTY_DOCUMENT()
     {
@@ -123,6 +144,7 @@ public class TLCErrorView extends ViewPart
         return new Document("Select line in Error Trace to show its value here.");
     }
     
+    
     private int numberOfStatesToShow;
 
     private FormToolkit toolkit;
@@ -130,16 +152,37 @@ public class TLCErrorView extends ViewPart
 
     private SourceViewer errorViewer;
     private TreeViewer variableViewer;
+    private RecordToSourceCoupler stackTraceActionListener;
+    private SyncStackTraversal syncStackTraversalAction;
     private SourceViewer valueViewer;
     private Model model;
     private TraceExplorerComposite traceExplorerComposite;
+    
+    @SuppressWarnings("unused")  // help onto for a nicer object graph
+	private ExpandableSpaceReclaimer spaceReclaimer;
 
     // listener on changes to the tlc output font preference
-    private FontPreferenceChangeListener fontChangeListener;
+    private FontPreferenceChangeListener outputFontChangeListener;
+    // listener on changes to the error trace font preference
+    private final IPropertyChangeListener errorTraceFontChangeListener;
 
 	public TLCErrorView() {
 		numberOfStatesToShow = TLCUIActivator.getDefault().getPreferenceStore()
 				.getInt(ITLCPreferenceConstants.I_TLC_TRACE_MAX_SHOW_ERRORS);
+		
+		errorTraceFontChangeListener = (event) -> {
+			if ((event == null) || event.getProperty().equals(ITLCPreferenceConstants.I_TLC_ERROR_TRACE_FONT)) {
+				final Font f = JFaceResources.getFont(ITLCPreferenceConstants.I_TLC_ERROR_TRACE_FONT);
+				
+				JFaceResources.getFontRegistry().put(JFACE_ERROR_TRACE_ID, f.getFontData());
+
+				if (variableViewer != null) {
+					variableViewer.refresh(true);
+				}
+			}
+		};
+		errorTraceFontChangeListener.propertyChange(null);
+        JFaceResources.getFontRegistry().addListener(errorTraceFontChangeListener);
 	}
     
     /**
@@ -149,8 +192,7 @@ public class TLCErrorView extends ViewPart
     {
         errorViewer.setDocument(EMPTY_DOCUMENT());
         setTraceInput(new TLCError());
-        traceExplorerComposite.getTableViewer().setInput(new Vector<TLCState>());
-        traceExplorerComposite.changeExploreEnablement(false);
+        traceExplorerComposite.getTableViewer().setInput(new Vector<Formula>());
         valueViewer.setInput(EMPTY_DOCUMENT());
     }
 
@@ -203,7 +245,7 @@ public class TLCErrorView extends ViewPart
             	trace = new TLCError();
             }
 
-            IDocument document = errorViewer.getDocument();
+            final IDocument document = errorViewer.getDocument();
             try
             {
                 document.replace(0, document.getLength(), buffer.toString());
@@ -216,8 +258,7 @@ public class TLCErrorView extends ViewPart
             /*
              * determine if trace has changed. this is important for really long
              * traces because resetting the trace input locks up the toolbox for a few
-             * seconds in these cases, so it is important to not reset the trace
-             * if it is not necessary
+             * seconds, so it is important to not reset the trace if it is not necessary.
              */
             TLCError oldTrace = (TLCError) variableViewer.getInput();
             boolean isNewTrace = trace != null && oldTrace != null && !(trace == oldTrace);
@@ -225,7 +266,6 @@ public class TLCErrorView extends ViewPart
             if (isNewTrace)
             {
                 this.setTraceInput(trace);
-                traceExplorerComposite.changeExploreEnablement(true);
             }
             if (model.isSnapshot()) {
             	final String date = sdf.format(model.getSnapshotTimeStamp());
@@ -239,6 +279,8 @@ public class TLCErrorView extends ViewPart
             clear();
         }
         // TODO Check if a run of the trace explorer produced no errors. This would be a bug.
+        
+        traceExplorerComposite.changeButtonEnablement();
     }
 
     /**
@@ -322,7 +364,9 @@ public class TLCErrorView extends ViewPart
 
             public void mouseDown(MouseEvent e)
             {
-                TLCUIHelper.openTLCLocationHyperlink(text, e, model);
+                final Set<Class<? extends ITextEditor>> blacklist = new HashSet<>();
+                blacklist.add(TLACoverageEditor.class);
+                TLCUIHelper.openTLCLocationHyperlink(text, e, model, blacklist);
             }
 
             public void mouseDoubleClick(MouseEvent e)
@@ -356,9 +400,16 @@ public class TLCErrorView extends ViewPart
          */
         layout.marginWidth = 0;
         belowErrorViewerComposite.setLayout(layout);
+        
+        final SashForm middleSashForm = new SashForm(belowErrorViewerComposite, SWT.VERTICAL);
+        toolkit.adapt(middleSashForm);
 
-        traceExplorerComposite = new TraceExplorerComposite(belowErrorViewerComposite, "Error-Trace Exploration",
-                "Enter expressions to be evaluated at each state of the trace", toolkit, this);
+        gd = new GridData(SWT.FILL, SWT.FILL, true, true);
+
+        middleSashForm.setLayoutData(gd);
+
+        traceExplorerComposite = new TraceExplorerComposite(middleSashForm, "Error-Trace Exploration",
+                "Expressions to be evaluated at each state of the trace - drag to re-order.", toolkit, this);
 
         // A group can be used to organize and provide a title for the inner sash form
         // but right now I think the section looks better because it looks the same
@@ -377,7 +428,7 @@ public class TLCErrorView extends ViewPart
          * There is no reason to make it possible to not have this in the expanded form, so the
          * only style bit is for the title bar.
          */
-        Section errorTraceSection = toolkit.createSection(belowErrorViewerComposite, Section.TITLE_BAR);
+        Section errorTraceSection = toolkit.createSection(middleSashForm, Section.TITLE_BAR);
         errorTraceSection.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
         errorTraceSection.setLayout(new GridLayout(1, true));
         errorTraceSection.setText("Error-Trace");
@@ -386,11 +437,10 @@ public class TLCErrorView extends ViewPart
         Composite errorTraceSectionClientArea = toolkit.createComposite(errorTraceSection);
         errorTraceSectionClientArea.setLayout(new GridLayout(1, true));
         errorTraceSection.setClient(errorTraceSectionClientArea);
-
-        // Modified on 30 Aug 2009 as part of putting error viewer inside a
-        // sash.
-        // SashForm sashForm = new SashForm(body, SWT.VERTICAL); //
-        final SashForm sashForm = new SashForm(errorTraceSectionClientArea/*belowErrorViewerComposite*/, SWT.VERTICAL);
+        
+        spaceReclaimer = new ExpandableSpaceReclaimer(traceExplorerComposite.getSection(), middleSashForm);
+        
+        final SashForm sashForm = new SashForm(errorTraceSectionClientArea, SWT.VERTICAL);
         toolkit.adapt(sashForm);
 
         gd = new GridData(SWT.FILL, SWT.FILL, true, true);
@@ -418,6 +468,16 @@ public class TLCErrorView extends ViewPart
         resizer.tree = tree;
         
         tree.addControlListener(resizer);
+        tree.addListener(SWT.MeasureItem, (event) -> {
+        	final Font originalFont = event.gc.getFont();
+        	
+        	event.gc.setFont(JFaceResources.getFontRegistry().getBold(JFACE_ERROR_TRACE_ID));
+        	// we add 2 because SWT doesn't seem to calculate the height correctly, regardless of the prototype
+        	final int height = event.gc.stringExtent(CELL_TEXT_PROTOTYPE).y + 2;
+        	event.height = height;
+        	
+        	event.gc.setFont(originalFont);
+        });
 
         variableViewer = new TreeViewer(tree);
         final StateContentProvider provider = new StateContentProvider(variableViewer);
@@ -462,15 +522,52 @@ public class TLCErrorView extends ViewPart
         // detect when the user has tried to resize the individual columns.
         // The following might work, if I can figure out the real event type
         // to use.
-        int eventType = SWT.Resize; // (2^25) - 1 ; // 1023; // what should this
-        // be?
-        resizer.column[0].addListener(eventType, resizer);
+        resizer.column[0].addListener(SWT.Resize, resizer);
 
-        variableViewer.getTree().addMouseListener(new ActionClickListener(variableViewer));
-        variableViewer.getTree().addKeyListener(new ActionClickListener(variableViewer));
-
-// This is working but I'm not sure we need it. ActionClickListener
-// has a keystroke to collapse the viewer.        
+        
+        final Set<Class<? extends ITextEditor>> blacklist = new HashSet<>();
+        blacklist.add(TLACoverageEditor.class);
+		stackTraceActionListener = new RecordToSourceCoupler(variableViewer, blacklist, this,
+				RecordToSourceCoupler.FocusRetentionPolicy.ARROW_KEY_TRAVERSAL);
+		variableViewer.getTree().addMouseListener(stackTraceActionListener);
+        variableViewer.getTree().addKeyListener(stackTraceActionListener);
+        variableViewer.getTree().addDisposeListener((event) -> {
+			final IDialogSettings ids = Activator.getDefault().getDialogSettings();
+			ids.put(SYNCED_TRAVERSAL_KEY, syncStackTraversalAction.isChecked());
+        });
+        
+        // Make it possible to expand and collapse the error trace with the push of a button.
+		final ToolBarManager toolBarManager = new ToolBarManager(SWT.FLAT);
+		final ToolBar toolbar = toolBarManager.createControl(errorTraceSection);
+		final ShiftClickAction action = new ShiftClickAction(
+				"Toggle between expand and collapse all (Shift+Click to restore the default two-level expansion)",
+				TLCUIActivator.getImageDescriptor("icons/elcl16/toggle_expand_state.png")) {
+			@Override
+			void runWithKey(final boolean pressed) {
+				if (pressed) {
+					// expandAll() followed by expandToLevel(2) requires us
+					// to collapse the viewer first.
+					variableViewer.collapseAll();
+					variableViewer.expandToLevel(2);
+				} else {
+					final Object[] expandedElements = variableViewer.getExpandedElements();
+					if (expandedElements.length == 0) {
+						variableViewer.expandAll();
+					} else {
+						variableViewer.collapseAll();
+					}
+				}
+			}
+		};
+		parent.getDisplay().addFilter(SWT.KeyDown, action);
+		parent.getDisplay().addFilter(SWT.KeyUp, action);
+		toolBarManager.add(action);
+		syncStackTraversalAction = new SyncStackTraversal();
+		toolBarManager.add(syncStackTraversalAction);
+		toolBarManager.update(true);
+		errorTraceSection.setTextClient(toolbar);
+// This is working but now redundant to the buttons on the section (see above).
+// Also ActionClickListener has a keystroke to collapse the viewer.        
 //        // Add a right click context menu to expand and collapse all variables. 
 //		final MenuManager contextMenu = new MenuManager("#ViewerMenu"); //$NON-NLS-1$
 //		contextMenu.setRemoveAllWhenShown(true);
@@ -556,18 +653,32 @@ public class TLCErrorView extends ViewPart
         } else {
         	outerSashForm.setWeights(new int[] {1,4});
         }
+        final String midWeights = dialogSettings.get(MID_WEIGHTS_KEY);
+        if (midWeights != null) {
+        	middleSashForm.setWeights(stringToIntArray(midWeights));
+        } else {
+        	final int[] weights;
+        	
+        	if (traceExplorerComposite.getSection().isExpanded()) {
+        		weights = new int[] {3, 7};
+        	} else {
+        		weights = new int[] {1, 9};
+        	}
+        	
+            middleSashForm.setWeights(weights);
+        }
 
-        sashForm.addDisposeListener(new DisposeListener() {
-			public void widgetDisposed(DisposeEvent e) {
-				final IDialogSettings dialogSettings = Activator.getDefault().getDialogSettings();
-		        dialogSettings.put(INNER_WEIGHTS_KEY, Arrays.toString(sashForm.getWeights()));
-			}
-		});
-        outerSashForm.addDisposeListener(new DisposeListener() {
-			public void widgetDisposed(DisposeEvent e) {
-				final IDialogSettings dialogSettings = Activator.getDefault().getDialogSettings();
-		        dialogSettings.put(OUTER_WEIGHTS_KEY, Arrays.toString(outerSashForm.getWeights()));
-			}
+        sashForm.addDisposeListener((event) -> {
+			final IDialogSettings ids = Activator.getDefault().getDialogSettings();
+			ids.put(INNER_WEIGHTS_KEY, Arrays.toString(sashForm.getWeights()));
+        });
+        outerSashForm.addDisposeListener((event) -> {
+			final IDialogSettings ids = Activator.getDefault().getDialogSettings();
+			ids.put(OUTER_WEIGHTS_KEY, Arrays.toString(outerSashForm.getWeights()));
+        });
+        middleSashForm.addDisposeListener((event) -> {
+			final IDialogSettings ids = Activator.getDefault().getDialogSettings();
+			ids.put(MID_WEIGHTS_KEY, Arrays.toString(middleSashForm.getWeights()));
         });
         
         form.getToolBarManager().add(new HelpAction());
@@ -576,16 +687,13 @@ public class TLCErrorView extends ViewPart
         // init
         clear();
 
-        // add a listener to the preference store to react when the font is
-        // changed
-
-        Vector<Control> controls = new Vector<Control>();
+        // add listeners to the preference store to react when the fonts are changed
+        Vector<Control> controls = new Vector<>();
         controls.add(errorViewer.getControl());
-        fontChangeListener = new FontPreferenceChangeListener(controls, ITLCPreferenceConstants.I_TLC_OUTPUT_FONT);
-        JFaceResources.getFontRegistry().addListener(fontChangeListener);
-
+        outputFontChangeListener = new FontPreferenceChangeListener(controls, ITLCPreferenceConstants.I_TLC_OUTPUT_FONT);
+        JFaceResources.getFontRegistry().addListener(outputFontChangeListener);
+		
         TLCUIHelper.setHelp(parent, IHelpConstants.TLC_ERROR_VIEW);
-
     }
     
 	private int[] stringToIntArray(final String str) {
@@ -602,10 +710,14 @@ public class TLCErrorView extends ViewPart
         form.setFocus();
     }
 
-    public void dispose()
-    {
-        JFaceResources.getFontRegistry().removeListener(fontChangeListener);
+	public void dispose() {
+		final FontRegistry fr = JFaceResources.getFontRegistry();
+		
+        fr.removeListener(outputFontChangeListener);
+        fr.removeListener(errorTraceFontChangeListener);
+        
         toolkit.dispose();
+        
         super.dispose();
     }
 
@@ -873,7 +985,7 @@ public class TLCErrorView extends ViewPart
 				if (error.isTraceRestricted() && viewerIndex == 0) {
 					// If only a subset of the trace is shown, show a dummy item
 					// at the top which can be double-clicked to load more.
-					viewer.replace(parent, viewerIndex, new ActionClickListener.LoaderTLCState(viewer,
+					viewer.replace(parent, viewerIndex, new RecordToSourceCoupler.LoaderTLCState(viewer,
 							Math.min(numberOfStatesToShow, error.getNumberOfRestrictedTraceStates()), error));
 					return;
 				}
@@ -1061,7 +1173,7 @@ public class TLCErrorView extends ViewPart
                     }
                     return state.getLabel();
                 case VALUE:
-                	if (state instanceof ActionClickListener.LoaderTLCState) {
+                	if (state instanceof RecordToSourceCoupler.LoaderTLCState) {
                     	return "";
                     } else {
                     	return "State (num = " + state.getStateNumber() + ")";
@@ -1153,9 +1265,10 @@ public class TLCErrorView extends ViewPart
             return null;
         }
 
-		private static final Map<String, Color> location2color = new ConcurrentHashMap<String, Color>();
+		private static final Map<String, Color> LOCATION_COLOR_MAP = new ConcurrentHashMap<String, Color>();
 		//TODO Convert to Toolbox preference once this features proves useful.
-		private static final boolean coloring = Boolean.getBoolean(TLCErrorView.class.getName() + ".coloring");
+		private static final boolean COLORING_SYSTEM_PROPERTY = Boolean
+				.getBoolean(TLCErrorView.class.getName() + ".coloring");
 
         /**
          * The following method sets the background color of a row or column of
@@ -1182,7 +1295,7 @@ public class TLCErrorView extends ViewPart
 				} else if (value.isDeleted()) {
 					return TLCUIActivator.getDefault().getDeletedColor();
 				}
-			} else if (coloring && element instanceof TLCState) {
+			} else if (COLORING_SYSTEM_PROPERTY && element instanceof TLCState) {
 				// Assign a color to each location to make actions in the error
 				// viewer more easily distinguishable.
 				final TLCState state = (TLCState) element;
@@ -1190,11 +1303,11 @@ public class TLCErrorView extends ViewPart
 				if (moduleLocation == null) {
 					return null;
 				}
-				Color c = location2color.get(moduleLocation.toString());
+				Color c = LOCATION_COLOR_MAP.get(moduleLocation.toString());
 				if (c == null) {
-					int color = SWT.COLOR_WHITE + (2 * location2color.size());
+					int color = SWT.COLOR_WHITE + (2 * LOCATION_COLOR_MAP.size());
 					c = TLCUIActivator.getColor(color);
-					location2color.put(state.getModuleLocation().toString(), c);
+					LOCATION_COLOR_MAP.put(state.getModuleLocation().toString(), c);
 				}
 				return c;
 			}
@@ -1206,20 +1319,20 @@ public class TLCErrorView extends ViewPart
             return null;
         }
 
-        private Font getFont(Object element, int columnIndex)
-        {
-            if (element instanceof TLCVariable)
-            {
-                TLCVariable variable = (TLCVariable) element;
-                if (variable.isTraceExplorerVar())
-                {
-                    return JFaceResources.getFontRegistry().getBold("");
-                }
-            } else if (element instanceof ActionClickListener.LoaderTLCState) {
-                return JFaceResources.getFontRegistry().getBold("");
-            }
-            return null;
-        }
+		private Font getFont(Object element, int columnIndex) {
+			boolean returnBoldVersion = false;
+			
+			if (element instanceof TLCVariable) {
+				if (((TLCVariable) element).isTraceExplorerVar()) {
+					returnBoldVersion = true;
+				}
+			} else if (element instanceof RecordToSourceCoupler.LoaderTLCState) {
+				returnBoldVersion = true;
+			}
+
+			final FontRegistry fr = JFaceResources.getFontRegistry();
+			return returnBoldVersion ? fr.getBold(JFACE_ERROR_TRACE_ID) : fr.get(JFACE_ERROR_TRACE_ID);
+		}
 
         /* (non-Javadoc)
          * @see org.eclipse.jface.viewers.BaseLabelProvider#dispose()
@@ -1244,7 +1357,7 @@ public class TLCErrorView extends ViewPart
 			if (element instanceof LoaderTLCState) {
 				return "Double-click to load more states.\nIf the number of states is large, this might take a few seconds.";
 			}
-			return "Click on a row to see in viewer below, double-click to go to corresponding action in spec.";
+			return DEFAULT_TOOL_TIP;
 		}
 
 		/* (non-Javadoc)
@@ -1341,5 +1454,60 @@ public class TLCErrorView extends ViewPart
 	
 	TreeViewer getViewer() {
 		return variableViewer;
+	}
+	
+	
+	private class SyncStackTraversal extends Action {
+		SyncStackTraversal() {
+			super("Sync traversing of the stack trace by arrow keys to the editor.", AS_CHECK_BOX);
+			
+			final ImageDescriptor id = PlatformUI.getWorkbench().getSharedImages()
+					.getImageDescriptor(ISharedImages.IMG_ELCL_SYNCED);
+			setImageDescriptor(id);
+			
+	        final boolean enabled = Activator.getDefault().getDialogSettings().getBoolean(SYNCED_TRAVERSAL_KEY);
+	        setChecked(enabled);
+	        
+	        run();
+		}
+
+	    /**
+	     * {@inheritDoc}
+	     */
+		@Override
+		public void run() {
+			final int value = isChecked()
+					? (RecordToSourceCoupler.OBSERVE_ARROW_KEY | RecordToSourceCoupler.OBSERVE_SINGLE_CLICK)
+					: RecordToSourceCoupler.OBSERVE_DEFAULT;
+
+			stackTraceActionListener.setNonDefaultObservables(value);
+		}
+	}
+	
+	
+	private static abstract class ShiftClickAction extends Action implements Listener {
+		private boolean holdDown = false;
+
+		public ShiftClickAction(final String text, final ImageDescriptor imageDescriptor) {
+			super(text, imageDescriptor);
+		}
+
+		@Override
+		public void runWithEvent(Event event) {
+			runWithKey(holdDown);
+		}
+
+		abstract void runWithKey(boolean shiftPressed);
+
+		@Override
+		public void handleEvent(Event event) {
+			if (event.keyCode == SWT.SHIFT) {
+				if (event.stateMask == SWT.SHIFT) {
+					holdDown = false;
+				} else if (event.stateMask == SWT.NONE){
+					holdDown = true;
+				}
+			}
+		}
 	}
 }

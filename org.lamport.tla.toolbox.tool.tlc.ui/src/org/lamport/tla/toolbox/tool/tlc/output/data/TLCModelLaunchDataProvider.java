@@ -26,10 +26,15 @@
 
 package org.lamport.tla.toolbox.tool.tlc.output.data;
 
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.Hashtable;
 import java.util.List;
 import java.util.Vector;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -57,6 +62,7 @@ import org.lamport.tla.toolbox.tool.tlc.model.Formula;
 import org.lamport.tla.toolbox.tool.tlc.model.Model;
 import org.lamport.tla.toolbox.tool.tlc.model.ModelWriter;
 import org.lamport.tla.toolbox.tool.tlc.output.ITLCOutputListener;
+import org.lamport.tla.toolbox.tool.tlc.output.data.TLCError.Order;
 import org.lamport.tla.toolbox.tool.tlc.output.source.TLCOutputSourceRegistry;
 import org.lamport.tla.toolbox.tool.tlc.output.source.TLCRegion;
 import org.lamport.tla.toolbox.tool.tlc.output.source.TLCRegionContainer;
@@ -77,7 +83,7 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
 {
 	public static final String STATESORTORDER = "STATESORTORDER";
 
-    public static final String NO_OUTPUT_AVAILABLE = "No user output is available";
+    public static final String NO_OUTPUT_AVAILABLE = "No output is available";
 
     public static final String NO_ERRORS = "No errors";
     // strings for current status reporting
@@ -91,6 +97,11 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
     public static final String SERVER_RUNNING = "Master waiting for workers";
     public static final String SINGLE_WORKER_REGISTERED = " worker registered";
     public static final String MULTIPLE_WORKERS_REGISTERED = " workers registered";
+    // strings for the types of searches
+    public static final String BREADTH_FIRST_SEARCH = "Breadth-first search";
+    public static final String DEPTH_FIRST_SEARCH = "Depth-first search";
+    // string for simulation mode
+    public static final String SIMULATION_MODE = "Simulation";
 
     // pattern for the output of evaluating constant expressions
     public static final Pattern CONSTANT_EXPRESSION_OUTPUT_PATTERN = Pattern.compile("(?s)" + ModelWriter.BEGIN_TUPLE
@@ -98,8 +109,10 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
             + "(.*)"/*calc output group*/
             + ModelWriter.END_TUPLE);
 
-    // presenter for the current process
-    protected ITLCModelLaunchDataPresenter presenter;
+    
+    
+    // presenters for the current process
+    private final CopyOnWriteArrayList<ITLCModelLaunchDataPresenter> m_dataPresenters;
     // list of errors
     protected List<TLCError> errors;
     // start time
@@ -117,7 +130,7 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
     // reports the probability of a fingerprint collision
     protected String fingerprintCollisionProbability;
     // coverage items
-    protected List<CoverageInformationItem> coverageInfo;
+    protected CoverageInformation coverageInfo;
     // One of the coverage infos indicate zero coverage.
     protected boolean zeroCoverage = false;
     // progress information
@@ -133,24 +146,27 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
     protected Document userOutput;
     // calc output
     protected String constantExprEvalOutput;
-    /**
-     * Sort order in which states are sorted in the variable viewer
-     */
-    protected boolean stateSortDirection;
-
     // the model, which is represented by the current launch data provider
     private final Model model;
     // flag indicating that TLC has started
     // currently this is used to indicate
-    // that tlc output not surrounded by message tags
-    // should be put in the user output widget
+	// that tlc output not surrounded by message tags
+	// should be put in the user output widget. This does not indicate the state of
+	// the TLC process. Instead it only indicates that the TLC process is past
+	// the spec parsing stage with SANY.
     protected boolean isTLCStarted = false;
 
     protected int numWorkers = 0;
 
-    public TLCModelLaunchDataProvider(Model model)
-    {
-        this.model = model;
+	private int fpIndex;
+
+	private boolean isSymmetryWithLiveness = false;
+	
+	public TLCModelLaunchDataProvider(final Model tlcModel) {
+    	Assert.isNotNull(tlcModel);
+        model = tlcModel;
+        
+        m_dataPresenters = new CopyOnWriteArrayList<>();
 
         // init provider, but not connect it to the source!
         initialize();
@@ -172,7 +188,7 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
         lastDetectedError = null;
         model.removeMarkers(ModelHelper.TLC_MODEL_ERROR_MARKER_TLC);
 
-        coverageInfo = new Vector<CoverageInformationItem>();
+        coverageInfo = new CoverageInformation();
         progressInformation = new Vector<StateSpaceInformationItem>();
         startTimestamp = Long.MIN_VALUE;
         finishTimestamp = Long.MIN_VALUE;
@@ -184,33 +200,27 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
         progressOutput = new Document(NO_OUTPUT_AVAILABLE);
         userOutput = new Document(NO_OUTPUT_AVAILABLE);
         constantExprEvalOutput = "";
-
-		final IDialogSettings dialogSettings = Activator.getDefault().getDialogSettings();
-		stateSortDirection = dialogSettings.getBoolean(STATESORTORDER);
+        isSymmetryWithLiveness = false;
     }
 
     /**
      * Inform the view, if any
      * @param fieldId
      */
-    protected void informPresenter(int fieldId)
-    {
-        if (presenter != null)
-        {
+	protected void informPresenter(final int fieldId) {
+    	m_dataPresenters.stream().forEach((presenter) -> {
             presenter.modelChanged(this, fieldId);
-        }
+    	});
     }
 
     /**
      * Populate data to the presenter 
      */
-    public void populate()
-    {
-        for (int i = 0; i < ITLCModelLaunchDataPresenter.ALL_FIELDS.length; i++)
-        {
-            informPresenter(ITLCModelLaunchDataPresenter.ALL_FIELDS[i]);
-        }
-    }
+	public void populate() {
+		for (int i = 0; i < ITLCModelLaunchDataPresenter.ALL_FIELDS.length; i++) {
+			informPresenter(ITLCModelLaunchDataPresenter.ALL_FIELDS[i]);
+		}
+	}
 
     /**
      * Name of the model
@@ -276,7 +286,7 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
             case MP.STATE:
                 Assert.isNotNull(this.lastDetectedError,
                         "The state encountered without the error describing the reason for it. This is a bug.");
-                this.lastDetectedError.addState(TLCState.parseState(outputMessage, getModelName()), stateSortDirection);
+                this.lastDetectedError.addState(TLCState.parseState(outputMessage, getModelName()));
                 break;
             case MP.ERROR:
             case MP.TLCBUG:
@@ -290,8 +300,12 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
                     
                 // send to progress output
                 case EC.TLC_FEATURE_UNSUPPORTED:
-                case EC.TLC_FEATURE_UNSUPPORTED_LIVENESS_SYMMETRY:
                     setDocumentText(this.progressOutput, outputMessage, true);
+                    break;
+                case EC.TLC_FEATURE_UNSUPPORTED_LIVENESS_SYMMETRY:
+                	this.isSymmetryWithLiveness = true;
+                    setDocumentText(this.progressOutput, outputMessage, true);
+                    informPresenter(ITLCModelLaunchDataPresenter.WARNINGS);
                     break;
                     
                 // usual errors
@@ -333,6 +347,7 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
                     // case EC.TLC_SUCCESS:
                 case EC.TLC_PROGRESS_START_STATS_DFID:
                 case EC.TLC_INITIAL_STATE:
+                case EC.TLC_COMPUTING_INIT_PROGRESS:
                 case EC.TLC_STATS:
                 case EC.TLC_STATS_DFID:
                 case EC.TLC_STATS_SIMU:
@@ -343,17 +358,19 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
                     setDocumentText(this.progressOutput, outputMessage, true);
                     break;
                 case EC.TLC_MODE_MC:
-                    this.tlcMode = "Breadth-first search";
+                    this.tlcMode = BREADTH_FIRST_SEARCH;
+					this.fpIndex = getFPIndex(outputMessage);
                     informPresenter(ITLCModelLaunchDataPresenter.TLC_MODE);
                     setDocumentText(this.progressOutput, outputMessage, true);
                     break;
                 case EC.TLC_MODE_MC_DFS:
-                    this.tlcMode = "Depth-first search";
+                    this.tlcMode = DEPTH_FIRST_SEARCH;
+					this.fpIndex = getFPIndex(outputMessage);
                     informPresenter(ITLCModelLaunchDataPresenter.TLC_MODE);
                     setDocumentText(this.progressOutput, outputMessage, true);
                     break;
                 case EC.TLC_MODE_SIMU:
-                    this.tlcMode = "Simulation";
+                    this.tlcMode = SIMULATION_MODE;
                     informPresenter(ITLCModelLaunchDataPresenter.TLC_MODE);
                     setDocumentText(this.progressOutput, outputMessage, true);
                     break;
@@ -436,24 +453,45 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
                 // Coverage information
                 case EC.TLC_COVERAGE_START:
                     this.coverageTimestamp = CoverageInformationItem.parseCoverageTimestamp(outputMessage);
-                    this.coverageInfo = new Vector<CoverageInformationItem>();
+                    this.coverageInfo = new CoverageInformation(model.getSavedTLAFiles());
                     informPresenter(ITLCModelLaunchDataPresenter.COVERAGE_TIME);
                     informPresenter(ITLCModelLaunchDataPresenter.COVERAGE);
                     break;
-                case EC.TLC_COVERAGE_VALUE:
-                    // Commented out by LL for testing on 25 sep 2010
-                    CoverageInformationItem item = CoverageInformationItem.parse(outputMessage, getModelName());
-                    if (!item.getModule().equals(ModelHelper.MC_MODEL_NAME))
-                    {
-                        // only add coverage of the spec files
-                        this.coverageInfo.add(item);
-                        if (item.getCount() == 0) {
-                        	this.zeroCoverage = true;
-                        }
-                        informPresenter(ITLCModelLaunchDataPresenter.COVERAGE);
-                    }
+                case EC.TLC_COVERAGE_PROPERTY:
+                    this.coverageInfo.add(ActionInformationItem.parseProp(outputMessage, getModelName()));
+                    informPresenter(ITLCModelLaunchDataPresenter.COVERAGE);
                     break;
+                case EC.TLC_COVERAGE_INIT:
+                    this.coverageInfo.add(ActionInformationItem.parseInit(outputMessage, getModelName()));
+                    informPresenter(ITLCModelLaunchDataPresenter.COVERAGE);
+                    break;
+                case EC.TLC_COVERAGE_NEXT:
+                    this.coverageInfo.add(ActionInformationItem.parseNext(outputMessage, getModelName()));
+                    informPresenter(ITLCModelLaunchDataPresenter.COVERAGE);
+                    break;
+                case EC.TLC_COVERAGE_VALUE_COST:
+                    CoverageInformationItem item = CoverageInformationItem.parseCost(outputMessage, getModelName());
+                    this.coverageInfo.add(item);
+                    if (item.getCount() == 0) {
+                    	this.zeroCoverage = true;
+                    }
+                    informPresenter(ITLCModelLaunchDataPresenter.COVERAGE);
+                    break;
+                case EC.TLC_COVERAGE_VALUE:
+                	item = CoverageInformationItem.parse(outputMessage, getModelName());
+                    this.coverageInfo.add(item);
+                    if (item.getCount() == 0) {
+                    	this.zeroCoverage = true;
+                    }
+                    informPresenter(ITLCModelLaunchDataPresenter.COVERAGE);
+                    break;
+                case EC.TLC_COVERAGE_END_OVERHEAD:
+                	if (getModel().isRunning()) {
+                		informPresenter(ITLCModelLaunchDataPresenter.COVERAGE_END_OVERHEAD);
+                		break;
+                	}
                 case EC.TLC_COVERAGE_END:
+                    informPresenter(ITLCModelLaunchDataPresenter.COVERAGE_END);
                     break;
                 case EC.TLC_DISTRIBUTED_SERVER_RUNNING:
                 	numWorkers = 0;
@@ -548,6 +586,14 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
         }
     }
 
+	static int getFPIndex(final String startupMessage) {
+		final Matcher matcher = startupMessagePattern.matcher(startupMessage);
+		if (matcher.find()) {
+			return Integer.parseInt(matcher.group(2));
+		}
+		return 0; // legacy support
+	}
+
     /**
      * @param latest
      * @return true iff the presenter should be updated
@@ -592,7 +638,9 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
     protected TLCError createError(TLCRegion tlcRegion, String message)
     {
         // the root of the error trace
-        TLCError topError = new TLCError();
+		final IDialogSettings dialogSettings = Activator.getDefault().getDialogSettings();
+        final boolean stateSortOrder = dialogSettings.getBoolean(STATESORTORDER);
+		final TLCError topError = new TLCError(Order.valueOf(stateSortOrder));
 
         if (tlcRegion instanceof TLCRegionContainer)
         {
@@ -625,7 +673,7 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
                      * a memory leak.
                      */
                     IFile mcFile = getModel().getTLAFile();
-                    FileEditorInput mcFileEditorInput = new FileEditorInput((IFile) mcFile);
+                    FileEditorInput mcFileEditorInput = new FileEditorInput(mcFile);
                     FileDocumentProvider mcFileDocumentProvider = new FileDocumentProvider();
 
                     try
@@ -672,7 +720,7 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
                             // create the error properties for this id
                             // this method find the corresponding attribute and
                             // create the map with attributes, required to create a marker
-                            props[j] = ModelHelper.createMarkerDescription(mcDocument, mcSearcher,
+                            props[j] = ModelHelper.createMarkerDescription(mcFile, mcDocument, mcSearcher,
                                     errorMessage, IMarker.SEVERITY_ERROR, coordinates);
 
                             // read the attribute name
@@ -747,8 +795,16 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
                         for (int j = 0; j < locations.length; j++)
                         {
                             // restore the location from the region
-                            String locationString = errorDocument.get(locations[j].getOffset(), locations[j]
-                                    .getLength());
+                        	String locationString = "";
+                        	try {
+								locationString = errorDocument.get(locations[j].getOffset(), locations[j]
+                        				.getLength());
+							} catch (BadLocationException ble) {
+								// Do not break from the loop when the spaghetti code above crashes for a
+								// whatever reason (life is too short). The region (locations!?) might point to
+								// another file which cannot be mapped to errorDocument which will throw the BLE.
+								continue;
+							}
                             Location location = Location.parseLocation(locationString);
                             // look only for location in the MC file
                             if (location.source().equals(
@@ -835,6 +891,10 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
     private static final String CR = "\n";
     private static final String EMPTY = "";
 
+	private static final Pattern startupMessagePattern = Pattern
+			.compile("^Running (depth|breadth)-first search Model-Checking with fp ([0-9]+) and seed "
+					+ "[-0-9]+ with [0-9]+ worker[s]? on [0-9]+ cores with .*? heap and .*? offheap memory (\\[pid: [0-9]+\\])? \\(.*\\).$");
+
     /**
      * Sets text to a document
      * @param document
@@ -892,13 +952,21 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
     }
 
     /**
-     * Set the presenter.  
-     * @param presenter a presenter to update on data changes
+     * Add a presenter.
+     * @param presenter
      */
-    public void setPresenter(ITLCModelLaunchDataPresenter presenter)
-    {
-        this.presenter = presenter;
-        populate();
+    public void addDataPresenter(final ITLCModelLaunchDataPresenter presenter) {
+    	m_dataPresenters.add(presenter);
+    	populate();
+    }
+    
+    /**
+     * Remove a presenter added via {@link #addDataPresenter(ITLCModelLaunchDataPresenter)}
+     * @param presenter
+     */
+    public void removeDataPresenter(final ITLCModelLaunchDataPresenter presenter) {
+    	m_dataPresenters.remove(presenter);
+    	populate();
     }
 
     public List<TLCError> getErrors()
@@ -935,14 +1003,9 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
         this.coverageTimestamp = coverageTimestamp;
     }
 
-    public List<CoverageInformationItem> getCoverageInfo()
+    public CoverageInformation getCoverageInfo()
     {
         return coverageInfo;
-    }
-
-    public void setCoverageInfo(List<CoverageInformationItem> coverageInfo)
-    {
-        this.coverageInfo = coverageInfo;
     }
 
     public boolean hasZeroCoverage() {
@@ -964,19 +1027,9 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
         return userOutput;
     }
 
-    public void setUserOutput(Document userOutput)
-    {
-        this.userOutput = userOutput;
-    }
-
     public Document getProgressOutput()
     {
         return progressOutput;
-    }
-
-    public void setProgressOutput(Document progressOutput)
-    {
-        this.progressOutput = progressOutput;
     }
 
     public long getLastCheckpointTimeStamp()
@@ -996,7 +1049,6 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
     }
 
 	public boolean isDone() {
-		assert currentStatus.equals("Not running");
 		return isDone;
 	}
 
@@ -1020,6 +1072,14 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
     {
         return constantExprEvalOutput;
     }
+    
+    private static final Pattern collisionProbabilityPattern = Pattern.compile(
+			"^Model checking completed\\. No error has been found\\.\\n  Estimates of the probability "
+			+ "that TLC did not check all reachable states\\n  because two distinct states had the "
+			+ "same fingerprint:\\n  calculated \\(optimistic\\):  val = "
+			+ "([0-9]*\\.?[0-9]+[eE][-+]?[0-9]+?)" // group 1
+			+ "(\\n  based on the actual fingerprints:  val = "
+			+ "([0-9]*\\.?[0-9]+[eE][-+]?[0-9]+?))?$"); // group 3 iff present (group 2 is last two lines)
 
     /**
      * Extracts the fingerprint collision probability information line
@@ -1032,29 +1092,17 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
      */
     private String extractCollisionProbability(String outputMessage)
     {
-        String result = "";
-        int valIndex;
-        int endValIndex;
-        int startIndex = 0;
-        String[] labels = { "calculated: ", ",  observed: " };
-        for (int i = 0; i < 2; i++)
-        {
-            result = result + labels[i];
-            valIndex = outputMessage.indexOf(" val = ", startIndex);
-            if (valIndex > 0)
-            {
-                startIndex = valIndex + 7;
-                endValIndex = startIndex;
-                while (endValIndex < outputMessage.length()
-                        && (! Character.isWhitespace(outputMessage.charAt(endValIndex))))
-                {
-                    endValIndex++;
-                }
-                result = result + outputMessage.substring(startIndex, endValIndex);
-                startIndex = endValIndex;
-            }
-        }
-        return result;
+		final Matcher matcher = collisionProbabilityPattern.matcher(outputMessage);
+		if (matcher.find()) {
+			final String optimistic = matcher.group(1);
+			final String actual = matcher.group(3);
+			if (actual != null) {
+				return String.format("calculated: %s  observed: %s", optimistic, actual);
+			} else {
+				return String.format("calculated: %s", optimistic);
+			}
+		}
+		return ""; // legacy support
     }
     
 	/**
@@ -1068,5 +1116,35 @@ public class TLCModelLaunchDataProvider implements ITLCOutputListener
 	
 	public String toString() {
 		return getModel().getSpec().getName() + "___" + getModelName();
+	}
+
+	public int getFPIndex() {
+		return this.fpIndex;
+	}
+
+	public boolean isSymmetryWithLiveness() {
+		return isSymmetryWithLiveness;
+	}
+	
+
+	private final static SimpleDateFormat SDF = new SimpleDateFormat(
+			"yyyy-MM-dd HH:mm:ss");
+	
+	public static Date parseDate(final String str) {
+		try {
+			return SDF.parse(str);
+		} catch (ParseException e) {
+			return new Date();
+		}
+	}
+
+	public static String formatInterval(final long firstTS, final long secondTS) {
+		final long interval = secondTS - firstTS;
+		final long hr = TimeUnit.MILLISECONDS.toHours(interval);
+		final long min = TimeUnit.MILLISECONDS.toMinutes(interval - TimeUnit.HOURS.toMillis(hr));
+		final long sec = TimeUnit.MILLISECONDS
+				.toSeconds(interval - TimeUnit.HOURS.toMillis(hr) - TimeUnit.MINUTES.toMillis(min));
+
+		return String.format("%02d:%02d:%02d", hr, min, sec);
 	}
 }

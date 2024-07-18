@@ -30,12 +30,20 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 
 public class ETest6 extends SuiteETestCase {
 
+	public ETest6() {
+		super(ExitStatus.FAILURE_SPEC_EVAL);
+	}
+	
 	@Test
 	public void testSpec() {
 		assertTrue(recorder.recordedWithSubStringValue(EC.GENERAL,
 				"In evaluation, the identifier x is either undefined or not an operator.\nline 16, col 23 to line 16, col 23 of module etest6"));
+
+		assertUncovered("line 13, col 14 to line 13, col 43 of module etest6: 0\n"
+				+ "line 19, col 13 to line 19, col 23 of module etest6: 0");
 	}
 }

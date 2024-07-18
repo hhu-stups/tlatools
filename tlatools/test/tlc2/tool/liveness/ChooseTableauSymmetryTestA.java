@@ -31,13 +31,16 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+
 import org.junit.Test;
+
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 
 public class ChooseTableauSymmetryTestA extends ModelCheckerTestCase {
 
 	public ChooseTableauSymmetryTestA() {
-		super("ChooseTableauSymmetryMCa", "symmetry");
+		super("ChooseTableauSymmetryMCa", "symmetry", ExitStatus.VIOLATION_LIVENESS);
 	}
 	
 	@Test
@@ -62,5 +65,7 @@ public class ChooseTableauSymmetryTestA extends ModelCheckerTestCase {
 		assertTraceWith(recorder.getRecords(EC.TLC_STATE_PRINT2), expectedTrace);
 		
 		assertBackToState(3, "<Ready line 7, col 13 to line 8, col 47 of module ChooseTableauSymmetry>");
+
+	assertZeroUncovered();
 	}
 }

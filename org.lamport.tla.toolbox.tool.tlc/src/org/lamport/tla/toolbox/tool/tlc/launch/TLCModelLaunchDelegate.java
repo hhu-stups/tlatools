@@ -8,10 +8,14 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
+import java.util.Random;
 import java.util.Vector;
+import java.util.stream.Collectors;
 
 import org.eclipse.core.internal.resources.ResourceException;
 import org.eclipse.core.resources.IFile;
@@ -58,8 +62,10 @@ import org.lamport.tla.toolbox.tool.tlc.job.ITLCJobStatus;
 import org.lamport.tla.toolbox.tool.tlc.job.TLCJobFactory;
 import org.lamport.tla.toolbox.tool.tlc.job.TLCProcessJob;
 import org.lamport.tla.toolbox.tool.tlc.model.Assignment;
+import org.lamport.tla.toolbox.tool.tlc.model.Formula;
 import org.lamport.tla.toolbox.tool.tlc.model.Model;
 import org.lamport.tla.toolbox.tool.tlc.model.ModelWriter;
+import org.lamport.tla.toolbox.tool.tlc.model.TLCSpec;
 import org.lamport.tla.toolbox.tool.tlc.model.TypedSet;
 import org.lamport.tla.toolbox.tool.tlc.output.IProcessOutputSink;
 import org.lamport.tla.toolbox.tool.tlc.util.ModelHelper;
@@ -73,6 +79,8 @@ import org.osgi.framework.ServiceReference;
 import tla2sany.semantic.ModuleNode;
 import tla2sany.semantic.OpDeclNode;
 import tlc2.TLCGlobals;
+import tlc2.util.FP64;
+import util.ExecutionStatisticsCollector;
 
 /**
  * Represents a launch delegate for TLC<br>
@@ -211,8 +219,6 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             IFile tlaFile = project.getFile(targetFolderPath.append(ModelHelper.FILE_TLA));
             IFile cfgFile = project.getFile(targetFolderPath.append(ModelHelper.FILE_CFG));
             IFile outFile = project.getFile(targetFolderPath.append(ModelHelper.FILE_OUT));
-
-            TLCActivator.logDebug("Writing files to: " + targetFolderPath.toOSString());
 
             final IFile[] files = new IFile[] { tlaFile, cfgFile, outFile };
 
@@ -452,16 +458,31 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             case MODEL_BEHAVIOR_TYPE_SPEC_CLOSED:
 
                 // the specification name-formula pair
-                writer.addFormulaList(ModelWriter.createSourceContent(MODEL_BEHAVIOR_CLOSED_SPECIFICATION,
-                        ModelWriter.SPEC_SCHEME, config), "SPECIFICATION", MODEL_BEHAVIOR_CLOSED_SPECIFICATION);
+            	final String spec = config.getAttribute(MODEL_BEHAVIOR_CLOSED_SPECIFICATION, EMPTY_STRING);
+    			if (model.getSpec().declares(spec) && !isExpression(spec)) {
+            		writer.addFormulaList(spec, "SPECIFICATION", MODEL_BEHAVIOR_CLOSED_SPECIFICATION);
+    			} else {
+    				writer.addFormulaList(ModelWriter.createSourceContent(MODEL_BEHAVIOR_CLOSED_SPECIFICATION,
+    						ModelWriter.SPEC_SCHEME, config), "SPECIFICATION", MODEL_BEHAVIOR_CLOSED_SPECIFICATION);
+    			}
                 break;
             case MODEL_BEHAVIOR_TYPE_SPEC_INIT_NEXT:
-
-                // the init and next formulas
-                writer.addFormulaList(ModelWriter.createSourceContent(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT,
-                        ModelWriter.INIT_SCHEME, config), "INIT", MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT);
-                writer.addFormulaList(ModelWriter.createSourceContent(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_NEXT,
-                        ModelWriter.NEXT_SCHEME, config), "NEXT", MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_NEXT);
+            	// the init and next formulas
+            	final String init = config.getAttribute(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT, EMPTY_STRING);
+				if (model.getSpec().declares(init) && !isExpression(init)) {
+            		writer.addFormulaList(init, "INIT", MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT);
+            	} else {
+            		writer.addFormulaList(ModelWriter.createSourceContent(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT,
+            				ModelWriter.INIT_SCHEME, config), "INIT", MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT);
+            	}
+				
+            	final String next = config.getAttribute(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_NEXT, EMPTY_STRING);
+				if (model.getSpec().declares(next) && !isExpression(next)) {
+	           		writer.addFormulaList(next, "NEXT", MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT);
+            	} else {
+	                writer.addFormulaList(ModelWriter.createSourceContent(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_NEXT,
+	                        ModelWriter.NEXT_SCHEME, config), "NEXT", MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_NEXT);
+            	}
                 break;
             }
 
@@ -472,15 +493,16 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             // do not write invariants and properties if there is no behavior spec
             if (hasSpec)
             {
-                // invariants
-                writer.addFormulaList(ModelWriter.createFormulaListContent(config.getAttribute(
-                        MODEL_CORRECTNESS_INVARIANTS, new Vector<String>()), ModelWriter.INVARIANT_SCHEME), "INVARIANT",
-                        MODEL_CORRECTNESS_INVARIANTS);
+            	// invariants (separate those declared in the spec from those declared in the model).
+				final List<String> invariants = config.getAttribute(MODEL_CORRECTNESS_INVARIANTS, new Vector<String>());
+				writer.addFormulaList(
+						createProperties(writer, model.getSpec(), invariants, ModelWriter.INVARIANT_SCHEME),
+						"INVARIANT", MODEL_CORRECTNESS_INVARIANTS);
 
-                // properties
-                writer.addFormulaList(ModelWriter.createFormulaListContent(config.getAttribute(
-                        MODEL_CORRECTNESS_PROPERTIES, new Vector<String>()), ModelWriter.PROP_SCHEME), "PROPERTY",
-                        MODEL_CORRECTNESS_PROPERTIES);
+				// properties
+				final List<String> properties = config.getAttribute(MODEL_CORRECTNESS_PROPERTIES, new Vector<String>());
+				writer.addFormulaList(createProperties(writer, model.getSpec(), properties, ModelWriter.PROP_SCHEME),
+						"PROPERTY", MODEL_CORRECTNESS_PROPERTIES);
             }
 
             monitor.worked(STEP);
@@ -500,6 +522,46 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 
         // we don't want to rebuild the workspace
         return false;
+    }
+    
+	private static boolean isExpression(final String formula) {
+		// TLC's config file only accepts identifiers but no expressions
+		// (tlc2.tool.ModelConfig.parse()). TLAplusParserTokenManager unfortunately does
+		// not parse tokens such as "C!Spec" into an identifier. Subsequently this leads
+		// to an invalid config. Thus, treat a formula with a bang as an expressions. If
+		// tla+.jj ever gets changed to handle instantiated operators, this
+		// workaround/hack can be removed.
+		return formula.contains("!");
+	}
+
+	private static List<String[]> createProperties(final ModelWriter writer, final TLCSpec spec, final List<String> properties,
+			final String scheme) {
+		
+		// Convert list of strings such as {"1Inv", "0x \in Nat"} into a subset of
+		// checked formulas (prefixed with 1).
+		final List<Formula> checkedFormula = ModelHelper.deserializeFormulaList(properties);
+
+		// Create the input for the model writer out of all formula...
+		final List<String[]> createFormulaListContent = ModelWriter.createFormulaListContentFormula(checkedFormula,
+				scheme);
+
+		// Collect those formula that are declared in the spec, not the MC.tla file.
+		final List<Formula> declaredFormula = checkedFormula.stream().filter(f -> spec.declares(f.getFormula()) && !isExpression(f.getFormula()))
+				.collect(Collectors.toList());
+
+		// Override each declared formula with its original declaration. This will cause
+		// ModelWriter.addFormulaList to omit it from the MC.tla file and only add it to MC.cfg.
+		declaredFormula.forEach(f -> createFormulaListContent.set(checkedFormula.indexOf(f),
+				new String[] { f.getFormula(), EMPTY_STRING, String.valueOf(checkedFormula.indexOf(f)) }));
+
+		// createFormulaListContent has to be in the same order as checkedFormula.
+		// Otherwise, TLCModelLaunchDataProvider.createError(TLCRegion,
+		// String) would fail to match the violated invariant to the one stored in the
+		// model. This results in the Toolbox reporting the wrong invariant. As a second
+		// safeguard ModelWriter.createFormulaListContentFormula adds the formula's index
+		// to the String[] which - if present - is eventually used as the formula's index
+		// by ModelWriter.addFormulaList.
+		return createFormulaListContent;
     }
 
 	// Copy userModule overrides (see tlc2.tool.Spec.processSpec(SpecObj)) if
@@ -557,8 +619,26 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             TLCActivator.logDebug("Errors in model file found " + rootModule.getLocation());
         }
 
-        FileEditorInput fileEditorInput = new FileEditorInput((IFile) rootModule);
+		final Map<TLAMarkerInformationHolder, Hashtable<String, Object>> props = sany2ToolboxErrors(monitor, rootModule,
+				detectedErrors);
+		props.values().forEach(marker -> model.setMarker(marker, Model.TLC_MODEL_ERROR_MARKER_SANY));
+
+        if (MODE_GENERATE.equals(mode))
+        {
+            // generation is done
+            // nothing to do more
+            return false;
+        } else
+        {
+            return status;
+        }
+    }
+
+	protected Map<TLAMarkerInformationHolder, Hashtable<String, Object>> sany2ToolboxErrors(final IProgressMonitor monitor, final IFile rootModule,
+			final Vector<TLAMarkerInformationHolder> detectedErrors) throws CoreException {
+		FileEditorInput fileEditorInput = new FileEditorInput(rootModule);
         FileDocumentProvider fileDocumentProvider = new FileDocumentProvider();
+        final Map<TLAMarkerInformationHolder, Hashtable<String, Object>> result = new HashMap<>();
         try
         {
 
@@ -585,13 +665,8 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 
                         // find the error cause and install the error marker on the corresponding
                         // field
-                        Hashtable<String, Object> props = ModelHelper.createMarkerDescription(document, searchAdapter,
-                                message, severity, coordinates);
-                        if (props != null)
-                        {
-                        	model.setMarker(props, Model.TLC_MODEL_ERROR_MARKER_SANY);
-                        }
-
+                        result.put(markerHolder, ModelHelper.createMarkerDescription(rootModule, document, searchAdapter,
+                                message, severity, coordinates));
                     } else
                     {
                     	// see getLaunch(...) above
@@ -628,18 +703,8 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             fileDocumentProvider.disconnect(fileEditorInput);
             monitor.done();
         }
-
-        if (MODE_GENERATE.equals(mode))
-        {
-            // generation is done
-            // nothing to do more
-            return false;
-        } else
-        {
-            TLCActivator.logDebug("Final check for the " + mode + " mode. The result of the check is " + status);
-            return status;
-        }
-    }
+        return result;
+	}
 
     /**
      * 5. method called on launch
@@ -734,14 +799,27 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 					}
 					props.put(TLCJobFactory.MAIL_ADDRESS, config.getAttribute(
 							LAUNCH_DISTRIBUTED_RESULT_MAIL_ADDRESS, "tlc@localhost"));
+
+					final ExecutionStatisticsCollector udc = new ExecutionStatisticsCollector();
+					if (udc.isEnabled()) {
+						props.put(ExecutionStatisticsCollector.PROP, udc.getIdentifier());
+					}
 					
 					// The parameters below are the only one currently useful with CloudDistributedTLC
 					final StringBuffer tlcParams = new StringBuffer();
 					
-			        // fp seed offset (decrease by one to map from [1, 64] interval to [0, 63] array address
-			        final int fpSeedOffset = launch.getLaunchConfiguration().getAttribute(LAUNCH_FP_INDEX, LAUNCH_FP_INDEX_DEFAULT);
-			        tlcParams.append("-fp ");
-			        tlcParams.append(String.valueOf(fpSeedOffset - 1));
+			        // fp seed offset (decrease by one to map from [1, 64] interval to [0, 63] array address)
+					if (launch.getLaunchConfiguration().getAttribute(LAUNCH_FP_INDEX_RANDOM, LAUNCH_FP_INDEX_RANDOM_DEFAULT)) {
+						final int fpIndex = new Random().nextInt(FP64.Polys.length);
+						tlcParams.append("-fp");
+			        	tlcParams.append(" ");
+						tlcParams.append(String.valueOf(fpIndex));
+					} else {
+						final int fpSeedOffset = launch.getLaunchConfiguration().getAttribute(LAUNCH_FP_INDEX, LAUNCH_FP_INDEX_DEFAULT);
+						tlcParams.append("-fp");
+			        	tlcParams.append(" ");
+						tlcParams.append(String.valueOf(fpSeedOffset));
+					}
 		        	tlcParams.append(" ");
 			        
 			        // add maxSetSize argument if not equal to the default
@@ -886,6 +964,13 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 			final String message = status.getMessage();
 			if (status instanceof ITLCJobStatus) {
 				final ITLCJobStatus result = (ITLCJobStatus) status;
+				
+				if (result.isReconnect()) {
+					// Do not open modal dialog if this is just a reconnect. In other words, no
+					// dialog if user is running cloud TLC repeatedly.
+					return;
+				}
+				
 				final URL url = result.getURL();
 				Display.getDefault().asyncExec(new Runnable() {
 					public void run() {
@@ -976,7 +1061,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             	Assert.isNotNull(event.getResult());
             	TLCProcessJob tlcJob = (TLCProcessJob) event.getJob();
 
-				if (!Status.CANCEL_STATUS.equals(event.getJob().getResult()) && tlcJob.getExitValue() > 0) {
+				if (!Status.CANCEL_STATUS.equals(event.getJob().getResult()) && tlcJob.hasCrashed()) {
 					// if TLC crashed with exit value > 0 and the user did *not*
 					// click cancel, mark the job as crashed.
 					model.setStale();
@@ -1126,7 +1211,6 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
                     break;
                 }
             }
-            TLCActivator.logDebug("Job '" + jobName + "' terminated with status: { " + status + " }");
         }
     };
 

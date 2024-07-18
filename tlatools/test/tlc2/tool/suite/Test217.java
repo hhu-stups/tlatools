@@ -25,18 +25,37 @@
  ******************************************************************************/
 package tlc2.tool.suite;
 
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertFalse;
 
 import org.junit.Test;
 
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 
 public class Test217 extends SuiteETestCase {
+
+	public Test217() {
+		super(ExitStatus.ERROR_SPEC_PARSE);
+	}
+	
 	@Test
 	public void testSpec() {
-		assertTrue(recorder.recorded(EC.GENERAL));
-		assertSubstring("*** Errors: 2\n\n" 
-		        + "line 12, col 11 to line 12, col 19 of module test217\n\n"
-				+ "Level error in applying operator I!Foo:");
+		assertFalse(recorder.recorded(EC.GENERAL));
+		assertSubstring("Semantic errors:\n" + 
+				"\n" + 
+				"*** Errors: 2\n" + 
+				"\n" + 
+				"line 12, col 11 to line 12, col 19 of module test217\n" + 
+				"\n" + 
+				"Level error in applying operator I!Foo:\n" + 
+				"The level of argument 1 exceeds the maximum level allowed by the operator.\n" + 
+				"\n" + 
+				"\n" + 
+				"line 13, col 9 to line 13, col 19 of module test217\n" + 
+				"\n" + 
+				"Level error in applying operator I!Foo:\n" + 
+				"The level of argument 1 exceeds the maximum level allowed by the operator.\n" + 
+				"\n" + 
+				"\n");
 	}
 }

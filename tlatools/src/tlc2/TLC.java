@@ -12,23 +12,24 @@ import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.Enumeration;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
 import java.util.TimeZone;
 
 import model.InJarFilenameToStream;
 import model.ModelInJar;
-import tla2sany.modanalyzer.ParseUnit;
-import tla2sany.modanalyzer.SpecObj;
 import tlc2.output.EC;
 import tlc2.output.MP;
-import tlc2.tool.AbstractChecker;
-import tlc2.tool.Cancelable;
 import tlc2.tool.DFIDModelChecker;
+import tlc2.tool.ITool;
 import tlc2.tool.ModelChecker;
 import tlc2.tool.Simulator;
 import tlc2.tool.fp.FPSet;
 import tlc2.tool.fp.FPSetConfiguration;
+import tlc2.tool.fp.FPSetFactory;
+import tlc2.tool.impl.Tool;
 import tlc2.tool.management.ModelCheckerMXWrapper;
 import tlc2.tool.management.TLCStandardMBean;
 import tlc2.util.DotStateWriter;
@@ -37,9 +38,10 @@ import tlc2.util.IStateWriter;
 import tlc2.util.NoopStateWriter;
 import tlc2.util.RandomGenerator;
 import tlc2.util.StateWriter;
-import tlc2.value.EnumerableValue;
-import tlc2.value.Value;
+import tlc2.value.RandomEnumerableValues;
+import util.Assert.TLCRuntimeException;
 import util.DebugPrinter;
+import util.ExecutionStatisticsCollector;
 import util.FileUtil;
 import util.FilenameToStream;
 import util.MailSender;
@@ -92,18 +94,14 @@ public class TLC
     /**
      * The number of traces/behaviors to generate in simulation mode
      */
-    public static long traceNum = Long.MAX_VALUE;
+    private static long traceNum = Long.MAX_VALUE;
     private String traceFile = null;
     private int traceDepth;
     private FilenameToStream resolver;
-    private SpecObj specObj;
 
     // flag if the welcome message is already printed
     private boolean welcomePrinted;
     
-    // handle to the cancellable instance (MC or Simulator)
-    private Cancelable instance;
-
     private FPSetConfiguration fpSetConfiguration;
     
     /**
@@ -126,11 +124,8 @@ public class TLC
         fromChkpt = null;
         resolver = null;
 
-        fpIndex = 0;
+        fpIndex = new Random().nextInt(FP64.Polys.length);
         traceDepth = 100;
-        
-        // instance is not set
-        instance = null;
 
         fpSetConfiguration = new FPSetConfiguration();
     }
@@ -186,7 +181,7 @@ public class TLC
      *    stored in the class FP64.
      *  o -view: apply VIEW (if provided) when printing out states.
      *  o -gzip: control if gzip is applied to value input/output stream.
-     *    Defaults to use gzip.
+     *    Defaults to off if not specified
      *  o -debug: debbuging information (non-production use)
      *  o -tool: tool mode (put output codes on console)
      *  o -checkpoint num: interval for check pointing (in minutes)
@@ -202,41 +197,92 @@ public class TLC
      */
     public static void main(String[] args) throws Exception
     {
-        TLC tlc = new TLC();
+        final TLC tlc = new TLC();
 
-        // handle parameters
-        if (tlc.handleParameters(args))
-        {
-        	final MailSender ms = new MailSender();
-        	if (MODEL_PART_OF_JAR) {
-        		tlc.setResolver(new InJarFilenameToStream(ModelInJar.PATH));
-        	} else {
-        		tlc.setResolver(new SimpleFilenameToStream());
-        	}
-        	ms.setModelName(tlc.getModelName());
-        	ms.setSpecName(tlc.getSpecName());
-
-            // call the actual processing method
-            tlc.process();
-
-            // Send logged output by email
-            boolean success = ms.send(tlc.getModuleFiles());
-            
-			// In case sending the mail has failed, we treat this as an error.
-			// This is needed when TLC runs on another host and email is
-			// the only means for the user to get access to the model checking
-			// results. 
-			// With distributed TLC and CloudDistributedTLCJob in particular,
-			// the cloud node is immediately turned off once the TLC process has
-			// finished. If we were to shutdown the node even when sending out 
-            // the email has failed, the result would be lost.
-			if (!success) {
-				System.exit(1);
-			}
+        // Try to parse parameters.
+        if (!tlc.handleParameters(args)) {
+            // This is a tool failure. We must exit with a non-zero exit
+            // code or else we will mislead system tools and scripts into
+            // thinking everything went smoothly.
+            //
+            // FIXME: handleParameters should return an error object (or
+            // null), where the error object contains an error message.
+            // This makes handleParameters a function we can test.
+            System.exit(1);
         }
-        // terminate
-        System.exit(0);
+        
+        if (!tlc.checkEnvironment()) {
+            System.exit(1);
+        }
+
+        // Setup how spec files will be resolved in the filesystem.
+        if (MODEL_PART_OF_JAR) {
+            // There was not spec file given, it instead exists in the
+            // .jar file being executed. So we need to use a special file
+            // resolver to parse it.
+        	tlc.setResolver(new InJarFilenameToStream(ModelInJar.PATH));
+        } else {
+            // The user passed us a spec file directly. To ensure we can
+            // recover it during semantic parsing, we must include its
+            // parent directory as a library path in the file resolver.
+            //
+            // If the spec file has no parent directory, use the "standard"
+            // library paths provided by SimpleFilenameToStream.
+            final String dir = FileUtil.parseDirname(tlc.getMainFile());
+            if (!dir.isEmpty()) {
+            	tlc.setResolver(new SimpleFilenameToStream(dir));
+            } else {
+            	tlc.setResolver(new SimpleFilenameToStream());
+            }
+        }
+        
+		// Setup MailSender *before* calling tlc.process. The MailSender's task it to
+		// write the MC.out file. The MC.out file is e.g. used by CloudTLC to feed
+		// progress back to the Toolbox (see CloudDistributedTLCJob).
+        final MailSender ms = new MailSender();
+        ms.setModelName(tlc.getModelName());
+        ms.setSpecName(tlc.getSpecName());
+
+        // Execute TLC.
+        final int errorCode = tlc.process();
+
+        // Send logged output by email.
+        //
+        // This is needed when TLC runs on another host and email is
+        // the only means for the user to get access to the model
+        // checking results.
+        boolean mailSent = ms.send(tlc.getModuleFiles());
+
+        // Treat failure to send mail as a tool failure.
+        //
+        // With distributed TLC and CloudDistributedTLCJob in particular,
+        // the cloud node is immediately turned off once the TLC process
+        // has finished. If we were to shutdown the node even when sending
+        // out the email has failed, the result would be lost.
+        if (!mailSent) {
+            System.exit(1);
+        }
+
+        // Be explicit about tool success.
+        System.exit(EC.ExitStatus.errorConstantToExitStatus(errorCode));
     }
+    
+	// false if the environment (JVM, OS, ...) makes model checking impossible.
+	// Might also result in warnings.
+	private boolean checkEnvironment() {
+		// Not a reasons to refuse startup but warn about non-ideal garbage collector.
+		// See https://twitter.com/lemmster/status/1089656514892070912 for actual
+		// performance penalty.
+		if (!TLCRuntime.getInstance().isThroughputOptimizedGC()) {
+			MP.printWarning(EC.TLC_ENVIRONMENT_JVM_GC);
+		}
+		
+		return true;
+	}
+
+	public static void setTraceNum(int aTraceNum) {
+		traceNum = aTraceNum;
+	}
 
     /**
      * This method handles parameter arguments and prepares the actual call
@@ -277,9 +323,6 @@ public class TLC
 							traceFile = arg.replace("file=", "");
 						}
 					}
-					for (int i = 0; i < simArgs.length; i++) {
-
-					}
 				}
             } else if (args[index].equals("-modelcheck"))
             {
@@ -308,7 +351,7 @@ public class TLC
             } else if (args[index].equals("-terse"))
             {
                 index++;
-                Value.expand = false;
+                TLCGlobals.expand = false;
             } else if (args[index].equals("-continue"))
             {
                 index++;
@@ -717,7 +760,7 @@ public class TLC
                 }
                 mainFile = args[index++];
                 int len = mainFile.length();
-                if (mainFile.startsWith(".tla", len - 4))
+                if (mainFile.endsWith(".tla"))
                 {
                     mainFile = mainFile.substring(0, len - 4);
                 }
@@ -740,19 +783,40 @@ public class TLC
 				return false;
 			}
         }
+        
+		// The functionality to start TLC from an (absolute) path /path/to/spec/file.tla
+		// seems to have eroded over the years which is why this block of code is a
+		// clutch.  It essentially massages the variable values for mainFile, specDir and
+        // the user dir to make the code below - as well as the FilenameToStream resolver -
+        // work. Original issues was https://github.com/tlaplus/tlaplus/issues/24.
+        final File f = new File(mainFile);
+        String specDir = "";
+        if (f.isAbsolute()) {
+        	specDir = f.getParent() + FileUtil.separator;
+        	mainFile = f.getName();
+        	// Not setting user dir causes a ConfigFileException when the resolver
+        	// tries to read the .cfg file later in the game.
+        	ToolIO.setUserDir(specDir);
+        }
+        
         if (configFile == null)
         {
             configFile = mainFile;
         }
 
+        if (cleanup && fromChkpt == null)
+        {
+            // clean up the states directory only when not recovering
+            FileUtil.deleteDir(TLCGlobals.metaRoot, true);
+        }
+        
         startTime = System.currentTimeMillis();
 
         // Check if mainFile is an absolute or relative file system path. If it is
 		// absolute, the parent gets used as TLC's meta directory (where it stores
 		// states...). Otherwise, no meta dir is set causing states etc. to be stored in
 		// the current directory.
-        final File f = new File(mainFile);
-    	metadir = FileUtil.makeMetaDir(new Date(startTime), f.isAbsolute() ? f.getParent() : "", fromChkpt);
+    	metadir = FileUtil.makeMetaDir(new Date(startTime), specDir, fromChkpt);
     	
         if (dumpFile != null) {
         	if (dumpFile.startsWith("${metadir}")) {
@@ -809,9 +873,8 @@ public class TLC
 	/**
      * The processing method
      */
-    public void process()
+    public int process()
     {
-        ToolIO.cleanToolObjects(TLCGlobals.ToolId);
         // UniqueString.initialize();
         
         // a JMX wrapper that exposes runtime statistics 
@@ -827,31 +890,11 @@ public class TLC
                 // We must recover the intern var table as early as possible
                 UniqueString.internTbl.recover(fromChkpt);
             }
-            if (cleanup && fromChkpt == null)
-            {
-                // clean up the states directory only when not recovering
-                FileUtil.deleteDir(TLCGlobals.metaRoot, true);
-            }
             FP64.Init(fpIndex);
-
-            
-    		final TLCRuntime tlcRuntime = TLCRuntime.getInstance();
-    		final long offHeapMemory = tlcRuntime.getNonHeapPhysicalMemory() / 1024L / 1024L;
-    		final String arch = tlcRuntime.getArchitecture().name();
-    		
-    		final Runtime runtime = Runtime.getRuntime();
-    		final long heapMemory = runtime.maxMemory() / 1024L / 1024L;
-    		final String cores = Integer.toString(runtime.availableProcessors());
-
-    		final String vendor = System.getProperty("java.vendor");
-    		final String version = System.getProperty("java.version");
-
-    		final String osName = System.getProperty("os.name");
-    		final String osVersion = System.getProperty("os.version");
-    		final String osArch = System.getProperty("os.arch");
     		
     		final RandomGenerator rng = new RandomGenerator();
             // Start checking:
+            final int result;
             if (isSimulate)
             {
                 // random simulation
@@ -863,67 +906,63 @@ public class TLC
                 {
                     rng.setSeed(seed, aril);
                 }
-				MP.printMessage(EC.TLC_MODE_SIMU,
-						new String[] { String.valueOf(seed), String.valueOf(TLCGlobals.getNumWorkers()),
-								TLCGlobals.getNumWorkers() == 1 ? "" : "s", cores, osName, osVersion, osArch, vendor,
-								version, arch, Long.toString(heapMemory), Long.toString(offHeapMemory) });
-                Simulator simulator = new Simulator(mainFile, configFile, traceFile, deadlock, traceDepth, 
-                        traceNum, rng, seed, true, resolver, specObj);
+				printStartupBanner(EC.TLC_MODE_SIMU, getSimulationRuntime(seed));
+				
+				Simulator simulator = new Simulator(mainFile, configFile, traceFile, deadlock, traceDepth, 
+                        traceNum, rng, seed, resolver, TLCGlobals.getNumWorkers());
                 TLCGlobals.simulator = simulator;
-// The following statement moved to Spec.processSpec by LL on 10 March 2011               
-//                MP.printMessage(EC.TLC_STARTING);
-                instance = simulator;
-                simulator.simulate();
+                result = simulator.simulate();
             } else
             {
 				if (noSeed) {
                     seed = rng.nextLong();
 				}
-				EnumerableValue.setRandom(seed);
+				// Replace seed with tlc2.util.FP64.Polys[fpIndex]?
+				// + No need to print seed in startup-banner for BFS and DFS
+				// - Only 131 different seeds
+				// RandomEnumerableValues.setSeed(tlc2.util.FP64.Polys[fpIndex]);
+				RandomEnumerableValues.setSeed(seed);
             	
-				final String[] parameters = new String[] { String.valueOf(TLCGlobals.getNumWorkers()),
-						TLCGlobals.getNumWorkers() == 1 ? "" : "s", cores, osName, osVersion, osArch, vendor, version,
-						arch, Long.toString(heapMemory), Long.toString(offHeapMemory),
-						Long.toString(EnumerableValue.getRandomSeed()) };
-
+				// Print startup banner before SANY writes its output.
+				printStartupBanner(isBFS() ? EC.TLC_MODE_MC : EC.TLC_MODE_MC_DFS, getModelCheckingRuntime(fpIndex, fpSetConfiguration));
+				
             	// model checking
-        		AbstractChecker mc = null;
-                if (TLCGlobals.DFIDMax == -1)
+		        final ITool tool = new Tool(mainFile, configFile, resolver);
+
+                if (isBFS())
                 {
-					MP.printMessage(EC.TLC_MODE_MC, parameters);
-                    mc = new ModelChecker(mainFile, configFile, metadir, stateWriter, deadlock, fromChkpt, resolver, specObj, fpSetConfiguration);
-                    modelCheckerMXWrapper = new ModelCheckerMXWrapper((ModelChecker) mc, this);
+					TLCGlobals.mainChecker = new ModelChecker(tool, metadir, stateWriter, deadlock, fromChkpt,
+							FPSetFactory.getFPSetInitialized(fpSetConfiguration, metadir, mainFile), startTime);
+					modelCheckerMXWrapper = new ModelCheckerMXWrapper((ModelChecker) TLCGlobals.mainChecker, this);
+					result = TLCGlobals.mainChecker.modelCheck();
                 } else
                 {
-					MP.printMessage(EC.TLC_MODE_MC_DFS, parameters);
-					mc = new DFIDModelChecker(mainFile, configFile, metadir, stateWriter, deadlock, fromChkpt, true, resolver, specObj);
+					TLCGlobals.mainChecker = new DFIDModelChecker(tool, metadir, stateWriter, deadlock, fromChkpt, startTime);
+					result = TLCGlobals.mainChecker.modelCheck();
                 }
-                TLCGlobals.mainChecker = mc;
-// The following statement moved to Spec.processSpec by LL on 10 March 2011               
-//                MP.printMessage(EC.TLC_STARTING);
-                instance = mc;
-                mc.modelCheck();
-                
             }
+            return result;
         } catch (Throwable e)
         {
             if (e instanceof StackOverflowError)
             {
                 System.gc();
-                MP.printError(EC.SYSTEM_STACK_OVERFLOW, e);
+                return MP.printError(EC.SYSTEM_STACK_OVERFLOW, e);
             } else if (e instanceof OutOfMemoryError)
             {
                 System.gc();
-                MP.printError(EC.SYSTEM_OUT_OF_MEMORY, e);
+                return MP.printError(EC.SYSTEM_OUT_OF_MEMORY, e);
+            } else if (e instanceof TLCRuntimeException) {
+            	return MP.printTLCRuntimeException((TLCRuntimeException) e);
             } else if (e instanceof RuntimeException) 
             {
                 // SZ 29.07.2009 
                 // printing the stack trace of the runtime exceptions
-                MP.printError(EC.GENERAL, e);
+                return MP.printError(EC.GENERAL, e);
                 // e.printStackTrace();
             } else
             {
-                MP.printError(EC.GENERAL, e);
+                return MP.printError(EC.GENERAL, e);
             }
         } finally 
         {
@@ -943,6 +982,73 @@ public class TLC
 			MP.flush();
         }
     }
+
+	private static boolean isBFS() {
+		return TLCGlobals.DFIDMax == -1;
+	}
+
+	public static Map<String, String> getSimulationRuntime(final long seed) {
+		final Runtime runtime = Runtime.getRuntime();
+		final long heapMemory = runtime.maxMemory() / 1024L / 1024L;
+		
+		final TLCRuntime tlcRuntime = TLCRuntime.getInstance();
+		final long offHeapMemory = tlcRuntime.getNonHeapPhysicalMemory() / 1024L / 1024L;
+		final long pid = tlcRuntime.pid();
+		
+		final Map<String, String> result = new LinkedHashMap<>();
+		result.put("seed", String.valueOf(seed));
+		result.put("workers", String.valueOf(TLCGlobals.getNumWorkers()));
+		result.put("plural", TLCGlobals.getNumWorkers() == 1 ? "" : "s");
+		result.put("cores", Integer.toString(runtime.availableProcessors()));
+		result.put("osName", System.getProperty("os.name"));
+		result.put("osVersion", System.getProperty("os.version"));
+		result.put("osArch", System.getProperty("os.arch"));
+		result.put("jvmVendor", System.getProperty("java.vendor"));
+		result.put("jvmVersion", System.getProperty("java.version"));
+		result.put("jvmArch", tlcRuntime.getArchitecture().name());
+		result.put("jvmHeapMem", Long.toString(heapMemory));
+		result.put("jvmOffHeapMem", Long.toString(offHeapMemory));
+		result.put("jvmPid", pid == -1 ? "" : String.valueOf(pid));
+		return result;
+	}
+
+	public static Map<String, String> getModelCheckingRuntime(final int fpIndex, final FPSetConfiguration fpSetConfig) {
+		final Runtime runtime = Runtime.getRuntime();
+		final long heapMemory = runtime.maxMemory() / 1024L / 1024L;
+		
+		final TLCRuntime tlcRuntime = TLCRuntime.getInstance();
+		final long offHeapMemory = tlcRuntime.getNonHeapPhysicalMemory() / 1024L / 1024L;
+		final long pid = tlcRuntime.pid();
+		
+		// TODO Better to use Class#getSimpleName provided we would have access to the
+		// Class instance instead of just its name. However, loading the class here is
+		// overkill and might interfere if other parts of TLC pull off class-loading
+		// tricks.
+		final String fpSetClassSimpleName = fpSetConfig.getImplementation()
+				.substring(fpSetConfig.getImplementation().lastIndexOf(".") + 1);
+		
+		final String stateQueueClassSimpleName = ModelChecker.getStateQueueName();
+		
+		//  fpSetClassSimpleName and stateQueueClassSimpleName ignored in DFS mode.
+		final Map<String, String> result = new LinkedHashMap<>();
+		result.put("workers", String.valueOf(TLCGlobals.getNumWorkers()));
+		result.put("plural", TLCGlobals.getNumWorkers() == 1 ? "" : "s");
+		result.put("cores", Integer.toString(runtime.availableProcessors()));
+		result.put("osName", System.getProperty("os.name"));
+		result.put("osVersion", System.getProperty("os.version"));
+		result.put("osArch", System.getProperty("os.arch"));
+		result.put("jvmVendor", System.getProperty("java.vendor"));
+		result.put("jvmVersion", System.getProperty("java.version"));
+		result.put("jvmArch", tlcRuntime.getArchitecture().name());
+		result.put("jvmHeapMem", Long.toString(heapMemory));
+		result.put("jvmOffHeapMem", Long.toString(offHeapMemory));
+		result.put("seed", Long.toString(RandomEnumerableValues.getSeed()));
+		result.put("fpidx", Integer.toString(fpIndex));
+		result.put("jvmPid", pid == -1 ? "" : String.valueOf(pid));
+		result.put("fpset", fpSetClassSimpleName);
+		result.put("queue", stateQueueClassSimpleName);
+		return result;
+	}
     
     /**
 	 * @return The given milliseconds runtime converted into human readable form
@@ -971,15 +1077,16 @@ public class TLC
 	public List<File> getModuleFiles() {
     	final List<File> result = new ArrayList<File>();
     	
-    	if (instance instanceof ModelChecker) {
-    		ModelChecker mc = (ModelChecker) instance;
-			final Enumeration<ParseUnit> parseUnitContext = mc.specObj.parseUnitContext
-					.elements();
-    		while (parseUnitContext.hasMoreElements()) {
-    			ParseUnit pu = (ParseUnit) parseUnitContext.nextElement();
-				File resolve = resolver.resolve(pu.getFileName(), false);
-				result.add(resolve);
+    	if (TLCGlobals.mainChecker instanceof ModelChecker) {
+    		final ModelChecker mc = (ModelChecker) TLCGlobals.mainChecker;
+    		result.addAll(mc.getModuleFiles(resolver));
+    		if (ModelInJar.hasCfg()) {
+    			result.add(ModelInJar.getCfg());
     		}
+			// It might be desirable to include tlc.jfr - a flight recording aka profiling
+			// at the JVM level here. This doesn't work though as the recording get created
+			// after the termination of the JVM. A recording can also be several hundred
+    		// MBs large.
     	}
         return result;
     }
@@ -995,28 +1102,6 @@ public class TLC
         ToolIO.setDefaultResolver(resolver);
     }
 
-    /**
-     * Set external specification object
-     * @param specObj spec object created external SANY run
-     */
-    public void setSpecObject(SpecObj specObj) 
-    {
-        this.specObj = specObj;
-    }
-
-    /**
-     * Delegate cancellation request to the instance
-     * @param flag
-     */
-    public void setCanceledFlag(boolean flag)
-    {
-        if (this.instance != null) 
-        {
-            this.instance.setCancelFlag(flag);
-            DebugPrinter.print("Cancel flag set to " + flag);
-        }
-    }
-    
     /**
      * Print out an error message, with usage hint
      * @param msg, message to print
@@ -1044,6 +1129,41 @@ public class TLC
         }
     }
     
+	private void printStartupBanner(final int mode, final Map<String, String> parameters) {
+		MP.printMessage(mode, parameters.values().toArray(new String[parameters.size()]));
+		
+		final Map<String, String> udc = new LinkedHashMap<>();
+		// First indicate the version (to make parsing forward compatible)
+		udc.put("ver", TLCGlobals.getRevisionOrDev());
+
+		// Simulation, DFS or BFS mode.
+		udc.put("mode", mode2String(mode));
+		
+		parameters.remove("plural"); // damn hack!
+		// "pid", "seed", and "fpidx" have no relevance for us.
+		parameters.remove("jvmPid");
+		parameters.remove("fpidx");
+		parameters.remove("seed");
+		udc.putAll(parameters);
+		
+		// True if TLC is run from within the Toolbox.
+		udc.put("toolbox", Boolean.toString(TLCGlobals.tool));
+		new ExecutionStatisticsCollector().collect(udc);
+	}
+	
+	private static String mode2String(final int mode) {
+		switch (mode) {
+		case EC.TLC_MODE_MC:
+			return "bfs";
+		case EC.TLC_MODE_MC_DFS:
+			return "dfs";
+		case EC.TLC_MODE_SIMU:
+			return "simulation";
+		default:
+			return "unknown";
+		}
+	}
+    
     /**
      * 
      */
@@ -1055,6 +1175,10 @@ public class TLC
 
     FPSetConfiguration getFPSetConfiguration() {
     	return fpSetConfiguration;
+    }
+
+    public String getMainFile() {
+        return mainFile;
     }
 
 	public String getModelName() {

@@ -46,6 +46,8 @@ public class SemaphoreMutexTest extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "73", "32", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "6"));
+
+		assertZeroUncovered();
 	}
 }
 /*

@@ -10,6 +10,7 @@ import java.rmi.RemoteException;
 
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.tool.TLCTrace;
 import util.Assert;
 import util.BufferedDataInputStream;
 import util.BufferedDataOutputStream;
@@ -63,9 +64,10 @@ public class MemFPSet extends FPSet {
     this.mask = initialCapacity - 1;
   }
 
-  public final void init(int numThreads, String metadir, String filename) {
+  public final FPSet init(int numThreads, String metadir, String filename) {
     this.metadir = metadir;
     this.filename = filename;
+	return this;
   }
     
   /**
@@ -213,7 +215,7 @@ public class MemFPSet extends FPSet {
     System.exit(0);    
   }
 
-  public final double checkFPs() {
+  public final long checkFPs() {
     long dis = Long.MAX_VALUE;
     for (int i = 0; i < this.table.length; i++) {
       long[] bucket = this.table[i];
@@ -238,7 +240,7 @@ public class MemFPSet extends FPSet {
 	}
       }
     }
-    return (1.0/dis);
+    return dis;
   }
 
   // Checkpoint.
@@ -287,7 +289,7 @@ public class MemFPSet extends FPSet {
     this.commitChkpt(this.filename);
   }
     
-  final public void recover() throws IOException {
+  final public void recover(TLCTrace trace) throws IOException {
     this.recover(this.filename);
   }
 

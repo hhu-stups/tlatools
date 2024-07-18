@@ -25,17 +25,18 @@
  ******************************************************************************/
 package tlc2.tool.suite;
 
-import static org.junit.Assert.assertTrue;
-
 import org.junit.Test;
 
-import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 
 public class ETest16 extends SuiteETestCase {
 
+	public ETest16() {
+		super(ExitStatus.ERROR_SPEC_PARSE);
+	}
+
 	@Test
 	public void testSpec() {
-		assertTrue(recorder.recorded(EC.GENERAL));
 		assertSubstring("*** Errors: 2\n\n" + "line 5, col 27 to line 5, col 27 of module etest16\n\n"
 				+ "Non-unique fields in constructor.\n\n\n"
 				+ "line 7, col 27 to line 7, col 27 of module etest16\n\n"

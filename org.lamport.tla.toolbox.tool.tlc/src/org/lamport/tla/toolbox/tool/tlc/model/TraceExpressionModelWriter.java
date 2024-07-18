@@ -33,9 +33,13 @@ import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationConstants;
 import org.lamport.tla.toolbox.tool.tlc.launch.TraceExpressionInformationHolder;
 import org.lamport.tla.toolbox.tool.tlc.traceexplorer.SimpleTLCState;
 import org.lamport.tla.toolbox.tool.tlc.traceexplorer.SimpleTLCVariable;
+import org.lamport.tla.toolbox.util.ResourceHelper;
 
 public class TraceExpressionModelWriter extends ModelWriter {
 
+	public static final String POSITION = "_TEPosition";
+	public static final String TRACE = "_TETrace";
+	
 	/**
 	 * This only changes the tla file. This method generates and adds a variable declaration
 	 * for each expression in the list. It also creates an identifier for each
@@ -70,12 +74,20 @@ public class TraceExpressionModelWriter extends ModelWriter {
 	    int position = 0;
 	    while (it.hasNext())
 	    {
-	        String expression = it.next().getFormula();
+	        final Formula formula = it.next();
+			final String expression = formula.getFormula();
 	
 	        if (expression != null && expression.length() > 0)
 	        {
-	            expressionData[position] = new TraceExpressionInformationHolder(expression,
-	                    getValidIdentifier(TRACE_EXPR_DEF_SCHEME), getValidIdentifier(TRACE_EXPR_VAR_SCHEME));
+	        	final String identifier = getValidIdentifier(TRACE_EXPR_DEF_SCHEME);
+	        	if (formula.isNamed()) {
+	        		final String varname = formula.getLeftHandSide();
+	        		String rightHandSide = formula.getRightHandSide();
+					expressionData[position] = new TraceExpressionInformationHolder(rightHandSide, identifier, varname);
+	        	} else  {
+	        		final String varname = getValidIdentifier(TRACE_EXPR_VAR_SCHEME);
+	        		expressionData[position] = new TraceExpressionInformationHolder(expression, identifier, varname);
+	        	}
 	        }
 	
 	        position++;
@@ -84,6 +96,61 @@ public class TraceExpressionModelWriter extends ModelWriter {
 	    addVariablesAndDefinitions(expressionData, attributeName, true);
 	
 	    return expressionData;
+	}
+	
+	public void addPrimer(final String moduleFilename, final String extendedModuleName) {
+		// A TE spec has to extend Integers because of the _TEPosition operator.
+		tlaBuffer.append(ResourceHelper.getExtendingModuleContent(moduleFilename,
+				new String[] { extendedModuleName, "TLC", "Integers" }));
+	}
+
+	public void addTraceFunction(final List<SimpleTLCState> input) {
+		// Filter stuttering or back2state instances from trace.
+		final List<SimpleTLCState> trace = input.stream()
+				.filter(state -> !state.isBackToState() && !state.isStuttering())
+				.collect(java.util.stream.Collectors.toList());
+		
+		if (trace.isEmpty()) {
+			return;
+	    }
+		
+		final StringBuffer traceFunctionDef = new StringBuffer();
+//		traceFunctionDef.append("---- MODULE __TEInner ----");
+//		traceFunctionDef.append(CR).append(CR);
+
+		// Trace
+		traceFunctionDef.append(COMMENT).append("TRACE EXPLORER identifier definition ").append(ATTRIBUTE)
+				.append("_TETrace").append(CR);
+		traceFunctionDef.append("_TETrace").append(DEFINES_CR);
+		traceFunctionDef.append(BEGIN_TUPLE).append(CR);
+		for (int j = 0; j < trace.size(); j++) {
+			final SimpleTLCState state = trace.get(j);
+
+			traceFunctionDef.append(L_PAREN).append(state.asFunction()).append(R_PAREN);
+
+			if (j < trace.size() - 1) {
+				traceFunctionDef.append(COMMA).append(CR);
+			}
+		}
+		traceFunctionDef.append(CR).append(END_TUPLE);
+		traceFunctionDef.append(CR);
+		traceFunctionDef.append(SEP).append(CR).append(CR);
+
+        // Position
+		traceFunctionDef.append(COMMENT).append("TRACE EXPLORER Position identifier definition ").append(ATTRIBUTE)
+				.append(POSITION).append(CR);
+		traceFunctionDef.append(POSITION).append(DEFINES_CR);
+		traceFunctionDef.append(
+				String.format("IF TLCGet(\"level\") >= %s THEN %s ELSE TLCGet(\"level\") + 1", trace.size(), trace.size()));
+		traceFunctionDef.append(CR);
+		traceFunctionDef.append(SEP).append(CR).append(CR);
+//		
+//		// INSTANCE
+//		traceFunctionDef.append("====").append(CR);
+//     	traceFunctionDef.append("LOCAL TE == INSTANCE __TEInner").append(CR).append(CR);
+
+        // append the expression definitions
+        tlaBuffer.append(traceFunctionDef.toString());
 	}
 
 	/**
@@ -138,7 +205,7 @@ public class TraceExpressionModelWriter extends ModelWriter {
 	            // expression
 	            // ----
 	            definitions.append(COMMENT).append("TRACE EXPLORER identifier definition ").append(ATTRIBUTE).append(
-	                    attributeName).append(CR);
+	                    attributeName).append(INDEX).append(i).append(CR);
 	            definitions.append(expressionInfo.getIdentifier()).append(DEFINES_CR).append(
 	                    expressionInfo.getExpression()).append(CR);
 	            definitions.append(SEP).append(CR).append(CR);

@@ -45,5 +45,8 @@ public class TestReplaceTest extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "18", "17", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "17"));
+
+		assertUncovered("line 124, col 32 to line 124, col 41 of module TestReplace: 0\n"
+				+ "line 175, col 33 to line 175, col 41 of module TestReplace: 0");
 	}
 }

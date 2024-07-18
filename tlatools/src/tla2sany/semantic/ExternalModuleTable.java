@@ -12,6 +12,7 @@ import java.util.Enumeration;
 import java.util.Hashtable;
 
 import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.utilities.Strings;
 import tla2sany.utilities.Vector;
 import util.UniqueString;
@@ -49,9 +50,9 @@ public class ExternalModuleTable implements ExploreNode {
      */
     public String levelDataToString() { return "Dummy level string"; }
 
-    public void walkGraph(Hashtable<Integer, ExploreNode> moduleNodesTable) {
-      if (moduleNode != null)   moduleNode.walkGraph(moduleNodesTable);
-      if (ctxt != null)      ctxt.walkGraph(moduleNodesTable);
+    public void walkGraph(Hashtable<Integer, ExploreNode> moduleNodesTable, ExplorerVisitor visitor) {
+      if (moduleNode != null)   moduleNode.walkGraph(moduleNodesTable, visitor);
+      if (ctxt != null)      ctxt.walkGraph(moduleNodesTable, visitor);
     } // end walkGraph()
 
     public String toString(int depth) {
@@ -80,21 +81,21 @@ public class ExternalModuleTable implements ExploreNode {
   * moduleHashTable, and that each of its entries has a moduleName as the  *
   * key and a value that's an ExternalModuleTableEntry object.             *
   *************************************************************************/
-  public Hashtable moduleHashTable;
+  public Hashtable<UniqueString, ExternalModuleTableEntry> moduleHashTable;
 
   // Vector moduleVector contains ModuleNodes (the same ones as
   // moduleHashTable), but preserves the order in which they were
   // inserted.  If module A depends on module B, then A has a HIGHER
   // index than B.
-  public Vector    moduleNodeVector;
+  public Vector<ModuleNode>    moduleNodeVector;
 
   // The nodule node of the root module
   public ModuleNode rootModule;
 
   // Constructor
   public ExternalModuleTable() {
-    moduleHashTable  = new Hashtable();
-    moduleNodeVector = new Vector();
+    moduleHashTable  = new Hashtable<>();
+    moduleNodeVector = new Vector<>();
   }
 
   // Set and get the rootModule field
@@ -102,11 +103,15 @@ public class ExternalModuleTable implements ExploreNode {
   public void       setRootModule(ModuleNode mn) { rootModule = mn; }
 
   public final Context getContext( UniqueString key ) {
-    ExternalModuleTableEntry p = (ExternalModuleTableEntry)moduleHashTable.get(key);
+    ExternalModuleTableEntry p = moduleHashTable.get(key);
     if (p == null) return null;
     return p.ctxt;
   }
 
+  public final Context getContextForRootModule() {
+	  return getContext(getRootModule().getName());
+  }
+  
   /**
    *  Returns a vector of ModuleNodes, one for each outer module (i.e. not
    *  inner modules) in the specification.  InnerModules can be obtained 
@@ -124,13 +129,13 @@ public class ExternalModuleTable implements ExploreNode {
   }
 
   public final ModuleNode getModuleNode( UniqueString key ) {
-    ExternalModuleTableEntry p = (ExternalModuleTableEntry)moduleHashTable.get(key);
+    ExternalModuleTableEntry p = moduleHashTable.get(key);
     if (p == null) return null;
     return p.moduleNode;
   }
 
   public final void put( UniqueString key, Context ctxt, ModuleNode moduleNode ) {
-    ExternalModuleTableEntry c = (ExternalModuleTableEntry)moduleHashTable.get( key );
+    ExternalModuleTableEntry c = moduleHashTable.get( key );
     if (c == null) {
       moduleHashTable.put( key, new ExternalModuleTableEntry(ctxt, moduleNode) );
       moduleNodeVector.addElement(moduleNode);
@@ -139,11 +144,11 @@ public class ExternalModuleTable implements ExploreNode {
 
   @Override
   public String toString() {
-    Enumeration Enum = moduleHashTable.elements();
+    Enumeration<ExternalModuleTableEntry> Enum = moduleHashTable.elements();
     String ret = "";
 
-    for (int i=1; Enum.hasMoreElements(); i++) {
-      ExternalModuleTableEntry mte = (ExternalModuleTableEntry)Enum.nextElement();
+    while (Enum.hasMoreElements()) {
+      ExternalModuleTableEntry mte = Enum.nextElement();
       ret = ret + mte.toString();
     }
     return "\nModule Table:" + Strings.indent(2,ret);
@@ -153,7 +158,7 @@ public class ExternalModuleTable implements ExploreNode {
     System.out.print("\nExternal Module Table:");
 
     for (int i = 0; i < moduleNodeVector.size(); i++) {
-      ModuleNode mn = (ModuleNode)moduleNodeVector.elementAt(i);
+      ModuleNode mn = moduleNodeVector.elementAt(i);
 
       if (mn != null) {
         System.out.print(Strings.indent(2, "\nModule: ")); 
@@ -188,11 +193,15 @@ public class ExternalModuleTable implements ExploreNode {
   }
 
   public void walkGraph(Hashtable<Integer, ExploreNode> moduleNodesTable) {
-    Enumeration Enum = moduleHashTable.elements();
+	  walkGraph(moduleNodesTable, ExplorerVisitor.NoopVisitor);
+  }
+
+  public void walkGraph(Hashtable<Integer, ExploreNode> moduleNodesTable, ExplorerVisitor visitor) {
+    Enumeration<ExternalModuleTableEntry> Enum = moduleHashTable.elements();
 
     while ( Enum.hasMoreElements() ) {
-	ExternalModuleTableEntry mte = (ExternalModuleTableEntry)Enum.nextElement();
-	mte.walkGraph(moduleNodesTable);
+	ExternalModuleTableEntry mte = Enum.nextElement();
+	mte.walkGraph(moduleNodesTable, visitor);
     }
   }
 

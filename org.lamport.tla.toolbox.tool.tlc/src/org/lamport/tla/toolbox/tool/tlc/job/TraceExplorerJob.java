@@ -1,8 +1,14 @@
 package org.lamport.tla.toolbox.tool.tlc.job;
 
+import java.util.List;
+
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.debug.core.ILaunch;
 import org.eclipse.swt.widgets.Display;
+import org.lamport.tla.toolbox.tool.tlc.model.TraceExpressionModelWriter;
+
+import tlc2.tool.fp.FPSetFactory;
+import tlc2.tool.impl.SpecProcessor;
 
 /**
  * Extends {@link TLCProcessJob}.
@@ -58,6 +64,17 @@ public class TraceExplorerJob extends TLCProcessJob
 	}
 
 	/* (non-Javadoc)
+	 * @see org.lamport.tla.toolbox.tool.tlc.job.TLCProcessJob#getAdditionalVMArgs()
+	 */
+	@Override
+	protected List<String> getAdditionalVMArgs() throws CoreException {
+		final List<String> additionalVMArgs = super.getAdditionalVMArgs();
+		additionalVMArgs.add(
+				String.format("-D%s=%s", SpecProcessor.LAZY_CONSTANT_OPERATORS, TraceExpressionModelWriter.POSITION));
+		return additionalVMArgs;
+	}
+
+	/* (non-Javadoc)
 	 * @see org.lamport.tla.toolbox.tool.tlc.job.TLCJob#isDepthFirst()
 	 */
 	@Override
@@ -106,5 +123,36 @@ public class TraceExplorerJob extends TLCProcessJob
 		// Never use an IStateWriter to write out the states created by trace
 		// exploration. A trace is just a txt file with a sequence of states.
 		return false;
+	}
+	
+    /* (non-Javadoc)
+     * @see org.lamport.tla.toolbox.tool.tlc.job.TLCJob#collectCoverage()
+     */
+	@Override
+    protected boolean collectCoverage() throws CoreException {
+		// No need for coverage statistics when running error trace exploration.
+    	return false;
+    }
+	
+	/* (non-Javadoc)
+	 * @see org.lamport.tla.toolbox.tool.tlc.job.TLCJob#deferLiveness()
+	 */
+	@Override
+    protected boolean deferLiveness() throws CoreException {
+		// As a performance improvement, always defer liveness until the end of model
+		// checking in trace exploration.
+        return true;
+    }
+	
+	/* (non-Javadoc)
+	 * @see org.lamport.tla.toolbox.tool.tlc.job.TLCProcessJob#getOptimalFPsetImpl()
+	 */
+	@Override
+	protected String getOptimalFPsetImpl() throws CoreException {
+		// A trace is a single behavior of usually about a dozen states and sometimes a
+		// few thousand. This range is easily handled by the default FPSet
+		// implementation which is faster to initialize compared to the optimized
+		// OffHeapDiskFPSet. This should make the trace explorer a lot snappier.
+		return FPSetFactory.getImplementationDefault();
 	}
 }

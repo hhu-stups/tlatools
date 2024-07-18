@@ -34,12 +34,13 @@ import java.util.List;
 import org.junit.Test;
 
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 import tlc2.tool.liveness.ModelCheckerTestCase;
 
 public class TraceWithLargeSetOfInitialStatesTest extends ModelCheckerTestCase {
 
 	public TraceWithLargeSetOfInitialStatesTest() {
-		super("TraceWithLargeSetOfInitialStatesTest", new String[] { "-maxSetSize", "10" });
+		super("TraceWithLargeSetOfInitialStatesTest", new String[] { "-maxSetSize", "10" }, ExitStatus.VIOLATION_SAFETY);
 	}
 
 	@Test
@@ -54,5 +55,7 @@ public class TraceWithLargeSetOfInitialStatesTest extends ModelCheckerTestCase {
 		expectedTrace.add("/\\ x = 1\n/\\ y = FALSE");
 		expectedTrace.add("/\\ x = 1\n/\\ y = TRUE");
 		assertTraceWith(recorder.getRecords(EC.TLC_STATE_PRINT2), expectedTrace);
+
+	assertZeroUncovered();
 	}
 }

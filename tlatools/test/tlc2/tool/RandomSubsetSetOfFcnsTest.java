@@ -25,21 +25,13 @@
  ******************************************************************************/
 package tlc2.tool;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-
-import java.util.List;
-import java.util.Map;
 
 import org.junit.Test;
 
 import tlc2.output.EC;
 import tlc2.tool.liveness.ModelCheckerTestCase;
-import tlc2.value.BoolValue;
-import tlc2.value.IntValue;
-import tlc2.value.Value;
-import util.UniqueString;
 
 public class RandomSubsetSetOfFcnsTest extends ModelCheckerTestCase {
 
@@ -54,7 +46,7 @@ public class RandomSubsetSetOfFcnsTest extends ModelCheckerTestCase {
 		
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_INIT_GENERATED1, "1000"));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "2000", "1000", "0"));
-		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "0"));
+		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "1"));
 //
 //		assertTrue(recorder.recorded(EC.TLC_STATE_PRINT2));
 //		
@@ -84,5 +76,7 @@ public class RandomSubsetSetOfFcnsTest extends ModelCheckerTestCase {
 //		assertEquals(firstY.val, ((IntValue) secondState.get(UniqueString.uniqueStringOf("y"))).val);
 //		// Check z is false
 //		assertEquals(BoolValue.ValFalse, (BoolValue) secondState.get(UniqueString.uniqueStringOf("z")));
+
+		assertZeroUncovered();
 	}
 }

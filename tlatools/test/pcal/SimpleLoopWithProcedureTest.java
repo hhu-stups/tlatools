@@ -46,6 +46,8 @@ public class SimpleLoopWithProcedureTest extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "66", "64", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "32"));
+
+		assertZeroUncovered();
 	}
 }
 /*

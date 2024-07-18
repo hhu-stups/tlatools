@@ -5,18 +5,20 @@
 package tla2sany.semantic;
 
 import java.util.Hashtable;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 
 import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.parser.SyntaxTreeNode;
 import tla2sany.st.Location;
 import tla2sany.st.TreeNode;
 import tla2sany.xml.XMLExportable;
-import tlc2.value.Value;
-import util.ToolIO;
+import tlc2.value.IValue;
+import tlc2.value.Values;
 
 /**
  * SemanticNode is the (abstract) superclass of all nodes in the
@@ -30,11 +32,11 @@ public abstract class SemanticNode
 
   private static final Object[] EmptyArr = new Object[0];
 
-  private static int uid = 0;  // the next unique ID for any semantic node
+  private static final AtomicInteger uid = new AtomicInteger();  // the next unique ID for any semantic node
 
   protected static Errors errors;
 
-  public    int      myUID;    // the unique ID of THIS semantic node
+  public    final int      myUID;    // the unique ID of THIS semantic node
   public    TreeNode stn;      // the concrete syntax tree node associated with THIS semantic node
   private   Object[] tools;    // each tool has a location in this array where
                                //   it may store an object for its own purposes
@@ -42,7 +44,7 @@ public abstract class SemanticNode
                                //   strongly correlated with the Java type of the node
 
   public SemanticNode(int kind, TreeNode stn) {
-    myUID = uid++;
+    myUID = uid.getAndIncrement();
     this.kind = kind;
     this.stn = stn;
     this.tools = EmptyArr;
@@ -88,7 +90,6 @@ public abstract class SemanticNode
       this.tools = newTools;
     }
     this.tools[toolId] = obj;
-    ToolIO.registerSemanticNode(this, toolId);
   }
 
   /**
@@ -177,10 +178,12 @@ public abstract class SemanticNode
    * of walkgraph is to find all reachable nodes in the semantic graph
    * and insert them in a Hashtable for use by the Explorer tool.
    */
-  public void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable) {
-    Integer uid = new Integer(myUID);
+  public void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
     semNodesTable.put(uid, this);
+    visitor.preVisit(this);
+    visitor.postVisit(this);
   }
 
   /**
@@ -194,10 +197,21 @@ public abstract class SemanticNode
 	    "  kind: " + (kind == -1 ? "<none>" : kinds[kind])
 	    + getPreCommentsAsString());
   }
+  
+  public boolean isBuiltIn() {
+	  return Context.isBuiltIn(this);
+  }
 
+  public boolean isStandardModule() {
+	  return StandardModules.isDefinedInStandardModule(this);
+  }
+  
   // YY's code
   public final Location getLocation() {
-    return this.stn.getLocation();
+	  if (this.stn != null) {
+		  return this.stn.getLocation();
+	  }
+	  return Location.nullLoc;
   }
 
   /**
@@ -227,6 +241,36 @@ public abstract class SemanticNode
        }
        return (loc1.beginColumn() < loc2.beginColumn())?-1:1;
   }
+
+	@Override
+	public int hashCode() {
+		final int prime = 31;
+		int result = 1;
+		result = prime * result + kind;
+		result = prime * result + myUID;
+		return result;
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+		if (this == obj) {
+			return true;
+		}
+		if (obj == null) {
+			return false;
+		}
+		if (getClass() != obj.getClass()) {
+			return false;
+		}
+		SemanticNode other = (SemanticNode) obj;
+		if (kind != other.kind) {
+			return false;
+		}
+		if (myUID != other.myUID) {
+			return false;
+		}
+		return true;
+	}
 
 /***************************************************************************
 * XXXXX A test for getLocation() returning null should be added            *
@@ -258,8 +302,8 @@ public abstract class SemanticNode
 	  return getLocation().toString();
   }
   
-  public String toString(final Value aValue) {
-	return Value.ppr(aValue.toString());
+  public String toString(final IValue aValue) {
+	return Values.ppr(aValue.toString());
   }
 
     /**

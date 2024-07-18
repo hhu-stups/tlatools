@@ -34,12 +34,13 @@ import java.util.List;
 import org.junit.Test;
 
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 import tlc2.tool.liveness.ModelCheckerTestCase;
 
 public class RandomElementXandYTest extends ModelCheckerTestCase {
 
 	public RandomElementXandYTest() {
-		super("RandomElementXandY", new String[] {"-seed", Long.toString(8006642976694192746L)}); 
+		super("RandomElementXandY", new String[] {"-seed", Long.toString(8006642976694192746L)}, ExitStatus.VIOLATION_SAFETY); 
 		// 8006642976694192746L produces a trace of three states.
 		// 8006642976346685430L and 8006642974998076619L results in no violation of an invariant
 		// 8006642972812024640L a trace with two states
@@ -57,5 +58,7 @@ public class RandomElementXandYTest extends ModelCheckerTestCase {
 		expectedTrace.add("/\\ x = 1\n/\\ y = 1");
 		expectedTrace.add("/\\ x = 0\n/\\ y = 1");
 		assertTraceWith(recorder.getRecords(EC.TLC_STATE_PRINT2), expectedTrace);
+
+	assertZeroUncovered();
 	}
 }

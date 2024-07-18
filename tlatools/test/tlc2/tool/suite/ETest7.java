@@ -30,12 +30,17 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 
 public class ETest7 extends SuiteETestCase {
 
+	public ETest7() {
+		super(ExitStatus.ERROR_CONFIG_PARSE);
+	}
+	
 	@Test
 	public void testSpec() {
-		assertTrue(recorder.recordedWithSubStringValue(EC.GENERAL,
-				"The configuration file substitutes constant C with non-constant Foo."));
+		assertTrue(recorder.recordedWithStringValues(EC.TLC_CONFIG_SUBSTITUTION_NON_CONSTANT,
+				"C", "Foo"));
 	}
 }

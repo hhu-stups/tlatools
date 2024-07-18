@@ -16,6 +16,7 @@ import util.Assert;
 import util.DebugPrinter;
 import util.Set;
 import util.ToolIO;
+import util.Assert.TLCRuntimeException;
 
 /**
  * This class is used in the following way to support the replacements of the
@@ -165,7 +166,7 @@ public class MP
      * @param parameters string of parameters to be replaced in the message
      * @return the formatted message
      */
-    private synchronized static String getMessage(int messageClass, int messageCode, String[] parameters)
+    public synchronized static String getMessage(int messageClass, int messageCode, String[] parameters)
     {
 
         if (parameters == null)
@@ -616,6 +617,10 @@ public class MP
             b.append("Overflow when computing %1%");
             break;
 
+        case EC.TLC_MODULE_ONE_ARGUMENT_ERROR:
+            b.append("The argument of %1% should be a %2%, but instead it is:\n%3%");
+            break;
+
         case EC.TLC_MODULE_ARGUMENT_ERROR:
             b.append("The %1% argument of %2% should be a %3%, but instead it is:\n%4%");
             break;
@@ -675,7 +680,10 @@ public class MP
         case EC.TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE_LOADED:
             b.append("Loading %1% operator override from %2% with signature: %3%.");
             break;
-        case EC.TLC_FEATURE_UNSUPPORTED:
+        case EC.TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE_MISMATCH:
+            b.append("Failed to match %1% operator override from %2% with signature: %3%.");
+            break;
+       case EC.TLC_FEATURE_UNSUPPORTED:
             b.append("%1%");
             break;
         case EC.TLC_FEATURE_UNSUPPORTED_LIVENESS_SYMMETRY:
@@ -712,6 +720,9 @@ public class MP
             break;
         case EC.TLC_LIVE_ENCOUNTERED_NONBOOL_PREDICATE:
             b.append("Encountered an action predicate that's not a boolean.");
+            break;
+        case EC.TLC_LIVE_FORMULA_TAUTOLOGY:
+            b.append("Temporal formula is a tautology (its negation is unsatisfiable).");
             break;
 
         case EC.TLC_EXPECTED_VALUE:
@@ -765,57 +776,88 @@ public class MP
         /*------------------------------------------- */
         // TLC distributed 
         case EC.TLC_DISTRIBUTED_SERVER_RUNNING:
-            b.append("TLC server at %1% is ready (").append(SDF.format(new Date())).append(")");
+            b.append("TLC server at %1% is ready (").append(now()).append(")");
             break;
         case EC.TLC_DISTRIBUTED_WORKER_REGISTERED:
-            b.append("Registration for worker at %1% completed (").append(SDF.format(new Date())).append(")");
+            b.append("Registration for worker at %1% completed (").append(now()).append(")");
             break;
         case EC.TLC_DISTRIBUTED_WORKER_DEREGISTERED:
-            b.append("TLC worker %1% disconnected (").append(SDF.format(new Date())).append(")");
+            b.append("TLC worker %1% disconnected (").append(now()).append(")");
             break;
         case EC.TLC_DISTRIBUTED_WORKER_STATS:
         	//new Date() + " Worker: " + name + " Sent: " + sentStates + " Rcvd: " + receivedStates
-			b.append("Worker: %1% Sent: %2% Rcvd: %3% CacheRatio: %4% (").append(SDF.format(new Date())).append(")");
+			b.append("Worker: %1% Sent: %2% Rcvd: %3% CacheRatio: %4% (").append(now()).append(")");
             break;
         case EC.TLC_DISTRIBUTED_SERVER_NOT_RUNNING:
-            b.append("TLCServer is gone due to %1%, exiting worker... (").append(SDF.format(new Date())).append(")");
+            b.append("TLCServer is gone due to %1%, exiting worker... (").append(now()).append(")");
             break;
         case EC.TLC_DISTRIBUTED_SERVER_FINISHED:
-            b.append("TLCServer has finished, exiting worker... (").append(SDF.format(new Date())).append(")");
+            b.append("TLCServer has finished, exiting worker... (").append(now()).append(")");
             break;
 		case EC.TLC_DISTRIBUTED_VM_VERSION:
 			b.append(
 					"VM does not allow to get the UnicastRef port.\nWorker will be identified with port 0 in output (")
-					.append(SDF.format(new Date())).append(")");
+					.append(now()).append(")");
 			break;
 		case EC.TLC_DISTRIBUTED_WORKER_LOST:
-			b.append("TLC worker connection lost %1% (").append(SDF.format(new Date())).append(")");
+			b.append("TLC worker connection lost %1% (").append(now()).append(")");
 			break;
 		case EC.TLC_DISTRIBUTED_EXCEED_BLOCKSIZE:
-			b.append("Trying to limit max block size (to recover from transport failure): %1% (").append(SDF.format(new Date())).append(")");
+			b.append("Trying to limit max block size (to recover from transport failure): %1% (").append(now()).append(")");
 			break;
 		case EC.TLC_DISTRIBUTED_SERVER_FPSET_REGISTERED:
-			b.append("%1% out of %2% FPSet server(s) registered (").append(SDF.format(new Date())).append(")");
+			b.append("%1% out of %2% FPSet server(s) registered (").append(now()).append(")");
 			break;
 		case EC.TLC_DISTRIBUTED_SERVER_FPSET_WAITING:
-			b.append("Waiting for %1% FPSet server(s) to register (").append(SDF.format(new Date())).append(")");
+			b.append("Waiting for %1% FPSet server(s) to register (").append(now()).append(")");
 			break;
             
         /*------------------------------------------- */
         case EC.TLC_STARTING:
-            b.append("Starting... (").append(SDF.format(new Date())).append(")");
+            b.append("Starting... (").append(now()).append(")");
             break;
         case EC.TLC_FINISHED:
-            b.append("Finished in %1% at (").append(SDF.format(new Date())).append(")");
+            b.append("Finished in %1% at (").append(now()).append(")");
             break;
+		/*
+		 * The two startup banners below are parsed by the Toolbox in
+		 * org.lamport.tla.toolbox.tool.tlc.output.data.TLCModelLaunchDataProvider.
+		 * startupMessagePattern.  Remember to update when the banners below 
+		 * get changed 
+		 * (see org.lamport.tla.toolbox.tool.tlc.output.data.TLCModelLaunchDataProviderTest)!!!
+		 */
         case EC.TLC_MODE_MC:
-            b.append("Running breadth-first search Model-Checking with seed %12% with %1% worker%2% on %3% cores with %10%MB heap and %11%MB offheap memory (%4% %5% %6%, %7% %8% %9%).");
+            b.append("Running breadth-first search Model-Checking with fp %13% and seed %12% with %1% worker%2% on %3% cores with %10%MB heap and %11%MB offheap memory");
+            if (!"".equals(parameters[13])) {
+            	b.append(" [pid: %14%]");
+            } else {
+				// Make sure subsequent parameters, %15%... are processed below in the
+				// replaceString method. replaceString terminates if a string is not present,
+				// thus we replace %14% with the zero-length string to not change the output but
+				// to make replaceString happy.
+            	b.append("%14%");
+            }
+            b.append(" (%4% %5% %6%, %7% %8% %9%, %15%, %16%).");
             break;
         case EC.TLC_MODE_MC_DFS:
-            b.append("Running depth-first search Model-Checking with seed %12% with %1% worker%2% on %3% cores with %10%MB heap and %11%MB offheap memory (%4% %5% %6%, %7% %8% %9%).");
+            b.append("Running depth-first search Model-Checking with fp %13% and seed %12% with %1% worker%2% on %3% cores with %10%MB heap and %11%MB offheap memory");
+            if (!"".equals(parameters[13])) {
+            	b.append(" [pid: %14%]");
+            } else {
+            	// see TLC_MODE_MC above.
+            	b.append("%14%");
+            }
+     		b.append(" (%4% %5% %6%, %7% %8% %9%).");
             break;
         case EC.TLC_MODE_SIMU:
-            b.append("Running Random Simulation with seed %1% with %2% worker%3% on %4% cores with %11%MB heap and %12%MB offheap memory (%5% %6% %7%, %8% %9% %10%).");
+            b.append("Running Random Simulation with seed %1% with %2% worker%3% on %4% cores with %11%MB heap and %12%MB offheap memory");
+            if (!"".equals(parameters[12])) {
+            	b.append(" [pid: %13%]");
+            } else {
+            	// see TLC_MODE_MC above.
+            	b.append("%13%");
+            }
+            b.append(" (%5% %6% %7%, %8% %9% %10%).");
             break;
         case EC.TLC_COMPUTING_INIT:
             b.append("Computing initial states...");
@@ -824,30 +866,37 @@ public class MP
             b.append("Computed %1% initial states...");
             break;
         case EC.TLC_INIT_GENERATED1:
-            b.append("Finished computing initial states: %1% distinct state%2% generated.");
+			b.append("Finished computing initial states: %1% distinct state%2% generated at ")
+					.append(now()).append(".");
             break;
         case EC.TLC_INIT_GENERATED2:
-            b.append("Finished computing initial states: %1% state%2% generated, with %3% of them distinct.");
+			b.append("Finished computing initial states: %1% state%2% generated, with %3% of them distinct at ")
+					.append(now()).append(".");
             break;
         case EC.TLC_INIT_GENERATED3:
-            b.append("Finished computing initial states: %1% states generated.\n"
-                    + "Because TLC recovers from a previous checkpoint, only %2% of them require further exploration.");
+			b.append("Finished computing initial states: %1% states generated.\n"
+					+ "Because TLC recovers from a previous checkpoint, only %2% of them require further exploration at ")
+					.append(now()).append(".");
             break;
         case EC.TLC_INIT_GENERATED4:
             b.append("Finished computing initial states: %1% states generated, with %2% of them distinct.");
             break;
         case EC.TLC_CHECKING_TEMPORAL_PROPS:
 			b.append("Checking %3%temporal properties for the %1% state space with %2% total distinct states at (")
-					.append(SDF.format(new Date())).append(")");
+					.append(now()).append(")");
             break;
 		case EC.TLC_CHECKING_TEMPORAL_PROPS_END:
-			b.append("Finished checking temporal properties in %1% at " + SDF.format(new Date()));
+			b.append("Finished checking temporal properties in %1% at " + now());
 	        break;
         case EC.TLC_SUCCESS:
             b.append("Model checking completed. No error has been found.\n"
-                    + "  Estimates of the probability that TLC did not check all reachable states\n"
-                    + "  because two distinct states had the same fingerprint:\n" + "  calculated (optimistic):  %1%\n"
-                    + "  based on the actual fingerprints:  %2%");
+                    + "  Estimates of the probability that TLC did not check all reachable states\n");
+            if (parameters.length == 1) {
+            	b.append("  because two distinct states had the same fingerprint:\n" + "  calculated (optimistic):  %1%");
+            } else {
+            	b.append("  because two distinct states had the same fingerprint:\n"
+            			+ "  calculated (optimistic):  %1%\n" + "  based on the actual fingerprints:  %2%");
+            }
             break;
         case EC.TLC_SEARCH_DEPTH:
 			b.append("The depth of the complete state graph search is %1%.");
@@ -859,7 +908,7 @@ public class MP
             b.append("Checkpointing of run %1%");
             break;
         case EC.TLC_CHECKPOINT_END:
-            b.append("Checkpointing completed at (").append(SDF.format(new Date())).append(")");
+            b.append("Checkpointing completed at (").append(now()).append(")");
             break;
         case EC.TLC_CHECKPOINT_RECOVER_START:
             b.append("Starting recovery from checkpoint %1%");
@@ -882,12 +931,11 @@ public class MP
             break;
         case EC.TLC_PROGRESS_STATS:
         	if (parameters.length == 4) {
-				b.append("Progress(%1%) at " + SDF.format(new Date()) + ": %2% states generated, "
+				b.append("Progress(%1%) at " + now() + ": %2% states generated, "
 						+ "%3% distinct states found, " + "%4% states left on queue.");
         	} else if (parameters.length == 6) {
-        		b.append("Progress(%1%) at " + SDF.format(new Date()) + ": %2% states generated ("
-        				+ df.format(Long.valueOf(parameters[4])) + " s/min), %3% distinct states found ("
-        				+ df.format(Long.valueOf(parameters[5])) + " ds/min), %4% states left on queue.");
+        		b.append("Progress(%1%) at " + now() + ": %2% states generated ("
+        				+ "%5% s/min), %3% distinct states found (%6% ds/min), %4% states left on queue.");
         	}
             break;
         case EC.TLC_PROGRESS_START_STATS_DFID:
@@ -897,7 +945,7 @@ public class MP
             if (TLCGlobals.tool)
             {
                 // same format as model checking progress reporting for easier parsing by the toolbox
-                b.append("Progress(" + NOT_APPLICABLE_VAL + ") at " + SDF.format(new Date())
+                b.append("Progress(" + NOT_APPLICABLE_VAL + ") at " + now()
                         + ": %1% states generated, %2% distinct states found, " + NOT_APPLICABLE_VAL
                         + " states left on queue.");
             } else
@@ -909,7 +957,7 @@ public class MP
             if (TLCGlobals.tool)
             {
                 // same format as model checking progress reporting for easier parsing by the toolbox
-                b.append("Progress(" + NOT_APPLICABLE_VAL + ") at " + SDF.format(new Date())
+                b.append("Progress(" + NOT_APPLICABLE_VAL + ") at " + now()
                         + ": %1% states generated, " + NOT_APPLICABLE_VAL + " distinct states found, "
                         + NOT_APPLICABLE_VAL + " states left on queue.");
             } else
@@ -919,14 +967,33 @@ public class MP
             break;
 
         case EC.TLC_COVERAGE_START:
-            b.append("The coverage statistics at " + SDF.format(new Date()));
+            b.append("The coverage statistics at " + now());
             break;
         case EC.TLC_COVERAGE_VALUE:
             b.append("  %1%: %2%");
             break;
-
+        case EC.TLC_COVERAGE_VALUE_COST:
+            b.append("  %1%: %2%:%3%");
+            break;
+        case EC.TLC_COVERAGE_INIT:
+       		b.append("%1%: %2%:%3%");
+            break;
+        case EC.TLC_COVERAGE_NEXT:
+       		b.append("%1%: %2%:%3%");
+            break;
+        case EC.TLC_COVERAGE_PROPERTY:
+       		b.append("%1%");
+            break;
+        case EC.TLC_COVERAGE_MISMATCH:
+			b.append(
+					"CostModel lookup failed for expression <%1%>. Reporting costs into <%2%> instead (Safety and Liveness checking is unaffected. Please report a bug.)");
+        	break;
         case EC.TLC_COVERAGE_END:
             b.append("End of statistics.");
+            break;
+		case EC.TLC_COVERAGE_END_OVERHEAD:
+			b.append("End of statistics (please note that for performance reasons large models\n"
+					+ "are best checked with coverage and cost statistics disabled).");
             break;
 
         /* ************************************************************************ */
@@ -1004,6 +1071,11 @@ public class MP
             b.append("The specification contains more than one conjunct of the form [][Next]_v,"
                     + "\nbut TLC can handle only specifications with one next-state relation.");
             break;
+        case EC.TLC_TRACE_TOO_LONG:
+            b.append("The specification contains one or more behaviors with 65536 or more states,"
+                    + "\nbut TLC can only handle behaviors of length up to 65535 states. The last\n"
+                    + "state in the behavior is:\n%1%");
+        	break;
         case EC.TLC_CONFIG_PROPERTY_NOT_CORRECTLY_DEFINED:
             b.append("The property %1% is not correctly defined.");
             break;
@@ -1028,6 +1100,10 @@ public class MP
             break;
         case EC.TLC_ENCOUNTERED_FORMULA_IN_PREDICATE:
             b.append("TLC encountered a temporal formula (%1%) when evaluating" + " a predicate or action.\n%2%");
+            break;
+        case EC.TLC_ENVIRONMENT_JVM_GC:
+			b.append(
+					"Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the \"-XX:+UseParallelGC\" property.");
             break;
 
         /* ************************************************************************ */
@@ -1200,9 +1276,9 @@ public class MP
      * Prints the error for a given error code
      * @param errorCode
      */
-    public static void printError(int errorCode)
+    public static int printError(int errorCode)
     {
-        printError(errorCode, EMPTY_PARAMS);
+        return printError(errorCode, EMPTY_PARAMS);
     }
 
     /**
@@ -1210,9 +1286,9 @@ public class MP
      * @param errorCode
      * @param parameter
      */
-    public static void printError(int errorCode, String parameter)
+    public static int printError(int errorCode, String parameter)
     {
-        printError(errorCode, new String[] { parameter });
+        return printError(errorCode, new String[] { parameter });
     }
 
     /**
@@ -1221,13 +1297,14 @@ public class MP
      * @param parameters a list of string parameters to be inserted into the message, by replacing 
      * %i% with the i-th parameter in the array
      */
-    public static void printError(int errorCode, String[] parameters)
+    public static int printError(int errorCode, String[] parameters)
     {
     	recorder.record(errorCode, (Object[]) parameters);
         // write the output
         DebugPrinter.print("entering printError(int, String[]) with errorCode " + errorCode); //$NON-NLS-1$
         ToolIO.out.println(getMessage(ERROR, errorCode, parameters));
         DebugPrinter.print("leaving printError(int, String[])"); //$NON-NLS-1$
+        return errorCode;
     }
 
     /**
@@ -1352,13 +1429,14 @@ public class MP
      * @param errorCode
      * @param cause
      */
-    public static void printError(int errorCode, Throwable cause)
+    public static int printError(int errorCode, Throwable cause)
     {
         if (errorCode == EC.GENERAL) {
             printError(errorCode, "", cause);
         } else {
             printError(errorCode, cause.getMessage(), cause, true);
         }
+        return errorCode;
     }
 
     /**
@@ -1386,7 +1464,7 @@ public class MP
      * @param parameters a list of string parameters to be inserted into the message, by replacing 
      * %i% with the i-th parameter in the array
      */
-    public static void printMessage(int errorCode, String[] parameters)
+    public static void printMessage(int errorCode, String... parameters)
     {
     	recorder.record(errorCode, (Object[]) parameters);
         DebugPrinter.print("entering printMessage(int, String[]) with errorCode " + errorCode); //$NON-NLS-1$
@@ -1395,6 +1473,20 @@ public class MP
         DebugPrinter.print("leaving printError(int, String[]) with errorCode "); //$NON-NLS-1$
     }
 
+    public static int printTLCRuntimeException(final TLCRuntimeException tre) {
+    	if (tre.parameters != null) {
+    		recorder.record(tre.errorCode, (Object[]) new Object[] {tre});
+    		DebugPrinter.print("entering printTLCRuntimeException(TLCRuntimeException) with errorCode " + tre.errorCode); //$NON-NLS-1$
+    		// write the output
+    		ToolIO.out.println(getMessage(ERROR, tre.errorCode, tre.parameters));
+    		DebugPrinter.print("leaving printTLCRuntimeException(TLCRuntimeException) with errorCode "); //$NON-NLS-1$
+    	} else {
+    		// Legacy code path except actual errorCode instead of EC.General.
+    		printError(tre.errorCode, tre);
+    	}
+    	return tre.errorCode;
+    }
+    
     /** 
      * Prints the state
      * @param parameters
@@ -1449,7 +1541,7 @@ public class MP
      * @param errorCode
      * @param parameters
      */
-    public static void printWarning(int errorCode, String[] parameters)
+    public static void printWarning(int errorCode, String... parameters)
     {
     	recorder.record(errorCode, (Object[]) parameters);
         DebugPrinter.print("entering printWarning(int, String[]) with errorCode " + errorCode); //$NON-NLS-1$
@@ -1549,5 +1641,19 @@ public class MP
 
 	public static void setRecorder(MPRecorder aRecorder) {
 		recorder = aRecorder;
+	}
+
+    private static String now() {
+    	if (Boolean.getBoolean(MP.class.getName() + ".noTimestamps")) {
+			// Return NOW if requested by setting -Dtlc2.output.MP.noTimestamps=true on the
+			// command-line. Can be useful if one wants to compare TLC's output from
+			// multiple executions.
+    		return "NOW";
+    	}
+		return SDF.format(new Date());
+	}
+
+	public static String format(final long l) {
+		return df.format(l);
 	}
 }

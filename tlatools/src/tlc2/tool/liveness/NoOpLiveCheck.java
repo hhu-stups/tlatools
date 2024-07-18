@@ -28,20 +28,21 @@ package tlc2.tool.liveness;
 
 import java.io.IOException;
 
+import tlc2.output.EC;
+import tlc2.tool.ITool;
 import tlc2.tool.StateVec;
 import tlc2.tool.TLCState;
-import tlc2.tool.Tool;
 import tlc2.util.SetOfStates;
 import tlc2.util.statistics.DummyBucketStatistics;
 import tlc2.util.statistics.IBucketStatistics;
 
 public class NoOpLiveCheck implements ILiveCheck {
 
-	private final Tool tool;
+	private final ITool tool;
 	private final String metadir;
 	private final IBucketStatistics stats;
 
-	public NoOpLiveCheck(Tool tool, String metadir) {
+	public NoOpLiveCheck(ITool tool, String metadir) {
 		this.tool = tool;
 		this.metadir = metadir;
 		this.stats = new DummyBucketStatistics();
@@ -50,13 +51,13 @@ public class NoOpLiveCheck implements ILiveCheck {
 	/* (non-Javadoc)
 	 * @see tlc2.tool.liveness.ILiveCheck#addInitState(tlc2.tool.TLCState, long)
 	 */
-	public void addInitState(TLCState state, long stateFP) {
+	public void addInitState(ITool tool, TLCState state, long stateFP) {
 	}
 
 	/* (non-Javadoc)
 	 * @see tlc2.tool.liveness.ILiveCheck#addNextState(tlc2.tool.TLCState, long, tlc2.util.SetOfStates)
 	 */
-	public void addNextState(TLCState s0, long fp0, SetOfStates nextStates) throws IOException {
+	public void addNextState(ITool tool, TLCState s0, long fp0, SetOfStates nextStates) throws IOException {
 	}
 
 	/* (non-Javadoc)
@@ -66,24 +67,20 @@ public class NoOpLiveCheck implements ILiveCheck {
 		return false;
 	}
 
-	/* (non-Javadoc)
-	 * @see tlc2.tool.liveness.ILiveCheck#check(boolean)
-	 */
-	public boolean check(boolean forceCheck) throws Exception {
-		return true;
+	@Override
+	public int check(ITool tool, boolean forceCheck) throws Exception {
+		return EC.NO_ERROR;
 	}
 
-	/* (non-Javadoc)
-	 * @see tlc2.tool.liveness.ILiveCheck#finalCheck()
-	 */
-	public boolean finalCheck() throws Exception {
-		return true;
+	@Override
+	public int finalCheck(ITool tool) throws Exception {
+		return EC.NO_ERROR;
 	}
 	
 	/* (non-Javadoc)
 	 * @see tlc2.tool.liveness.ILiveCheck#checkTrace(tlc2.tool.StateVec)
 	 */
-	public void checkTrace(StateVec trace) throws IOException, InterruptedException {
+	public void checkTrace(ITool tool, StateVec trace) throws IOException, InterruptedException {
 	}
 
 	/* (non-Javadoc)
@@ -96,7 +93,7 @@ public class NoOpLiveCheck implements ILiveCheck {
 	/* (non-Javadoc)
 	 * @see tlc2.tool.liveness.ILiveCheck#getTool()
 	 */
-	public Tool getTool() {
+	public ITool getTool() {
 		return tool;
 	}
 

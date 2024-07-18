@@ -28,10 +28,12 @@ package org.lamport.tla.toolbox.tool.tlc.launch;
 import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Vector;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IFolder;
+import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.IWorkspace;
@@ -53,6 +55,7 @@ import org.eclipse.jface.dialogs.MessageDialog;
 import org.lamport.tla.toolbox.spec.parser.ParseResult;
 import org.lamport.tla.toolbox.tool.IParseResult;
 import org.lamport.tla.toolbox.tool.ToolboxHandle;
+import org.lamport.tla.toolbox.tool.tlc.LongFormDialog;
 import org.lamport.tla.toolbox.tool.tlc.TLCActivator;
 import org.lamport.tla.toolbox.tool.tlc.job.TLCJob;
 import org.lamport.tla.toolbox.tool.tlc.job.TLCProcessJob;
@@ -417,6 +420,8 @@ public class TraceExplorerDelegate extends TLCModelLaunchDelegate implements ILa
         writer.addPrimer(ModelHelper.TE_MODEL_NAME, ResourceHelper.getModuleName(model.getSpec().getRootFilename()));
 
         writeModelInfo(config, writer);
+        
+        writer.addTraceFunction(trace);
 
         /*
          * The following writes variable declarations and identifier definitions
@@ -483,24 +488,30 @@ public class TraceExplorerDelegate extends TLCModelLaunchDelegate implements ILa
         /***********************************************************************************
          * Check for parsing errors first.                                                 *
          ***********************************************************************************/
-        if (parseResult.getDetectedErrors().size() > 0)
+        final Vector<TLAMarkerInformationHolder> detectedErrors = parseResult.getDetectedErrors();
+		if (detectedErrors.size() > 0)
         {
+			final Map<TLAMarkerInformationHolder, Hashtable<String, Object>> props = sany2ToolboxErrors(monitor, rootModule, detectedErrors);
+        	
             /*
              * This displays the parse errors to the user in an error
              * dialog. It attempts to replace messages containing references
              * to locations to module TE with the string from that location.
              */
             final StringBuffer errorMessage = new StringBuffer();
-            Iterator<TLAMarkerInformationHolder> it = parseResult.getDetectedErrors().iterator();
-            while (it.hasNext())
-            {
-                TLAMarkerInformationHolder errorInfo = it.next();
-                errorMessage.append(errorInfo.getMessage() + "\n");
+            for (final TLAMarkerInformationHolder errorInfo : parseResult.getDetectedErrors()) {
+            	if (props.containsKey(errorInfo)) {
+            		errorMessage.append(props.get(errorInfo).get(IMarker.MESSAGE));
+            	} else {
+            		errorMessage.append(errorInfo.getMessage() + "\n");
+            	}
             }
             UIHelper.runUIAsync(new Runnable() {
 				public void run() {
-					MessageDialog.openError(UIHelper.getShellProvider().getShell(),
-							"Parsing error when running trace explorer", errorMessage.toString());
+					final LongFormDialog dialog = new LongFormDialog("Parsing error when running trace explorer",
+							errorMessage.toString());
+					
+					dialog.open();
 				}
 			});
             return false;
@@ -616,6 +627,8 @@ public class TraceExplorerDelegate extends TLCModelLaunchDelegate implements ILa
 
         // write constants, model values, new definitions, definition overrides
         writeModelInfo(configuration, writer);
+        
+        writer.addTraceFunction(trace);
 
         // variables declarations for trace explorer expressions
         writer.addVariablesAndDefinitions(traceExpressionData, TRACE_EXPLORE_EXPRESSIONS, false);

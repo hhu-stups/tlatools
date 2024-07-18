@@ -32,14 +32,17 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+
 import org.junit.Test;
+
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 import tlc2.tool.liveness.ModelCheckerTestCase;
 
 public class IncompleteNextTest extends ModelCheckerTestCase {
 
 	public IncompleteNextTest() {
-		super("IncompleteNext", "");
+		super("IncompleteNext", ExitStatus.FAILURE_SPEC_EVAL);
 	}
 
 	@Test
@@ -62,5 +65,7 @@ public class IncompleteNextTest extends ModelCheckerTestCase {
 		final List<Object> records = recorder.getRecords(EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT);
 		assertEquals(" is", ((String[]) records.get(0))[0]);
 		assertEquals("y", ((String[]) records.get(0))[1]);
+
+		assertZeroUncovered();
 	}
 }

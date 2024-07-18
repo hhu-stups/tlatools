@@ -31,13 +31,16 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+
 import org.junit.Test;
+
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 
 public class ErrorTraceConstructionTest extends ModelCheckerTestCase {
 
 	public ErrorTraceConstructionTest() {
-		super("ErrorTraceConstructionMC", "symmetry");
+		super("ErrorTraceConstructionMC", "symmetry", ExitStatus.VIOLATION_LIVENESS);
 	}
 	
 	@Test
@@ -67,5 +70,7 @@ public class ErrorTraceConstructionTest extends ModelCheckerTestCase {
 		assertTraceWith(recorder.getRecords(EC.TLC_STATE_PRINT2), expectedTrace);
 		
 		assertBackToState(4, "<N7 line 32, col 7 to line 34, col 19 of module ErrorTraceConstruction>");
+
+	assertZeroUncovered();
 	}
 }

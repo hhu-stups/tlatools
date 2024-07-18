@@ -30,14 +30,19 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 
 public class ETest12 extends SuiteETestCase {
+
+	public ETest12() {
+		super(ExitStatus.VIOLATION_ASSUMPTION);
+	}
 
 	@Test
 	public void testSpec() {
 		assertTrue(recorder.toString(), recorder.recordedWithSubStringValue(EC.TLC_ASSUMPTION_EVALUATION_ERROR,
 				"Attempted to apply the operator overridden by the Java method\n"
-				+ "public static tlc2.value.IntValue tlc2.module.FiniteSets.Cardinality(tlc2.value.Value),\n"
+				+ "public static tlc2.value.impl.IntValue tlc2.module.FiniteSets.Cardinality(tlc2.value.impl.Value),\n"
 				+ "but it produced the following error:\n"
 				+ "Overflow when computing the number of elements in:"
 				+ "\n[0..2 -> 1..2000]"));

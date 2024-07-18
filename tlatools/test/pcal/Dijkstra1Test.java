@@ -46,6 +46,8 @@ public class Dijkstra1Test extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "16775", "5510", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "10"));
+		
+		assertZeroUncovered();
 	}
 }
 /*

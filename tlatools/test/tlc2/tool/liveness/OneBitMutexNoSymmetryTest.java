@@ -32,13 +32,16 @@ import static org.junit.Assert.assertTrue;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+
 import org.junit.Test;
+
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 
 public class OneBitMutexNoSymmetryTest extends ModelCheckerTestCase {
 
 	public OneBitMutexNoSymmetryTest() {
-		super("OneBitMutexNoSymmetryMC", "symmetry" + File.separator + "OneBitMutex");
+		super("OneBitMutexNoSymmetryMC", "symmetry" + File.separator + "OneBitMutex", ExitStatus.VIOLATION_LIVENESS);
 	}
 	
 	@Test
@@ -159,5 +162,9 @@ public class OneBitMutexNoSymmetryTest extends ModelCheckerTestCase {
 		assertTraceWith(recorder.getRecords(EC.TLC_STATE_PRINT2), expectedTrace);
 
 		assertBackToState(9, "<e2 line 66, col 13 to line 74, col 21 of module OneBitMutex>");
+
+		assertUncovered("line 80, col 38 to line 80, col 69 of module OneBitMutex: 0\n"
+				+ "line 96, col 16 to line 96, col 47 of module OneBitMutex: 0\n"
+				+ "line 97, col 16 to line 97, col 50 of module OneBitMutex: 0");
 	}
 }

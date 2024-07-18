@@ -10,6 +10,7 @@ import java.rmi.NoSuchObjectException;
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
 
+import tlc2.tool.TLCTrace;
 import tlc2.tool.distributed.fp.DistributedFPSet;
 import tlc2.tool.distributed.fp.FPSetRMI;
 import tlc2.util.BitVector;
@@ -47,7 +48,7 @@ public abstract class FPSet extends UnicastRemoteObject implements FPSetRMI
      * override this method as necessary. This method must be called
      * after the constructor but before any of the other methods below.
      */
-    public abstract void init(int numThreads, String metadir, String filename) throws IOException;
+    public abstract FPSet init(int numThreads, String metadir, String filename) throws IOException;
     
     public void incWorkers(int num) {
     	// subclasses may override
@@ -100,7 +101,7 @@ public abstract class FPSet extends UnicastRemoteObject implements FPSetRMI
     /* (non-Javadoc)
      * @see tlc2.tool.distributed.fp.FPSetRMI#checkFPs()
      */
-    public abstract double checkFPs() throws IOException;
+    public abstract long checkFPs() throws IOException;
 
     /* (non-Javadoc)
      * @see tlc2.tool.distributed.fp.FPSetRMI#beginChkpt()
@@ -115,7 +116,7 @@ public abstract class FPSet extends UnicastRemoteObject implements FPSetRMI
     /* (non-Javadoc)
      * @see tlc2.tool.distributed.fp.FPSetRMI#recover()
      */
-    public abstract void recover() throws IOException;
+    public abstract void recover(TLCTrace trace) throws IOException;
 
     public abstract void recoverFP(long fp) throws IOException;
 

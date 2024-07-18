@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.rmi.Remote;
 import java.rmi.RemoteException;
 
+import tlc2.tool.TLCTrace;
 import tlc2.tool.fp.FPSet;
 import tlc2.util.BitVector;
 import tlc2.util.LongVec;
@@ -32,7 +33,7 @@ public interface FPSetRMI extends Remote {
 	 *         This distance reflects the probability of a fingerprint
 	 *         collision.
 	 */
-	double checkFPs() throws IOException;
+	long checkFPs() throws IOException;
 	
 	/**
 	 * @see FPSet#checkInvariant()
@@ -102,7 +103,7 @@ public interface FPSetRMI extends Remote {
 	 */
 	BitVector putBlock(LongVec fpv) throws IOException;
 
-	void recover() throws IOException;
+	void recover(TLCTrace trace) throws IOException;
 
 	void recover(String filename) throws IOException;
 

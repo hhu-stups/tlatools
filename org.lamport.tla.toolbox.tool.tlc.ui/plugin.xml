@@ -108,8 +108,7 @@
          <commandParameter
                id="toolbox.tool.tlc.commands.model.clone.param.modelName"
                name="Model to be cloned"
-               optional="true">
-         </commandParameter>
+               optional="true"/>
       </command>
       <!-- The difference between this command and the "...delegate" above is, 
       	   that handlers associated to this command are *always* created. This 
@@ -124,15 +123,18 @@
          <commandParameter
                id="toolbox.tool.tlc.commands.model.clone.param.modelName"
                name="Model to be cloned"
-               optional="true">
-         </commandParameter>
+               optional="true"/>
       </command>
+      <command
+            categoryId="toolbox.tool.tlc.commands.category"
+            description="Starts the process of cloning a foreign model."
+            id="toolbox.tool.tlc.commands.model.cloneforeign"
+            name="Clone a foreign model"/>
       <command
             categoryId="toolbox.tool.tlc.commands.category"
             description="Runs the model checker."
             id="toolbox.tool.tlc.commands.model.run"
-            name="Run model checking">
-      </command>
+            name="Run model checking"/>
       <command
             categoryId="toolbox.tool.tlc.commands.category"
             description="Stops the model checker execution."
@@ -162,6 +164,13 @@
             description="Open a spec, module or model."
             id="org.lamport.tla.toolbox.openElementSelection"
             name="Filtered open element selection dialog">
+      </command>
+      <command
+            categoryId="toolbox.tool.tlc.commands.category"
+            defaultHandler="org.lamport.tla.toolbox.tool.tlc.ui.util.ExecutionStatisticsHandler"
+            description="Opt-in or opt-out of TLA+ Execution Statistics collection"
+            id="org.lamport.tla.toolbox.tool.tlc.ui.executionstatistics"
+            name="&amp;Opt In/Out Execution Statistics">
       </command>
    </extension>
    
@@ -215,8 +224,7 @@
             </menu>
             <menu
                   id="toolbox.tool.tlc.modellaunch.clone"
-                  label="Clone Model"
-                  mnemonic="O">
+                  label="Clone Model">
                <dynamic
                      class="org.lamport.tla.toolbox.tool.tlc.ui.modelexplorer.CloneModelContributionItem"
                      id="toolbox.tool.tlc.model.clone.dynamic">
@@ -368,6 +376,17 @@
                </with>
             </visibleWhen>
          </command -->
+      </menuContribution>
+      <menuContribution
+            locationURI="menu:toolbox.menu.help?after=toolbox.command.about">
+         <command
+               commandId="org.lamport.tla.toolbox.tool.tlc.ui.executionstatistics"
+               label="Opt In/Out Execution Statistics"
+               mnemonic="O"
+               mode="FORCE_TEXT"
+               style="push"
+               tooltip="Opt-in or opt-out of TLA+ Execution Statistics collection">
+         </command>
       </menuContribution>
    </extension>
    
@@ -638,6 +657,10 @@ Console Facory
          </activeWhen>
       </handler>
       <handler
+            class="org.lamport.tla.toolbox.tool.tlc.handlers.CloneForeignModelHandler"
+            commandId="toolbox.tool.tlc.commands.model.cloneforeign">
+      </handler>
+      <handler
             class="org.lamport.tla.toolbox.tool.tlc.handlers.CloneModelHandlerDelegate"
             commandId="toolbox.tool.tlc.commands.model.clone.delegate.always.enabled">
             <!-- intentionally no enabledWhen here (see corresponding command above) -->
@@ -831,7 +854,7 @@ Console Facory
       <fontDefinition
             id="org.lamport.tla.toolbox.tool.tlc.ui.tlcOutputFont"
             isEditable="true"
-            label="TLC Output"
+            label="TLC User, Progress, and Error Output"
             value="Courier New-regular-8">
          <fontValue
                os="win32"
@@ -840,6 +863,23 @@ Console Facory
          <fontValue
                os="macosx"
                value="Microsoft Sans Serif-regular-10">
+         </fontValue>
+         <description>
+         	The font used on the User and Progress output text areas on the Results page of the Model Editor, as well as the Error Output in the TLC Error view.
+         </description>
+      </fontDefinition>
+      <fontDefinition
+            id="org.lamport.tla.toolbox.tool.tlc.ui.tlcErrorTraceFont"
+            isEditable="true"
+            label="Error Trace"
+            value="DejaVu Sans-regular-12">
+         <fontValue
+               os="win32"
+               value="Arial-regular-12">
+         </fontValue>
+         <fontValue
+               os="macosx"
+               value="Helvetica Neue-regular-12">
          </fontValue>
       </fontDefinition>
    </extension>
@@ -868,5 +908,60 @@ Console Facory
                type="org.lamport.tla.toolbox.tool.tlc.ui.editor.ModelEditor">
          </adapter>
       </factory>
+   </extension>
+   <extension
+         point="org.eclipse.mylyn.commons.notifications.ui.notifications">
+      <category
+            id="org.lamport.tla.toolbox.tool.tlc.ui.notification.category"
+            label="CategoryLabel">
+      </category>
+      <event
+            categoryId="org.lamport.tla.toolbox.tool.tlc.ui.notification.category"
+            id="org.lamport.tla.toolbox.tool.tlc.ui.notification.event"
+            label="EventLabel">
+         <defaultHandler
+               sinkId="org.eclipse.mylyn.commons.notifications.sink.Popup">
+         </defaultHandler>
+      </event>
+   </extension>
+   <extension
+         id="org.lamport.tla.toolbox.tlc.zerocoverage"
+         name="Zero Coverage Marker Name"
+         point="org.eclipse.core.resources.markers">
+      <super
+            type="org.eclipse.core.resources.textmarker">
+      </super>
+      <persistent
+            value="true">
+      </persistent>
+   </extension>
+   <extension
+         point="org.eclipse.ui.editors.annotationTypes">
+      <type
+            markerType="org.lamport.tla.toolbox.tlc.zerocoverage"
+            name="org.lamport.tla.toolbox.tlc.zerocoverage">
+      </type>
+   </extension>
+   <extension
+         point="org.eclipse.ui.editors.markerAnnotationSpecification">
+      <specification
+            annotationType="org.lamport.tla.toolbox.tlc.zerocoverage"
+            colorPreferenceKey="org.lamport.tla.toolbox.tlc.zerocoverage.color"
+            colorPreferenceValue="250,218,92"
+            contributesToHeader="true"
+            highlightPreferenceKey="org.lamport.tla.toolbox.tlc.zerocoverage.highlight"
+            highlightPreferenceValue="true"
+            includeOnPreferencePage="true"
+            label="Disabled Actions"
+            overviewRulerPreferenceKey="org.lamport.tla.toolbox.tlc.zerocoverage.overruler"
+            overviewRulerPreferenceValue="true"
+            symbolicIcon="warning"
+            textPreferenceKey="org.lamport.tla.toolbox.tlc.zerocoverage.text"
+            textPreferenceValue="true"
+            textStylePreferenceKey="org.lamport.tla.toolbox.tlc.zerocoverage.textstyle"
+            textStylePreferenceValue="BOX"
+            verticalRulerPreferenceKey="org.lamport.tla.toolbox.tlc.zerocoverage.vertruler"
+            verticalRulerPreferenceValue="true">
+      </specification>
    </extension>
 </plugin>

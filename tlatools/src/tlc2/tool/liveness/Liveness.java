@@ -19,29 +19,30 @@ import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.tool.Action;
 import tlc2.tool.BuiltInOPs;
-import tlc2.tool.ContextEnumerator;
 import tlc2.tool.EvalControl;
-import tlc2.tool.Spec;
+import tlc2.tool.IContextEnumerator;
+import tlc2.tool.ITool;
+import tlc2.tool.ModelChecker;
+import tlc2.tool.Specs;
 import tlc2.tool.TLCState;
-import tlc2.tool.Tool;
 import tlc2.tool.ToolGlobals;
 import tlc2.util.Context;
 import tlc2.util.Vect;
-import tlc2.value.BoolValue;
-import tlc2.value.FcnLambdaValue;
-import tlc2.value.Value;
+import tlc2.value.IBoolValue;
+import tlc2.value.IFcnLambdaValue;
+import tlc2.value.IValue;
 import util.Assert;
 import util.ToolIO;
 
 public class Liveness implements ToolGlobals, ASTConstants {
 
-	private static LiveExprNode astToLive(Tool tool, ExprNode expr, Context con, int level) {
+	private static LiveExprNode astToLive(ITool tool, ExprNode expr, Context con, int level) {
 		if (level == 0) {
-			Value val = tool.eval(expr, con, TLCState.Empty);
-			if (!(val instanceof BoolValue)) {
+			IValue val = tool.eval(expr, con, TLCState.Empty);
+			if (!(val instanceof IBoolValue)) {
 				Assert.fail(EC.TLC_EXPECTED_VALUE, new String[] { "boolean", expr.toString() });
 			}
-			return (((BoolValue) val).val) ? LNBool.TRUE : LNBool.FALSE;
+			return ((IBoolValue) val).getVal() ? LNBool.TRUE : LNBool.FALSE;
 		} else if (level == 1) {
 			return new LNStateAST(expr, con);
 		} else {
@@ -58,7 +59,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 	 * the predicate body with []p. For the moment, we require that arguments to
 	 * predicates be computable from its context.
 	 */
-	private static LiveExprNode astToLive(Tool tool, ExprNode expr, Context con) {
+	private static LiveExprNode astToLive(ITool tool, ExprNode expr, Context con) {
 		switch (expr.getKind()) {
 		case OpApplKind: {
 			OpApplNode expr1 = (OpApplNode) expr;
@@ -80,7 +81,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 			return astToLive(tool, expr1.getBody(), con1);
 		}
 		default: {
-			int level = Spec.getLevel(expr, con);
+			int level = Specs.getLevel(expr, con);
 			if (level > 2) {
 				Assert.fail(EC.TLC_LIVE_CANNOT_HANDLE_FORMULA, expr.toString());
 			}
@@ -89,7 +90,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		}
 	}
 
-	private static LiveExprNode astToLiveAppl(Tool tool, OpApplNode expr, Context con) {
+	private static LiveExprNode astToLiveAppl(ITool tool, OpApplNode expr, Context con) {
 		ExprOrOpArgNode[] args = expr.getArgs();
 		int alen = args.length;
 		SymbolNode opNode = expr.getOperator();
@@ -109,7 +110,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 						FormalParamNode[] formals = opDef.getParams();
 						Context con1 = con;
 						for (int i = 0; i < alen; i++) {
-							Value argVal = tool.eval(args[i], con, TLCState.Empty);
+							IValue argVal = tool.eval(args[i], con, TLCState.Empty);
 							con1 = con1.cons(formals[i], argVal);
 						}
 						LiveExprNode res = astToLive(tool, opDef.getBody(), con1);
@@ -121,12 +122,12 @@ public class Liveness implements ToolGlobals, ASTConstants {
 					} catch (Exception e) { /* SKIP */
 					}
 				}
-			} else if (val instanceof BoolValue) {
-				return (((BoolValue) val).val) ? LNBool.TRUE : LNBool.FALSE;
+			} else if (val instanceof IBoolValue) {
+				return ((IBoolValue) val).getVal() ? LNBool.TRUE : LNBool.FALSE;
 			}
 
 			if (opcode == 0) {
-				int level = Spec.getLevel(expr, con);
+				int level = Specs.getLevel(expr, con);
 				if (level > 2) {
 					Assert.fail(EC.TLC_LIVE_CANNOT_HANDLE_FORMULA, expr.toString());
 				}
@@ -139,7 +140,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		{
 			ExprNode body = (ExprNode) args[0];
 			try {
-				ContextEnumerator Enum = tool.contexts(expr, con, TLCState.Empty, TLCState.Empty, EvalControl.Clear);
+				IContextEnumerator Enum = tool.contexts(expr, con, TLCState.Empty, TLCState.Empty, EvalControl.Clear);
 				Context con1;
 				LNDisj res = new LNDisj(0);
 				while ((con1 = Enum.nextElement()) != null) {
@@ -154,7 +155,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 			} catch (Exception e) {
 				// Catching Exception here seem dangerous
 				// Assert.printStack(e);
-				int level = Spec.getLevel(expr, con);
+				int level = Specs.getLevel(expr, con);
 				if (level > 2) {
 					Assert.fail(EC.TLC_LIVE_CANNOT_HANDLE_FORMULA, expr.toString());
 					;
@@ -166,7 +167,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		{
 			ExprNode body = (ExprNode) args[0];
 			try {
-				ContextEnumerator Enum = tool.contexts(expr, con, TLCState.Empty, TLCState.Empty, EvalControl.Clear);
+				IContextEnumerator Enum = tool.contexts(expr, con, TLCState.Empty, TLCState.Empty, EvalControl.Clear);
 				Context con1;
 				LNConj res = new LNConj(0);
 				while ((con1 = Enum.nextElement()) != null) {
@@ -181,7 +182,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 			} catch (Exception e) {
 				// Catching Exception here seem dangerous
 				// Assert.printStack(e);
-				int level = Spec.getLevel(expr, con);
+				int level = Specs.getLevel(expr, con);
 				if (level > 2) {
 					if (e instanceof Assert.TLCRuntimeException) {
 						Assert.fail(EC.TLC_LIVE_CANNOT_HANDLE_FORMULA, new String[] {expr.toString(), e.getMessage()});
@@ -221,17 +222,17 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		case OPCODE_fa: // FcnApply
 		{
 			try {
-				Value fval = tool.eval(args[0], con, TLCState.Empty);
-				if (fval instanceof FcnLambdaValue) {
-					FcnLambdaValue fcn = (FcnLambdaValue) fval;
-					if (fcn.fcnRcd == null) {
+				IValue fval = tool.eval(args[0], con, TLCState.Empty);
+				if (fval instanceof IFcnLambdaValue) {
+					IFcnLambdaValue fcn = (IFcnLambdaValue) fval;
+					if (!fcn.hasRcd()) {
 						// this could be a bug, since con1 is created but not
 						// used
 						// SZ Jul 13, 2009: removed to kill the warning
 						// SZ Feb 20, 2009: variable never read locally
 						// Context con1 =
 						tool.getFcnContext(fcn, args, con, TLCState.Empty, TLCState.Empty, EvalControl.Clear);
-						return astToLive(tool, (ExprNode) fcn.body, con);
+						return astToLive(tool, (ExprNode) fcn.getBody(), con);
 					}
 				}
 			} catch (Exception e) { /* SKIP */
@@ -315,6 +316,12 @@ public class Liveness implements ToolGlobals, ASTConstants {
 			LiveExprNode lnArg = astToLive(tool, (ExprNode) args[0], con);
 			return new LNEven(lnArg);
 		}
+		case OPCODE_aa: { // AngleAct <A>_e
+			assert Specs.getLevel(expr, con) == 2;
+			final ExprNode body = (ExprNode) args[0]; // the A in <<A>>_e
+			final ExprNode subs = (ExprNode) args[1]; // the e in <<A>>_e
+			return new LNAction(body, con, subs, false);
+		}
 
 		// The following case added by LL on 13 Nov 2009 to handle subexpression
 		// names.
@@ -322,11 +329,23 @@ public class Liveness implements ToolGlobals, ASTConstants {
 			return astToLive(tool, (ExprNode) args[0], con);
 		}
 		default: {
-			// We handle all the other built-in operators here.
-			int level = Spec.getLevel(expr, con);
+			// We handle all the other built-in operators here. Surprisingly, even OPCODE_aa
+			// (AngleAct <A>_e) is handled here and not as the dedicated case statement below
+			// such that e gets passed as subscript to LNAction:
+			//
+			//		case OPCODE_aa: { // AngleAct <A>_e
+			//			assert Spec.getLevel(expr, con) == 2;
+			//			final ExprNode body = (ExprNode) args[0]; // the A in <<A>>_e
+			//			final ExprNode subscript = (ExprNode) args[1]; // the e in <<A>>_e
+			//			return new LNAction(body, con, subscript, false);
+			//		}
+			//
+			// The default handling here results in LNAction#subscript to be null skipping
+			// the subscript related branch in LNAction#eval(Tool, TLCState, TLCState). This
+			// poses no problem though because Tool#evalAppl eventually checks if e' = e.
+			int level = Specs.getLevel(expr, con);
 			if (level > 2) {
 				Assert.fail(EC.TLC_LIVE_CANNOT_HANDLE_FORMULA, expr.toString());
-				;
 			}
 			return astToLive(tool, expr, con, level);
 		}
@@ -337,7 +356,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 	 * Parse the temporals and impliedTemporals given in the config file. It
 	 * returns null if there is nothing to check.
 	 */
-	private static LiveExprNode parseLiveness(Tool tool) {
+	private static LiveExprNode parseLiveness(ITool tool) {
 		Action[] fairs = tool.getTemporals();
 		LNConj lnc = new LNConj(fairs.length);
 		for (int i = 0; i < fairs.length; i++) {
@@ -411,7 +430,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 	 * <i>fairness</i> formulae where check1, check2, ... are the actual
 	 * <i>liveness properties</i> to be checked.
 	 */
-	public static OrderOfSolution[] processLiveness(Tool tool) {
+	public static OrderOfSolution[] processLiveness(final ITool tool) {
 		LiveExprNode lexpr = parseLiveness(tool);
 
 		if (lexpr == null) {
@@ -471,7 +490,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		// up \/ and /\ above them. tfbin contains the different tf's.
 		// pembin is a vect of vect-of-pems collecting each tf's pems.
 		final TBPar tfbin = new TBPar(dnf.getCount());
-		final Vect pembin = new Vect(dnf.getCount());
+		final Vect<Vect<OSExprPem>> pembin = new Vect<>(dnf.getCount());
 		for (int i = 0; i < dnf.getCount(); i++) {
 			int found = -1;
 			final LiveExprNode tf = tfs[i];
@@ -484,9 +503,9 @@ public class Liveness implements ToolGlobals, ASTConstants {
 			if (found == -1) {
 				found = tfbin.size();
 				tfbin.addElement(tf);
-				pembin.addElement(new Vect());
+				pembin.addElement(new Vect<OSExprPem>());
 			}
-			((Vect) pembin.elementAt(found)).addElement(pems[i]);
+			((Vect<OSExprPem>) pembin.elementAt(found)).addElement(pems[i]);
 		}
 
 		// We then create an OrderOfSolution for each tf in tfbin.
@@ -495,12 +514,12 @@ public class Liveness implements ToolGlobals, ASTConstants {
 			final LiveExprNode tf = tfbin.exprAt(i);
 
 			if (tf == null) {
-				oss[i] = new OrderOfSolution(new LNEven[0], tool);
+				oss[i] = new OrderOfSolution(new LNEven[0]);
 			} else {
 				final LiveExprNode tf1 = tf.makeBinary();
 				final TBPar promises = new TBPar(10);
 				tf1.extractPromises(promises);
-				oss[i] = new OrderOfSolution(new TBGraph(tf1), new LNEven[promises.size()], tool);
+				oss[i] = new OrderOfSolution(new TBGraph(tf1), new LNEven[promises.size()]);
 				for (int j = 0; j < promises.size(); j++) {
 					oss[i].getPromises()[j] = (LNEven) promises.exprAt(j);
 				}
@@ -508,9 +527,9 @@ public class Liveness implements ToolGlobals, ASTConstants {
 
 			// We lump all the pems into a single checkState and checkAct,
 			// and oss[i].pems will simply be integer lookups into them.
-			final Vect stateBin = new Vect();
-			final Vect actionBin = new Vect();
-			final Vect tfPems = (Vect) pembin.elementAt(i);
+			final Vect<LiveExprNode> stateBin = new Vect<>();
+			final Vect<LiveExprNode> actionBin = new Vect<>();
+			final Vect<OSExprPem> tfPems = (Vect<OSExprPem>) pembin.elementAt(i);
 			oss[i].setPems(new PossibleErrorModel[tfPems.size()]);
 			for (int j = 0; j < tfPems.size(); j++) {
 				final OSExprPem pem = (OSExprPem) tfPems.elementAt(j);
@@ -538,7 +557,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 	 * Given a list of checks, ensures that the checks are in the bin. It
 	 * returns an array of index of the checks in the bin.
 	 */
-	private static int addToBin(LiveExprNode check, Vect bin) {
+	private static int addToBin(LiveExprNode check, Vect<LiveExprNode> bin) {
 		if (check == null) {
 			return -1;
 		}
@@ -556,7 +575,7 @@ public class Liveness implements ToolGlobals, ASTConstants {
 		return idx;
 	}
 
-	private static int[] addToBin(Vect checks, Vect bin) {
+	private static int[] addToBin(Vect<LiveExprNode> checks, Vect<LiveExprNode> bin) {
 		int[] index = new int[checks.size()];
 		for (int i = 0; i < checks.size(); i++) {
 			LiveExprNode check = (LiveExprNode) checks.elementAt(i);
@@ -625,16 +644,16 @@ public class Liveness implements ToolGlobals, ASTConstants {
 	 * PossibleErrorModel and OrderOfSolution.
 	 */
 	private static class OSExprPem {
-		Vect EAAction; // <>[]action's
-		Vect AEState; // []<>state's
-		Vect AEAction; // []<>action's
-		Vect tfs; // other temp formulae with no actions
+		Vect<LiveExprNode> EAAction; // <>[]action's
+		Vect<LiveExprNode> AEState; // []<>state's
+		Vect<LiveExprNode> AEAction; // []<>action's
+		Vect<LiveExprNode> tfs; // other temp formulae with no actions
 
 		public OSExprPem() {
-			this.EAAction = new Vect();
-			this.AEState = new Vect();
-			this.AEAction = new Vect();
-			this.tfs = new Vect();
+			this.EAAction = new Vect<>();
+			this.AEState = new Vect<>();
+			this.AEAction = new Vect<>();
+			this.tfs = new Vect<>();
 		}
 	}
 

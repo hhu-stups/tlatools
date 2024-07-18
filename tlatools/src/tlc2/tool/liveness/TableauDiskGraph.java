@@ -30,6 +30,7 @@ import java.io.IOException;
 
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.tool.ITool;
 import tlc2.util.LongVec;
 import tlc2.util.MemIntQueue;
 import tlc2.util.statistics.IBucketStatistics;
@@ -69,7 +70,7 @@ public class TableauDiskGraph extends AbstractDiskGraph {
 	 * long as it has been recorded with recordNode().
 	 * <p>
 	 * A node is logically undone when it's an initial state and added via
-	 * {@link LiveCheck#addInitState(tlc2.tool.TLCState, long)} but not yet
+	 * {@link LiveCheck#addInitState(ITool, tlc2.tool.TLCState, long)} but not yet
 	 * added via
 	 * {@link LiveCheck#addNextState(tlc2.tool.TLCState, long, tlc2.tool.StateVec, LongVec)}
 	 * . A second case is when a successor node in the behavior graph is added
@@ -264,9 +265,11 @@ public class TableauDiskGraph extends AbstractDiskGraph {
 	}
 
 	/* (non-Javadoc)
-	 * @see tlc2.tool.liveness.AbstractDiskGraph#toDotViz(int, int)
+	 * @see tlc2.tool.liveness.AbstractDiskGraph#toDotViz(tlc2.tool.liveness.OrderOfSolution)
 	 */
-	public final String toDotViz(final int slen, final int alen) {
+	public final String toDotViz(final OrderOfSolution oos) {
+		final int slen = oos.getCheckState().length;
+		final int alen = oos.getCheckAction().length;
 
 		// The following code relies on gnodes not being null, thus safeguard
 		// against accidental invocations.
@@ -282,6 +285,9 @@ public class TableauDiskGraph extends AbstractDiskGraph {
 			sb.append("digraph DiskGraph {\n");
 			sb.append("nodesep = 0.7\n");
 			sb.append("rankdir=LR;\n"); // Left to right rather than top to bottom
+			sb.append(toDotVizLegend(oos));
+			sb.append("subgraph cluster_graph {\n"); 
+	        sb.append("color=\"white\";\n"); // no border.
 			//TODO Reading the file front to end potentially yields node duplicates in the output. Better to create a (temporary) nodeptrtable and traverse it instead.
 			long nodePtr = this.nodeRAF.getFilePointer();
 			long nodePtrPtr = this.nodePtrRAF.getFilePointer();
@@ -294,7 +300,7 @@ public class TableauDiskGraph extends AbstractDiskGraph {
 				GraphNode gnode = this.getNode(fp, tidx, loc);
 				sb.append(gnode.toDotViz(isInitState(gnode), true, slen, alen));
 			}
-			sb.append("}");
+			sb.append("}}");
 			this.nodeRAF.seek(nodePtr);
 			this.nodePtrRAF.seek(nodePtrPtr);
 		} catch (IOException e) {

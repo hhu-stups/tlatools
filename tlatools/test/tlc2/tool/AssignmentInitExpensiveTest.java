@@ -44,5 +44,7 @@ public class AssignmentInitExpensiveTest extends ModelCheckerTestCase {
 		assertTrue(recorder.recorded(EC.TLC_FINISHED));
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "10002", "1", "0"));
+
+	assertZeroUncovered();
 	}
 }

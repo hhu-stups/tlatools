@@ -7,7 +7,6 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
-import tla2sany.modanalyzer.SpecObj;
 import tla2sany.semantic.ExprNode;
 import tla2sany.semantic.OpDeclNode;
 import tlc2.TLCGlobals;
@@ -19,10 +18,8 @@ import tlc2.tool.liveness.LiveException;
 import tlc2.util.IStateWriter;
 import tlc2.util.IdThread;
 import tlc2.util.LongVec;
-import tlc2.util.ObjLongTable;
 import tlc2.util.SetOfStates;
 import util.FileUtil;
-import util.FilenameToStream;
 import util.UniqueString;
 
 /** 
@@ -42,20 +39,28 @@ public class DFIDModelChecker extends AbstractChecker
     public FPIntSet theFPSet; // the set of reachable states (SZ: note the type)
     private final AtomicLong numOfGenStates;
 
+	protected final ThreadLocal<Integer> threadLocal = new ThreadLocal<Integer>() {
+		protected Integer initialValue() {
+			return 1;
+		}
+	};
+
+	protected static final int INITIAL_CAPACITY = 16;
+
     /** 
      * Constructor for running DFID   
+     * @param startTime 
      * @param resolver 
      */
-    public DFIDModelChecker(String specFile, String configFile, String metadir, final IStateWriter stateWriter, boolean deadlock, String fromChkpt,
-            boolean preprocess, FilenameToStream resolver, SpecObj specObj) throws EvalException, IOException
-    {
+	public DFIDModelChecker(ITool tool, String metadir, final IStateWriter stateWriter,
+			boolean deadlock, String fromChkpt, long startTime) throws EvalException, IOException {
         // call the abstract constructor
-        super(specFile, configFile, metadir, stateWriter, deadlock, fromChkpt, preprocess, resolver, specObj);
+        super(tool, metadir, stateWriter, deadlock, fromChkpt, startTime);
 
         this.theInitStates = null;
         this.theInitFPs = null;
         this.theFPSet = new MemFPIntSet(); // init the state set
-        this.theFPSet.init(TLCGlobals.getNumWorkers(), this.metadir, specFile);
+        this.theFPSet.init(TLCGlobals.getNumWorkers(), this.metadir, this.tool.getRootFile());
 
         // Initialize all the workers:
         this.workers = new DFIDWorker[TLCGlobals.getNumWorkers()];
@@ -66,15 +71,22 @@ public class DFIDModelChecker extends AbstractChecker
      * This method does model checking on a TLA+ spec. All the visited
      * states are stored in the variable theFPSet.
      */
-    public void modelCheck() throws Exception
+	@Override
+    protected int modelCheckImpl() throws Exception
     {
+		int result = EC.NO_ERROR;
         boolean recovered = this.recover();
         try
         {
-            if (!this.checkAssumptions())
-                return;
-            if (!this.doInit(false))
-                return;
+			if (this.checkLiveness && liveCheck.getNumChecker() == 0) {
+				return MP.printError(EC.TLC_LIVE_FORMULA_TAUTOLOGY);
+			}
+			result = this.checkAssumptions();
+            if (result != EC.NO_ERROR)
+                return result;
+            result = this.doInit(false);
+            if (result != EC.NO_ERROR)
+                return result;
         } catch (Throwable e)
         {
             // Initial state computation fails with an exception:
@@ -94,11 +106,11 @@ public class DFIDModelChecker extends AbstractChecker
                 this.doInit(true);
             } catch (Throwable e1)
             {
-                MP.printError(EC.TLC_NESTED_EXPRESSION, this.tool.getCallStack().toString());
+                result = MP.printError(EC.TLC_NESTED_EXPRESSION, this.tool.getCallStack().toString());
             }
             this.printSummary(false);
             this.cleanup(false);
-            return;
+            return result;
         }
 
         if (recovered)
@@ -112,15 +124,15 @@ public class DFIDModelChecker extends AbstractChecker
         }
 
         // Return if there is no next state predicate:
-        if (this.actions.length == 0)
+        if (this.tool.getActions().length == 0)
         {
             this.reportSuccess();
             this.printSummary(true);
             this.cleanup(true);
-            return;
+            return result;
         }
 
-        boolean success = false;
+        result = EC.GENERAL;
         try
         {
             boolean terminated = false;
@@ -142,13 +154,13 @@ public class DFIDModelChecker extends AbstractChecker
 									String.valueOf(this.numOfGenStates), String.valueOf(theFPSet.size()) });
                             // SZ Jul 10, 2009: what for?
                             // ToolIO.out.flush();
-                            success = liveCheck.finalCheck();
-                            if (!success)
-                                return;
+                            result = liveCheck.finalCheck(tool);
+                            if (result != EC.NO_ERROR)
+                                return result;
                         }
 
                         // We get here because the checking has been completed.
-                        success = true;
+                        result = EC.NO_ERROR;
                         this.reportSuccess();
                     } else if (this.keepCallStack)
                     {
@@ -156,7 +168,7 @@ public class DFIDModelChecker extends AbstractChecker
                         this.tool.setCallStack();
                         try
                         {
-                            this.doNext(this.predErrState, this.predErrState.fingerPrint(), true, new ObjLongTable(10),
+                            this.doNext(this.predErrState, this.predErrState.fingerPrint(), true,
                                     new StateVec(1), new LongVec());
                         } catch (Throwable e)
                         {
@@ -171,12 +183,12 @@ public class DFIDModelChecker extends AbstractChecker
                         String.valueOf(this.numOfGenStates), String.valueOf(this.theFPSet.size()) });
 
                 FPIntSet.incLevel();
-                success = this.runTLC(level);
+                result = this.runTLC(level);
 				// Recent done flag before after the workers have checked the
 				// current level in preparation for the next level.
                 this.done = false;
-                if (!success)
-                    return;
+                if (result != EC.NO_ERROR)
+                    return result;
 
                 // Check if we should stop at this level:
                 for (int i = 0; i < this.workers.length; i++)
@@ -198,16 +210,21 @@ public class DFIDModelChecker extends AbstractChecker
                 }
                 terminated = terminated || !moreLevel;
             }
+            return result;
         } catch (Exception e)
         {
             // Assert.printStack(e);
-            success = false;
-            if (!(e instanceof LiveException))
+            if (e instanceof LiveException)
             {
-                MP.printError(EC.GENERAL, e);  // LL changed call 7 April 2012
+                result = ((LiveException)e).errorCode;
+            } else
+            {
+                result = MP.printError(EC.GENERAL, e);  // LL changed call 7 April 2012
             }
+            return result;
         } finally
         {
+        	final boolean success = result == EC.NO_ERROR;
             this.printSummary(success);
             this.cleanup(success);
         }
@@ -215,7 +232,7 @@ public class DFIDModelChecker extends AbstractChecker
 
     /* Check the assumptions.  
      * This code is a clone of the same method in ModelChecker */
-    public final boolean checkAssumptions()
+    public final int checkAssumptions()
     {
         ExprNode[] assumps = this.tool.getAssumptions();
         boolean[] isAxiom = this.tool.getAssumptionIsAxiom();
@@ -225,23 +242,21 @@ public class DFIDModelChecker extends AbstractChecker
             {
                 if ((!isAxiom[i]) && !this.tool.isValid(assumps[i]))
                 {
-                    MP.printError(EC.TLC_ASSUMPTION_FALSE, assumps[i].toString());
-                    return false;
+                    return MP.printError(EC.TLC_ASSUMPTION_FALSE, assumps[i].toString());
                 }
             } catch (Exception e)
             {
                 // Assert.printStack(e);
-                MP.printError(EC.TLC_ASSUMPTION_EVALUATION_ERROR,
+                return MP.printError(EC.TLC_ASSUMPTION_EVALUATION_ERROR,
                         new String[] { assumps[i].toString(), e.getMessage() });
-                return false;
             }
         }
-        return true;
+        return EC.NO_ERROR;
     }
 
     /* Compute the set of initial states.  */
     // SZ Feb 23, 2009: added ignore cancel flag
-    public final boolean doInit(boolean ignoreCancel) throws Throwable
+    public final int doInit(boolean ignoreCancel) throws Throwable
     {
         TLCState curState = null;
         try
@@ -260,8 +275,7 @@ public class DFIDModelChecker extends AbstractChecker
                 // Check if the state is a legal state
                 if (!this.tool.isGoodState(curState))
                 {
-                    MP.printError(EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_INITIAL, curState.toString());
-                    return false;
+                    return MP.printError(EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_INITIAL, curState.toString());
                 }
                 boolean inModel = this.tool.isInModel(curState);
                 int status = FPIntSet.NEW;
@@ -280,32 +294,31 @@ public class DFIDModelChecker extends AbstractChecker
                         // build behavior graph for liveness checking
                         if (this.checkLiveness)
                         {
-                            liveCheck.addInitState(curState, fp);
+                            liveCheck.addInitState(tool, curState, fp);
                         }
                     }
                 }
                 // Check properties of the state:
                 if (status == FPIntSet.NEW)
                 {
-                    for (int j = 0; j < this.invariants.length; j++)
+                    for (int j = 0; j < this.tool.getInvariants().length; j++)
                     {
-                        if (!this.tool.isValid(this.invariants[j], curState))
+                        if (!this.tool.isValid(this.tool.getInvariants()[j], curState))
                         {
                             // We get here because of invariant violation:
                             MP.printError(EC.TLC_INVARIANT_VIOLATED_INITIAL, new String[] { this.tool.getInvNames()[j],
                                     curState.toString() });
                             if (!TLCGlobals.continuation)
-                                return false;
+                                return EC.TLC_INVARIANT_VIOLATED_INITIAL;
                         }
                     }
-                    for (int j = 0; j < this.impliedInits.length; j++)
+                    for (int j = 0; j < this.tool.getImpliedInits().length; j++)
                     {
-                        if (!this.tool.isValid(this.impliedInits[j], curState))
+                        if (!this.tool.isValid(this.tool.getImpliedInits()[j], curState))
                         {
                             // We get here because of implied-inits violation:
-                            MP.printError(EC.TLC_PROPERTY_VIOLATED_INITIAL, new String[] {
+                            return MP.printError(EC.TLC_PROPERTY_VIOLATED_INITIAL, new String[] {
                                     this.tool.getImpliedInitNames()[j], curState.toString() });
-                            return false;
                         }
                     }
                 }
@@ -326,13 +339,12 @@ public class DFIDModelChecker extends AbstractChecker
             // Assert.printStack(e);
             if (e instanceof OutOfMemoryError)
             {
-                MP.printError(EC.SYSTEM_OUT_OF_MEMORY_TOO_MANY_INIT);
-                return false;
+                return MP.printError(EC.SYSTEM_OUT_OF_MEMORY_TOO_MANY_INIT);
             }
             this.errState = curState;
             throw e;
         }
-        return true;
+        return EC.NO_ERROR;
     }
 
     /**
@@ -342,7 +354,7 @@ public class DFIDModelChecker extends AbstractChecker
      * not been done in nextStates.  Return true if it finds a leaf
      * successor of curState.
      */
-    public final boolean doNext(TLCState curState, long cfp, boolean isLeaf, ObjLongTable counts, StateVec states,
+    public final boolean doNext(TLCState curState, long cfp, boolean isLeaf, StateVec states,
             LongVec fps) throws Throwable
     {
         boolean deadLocked = true;
@@ -359,9 +371,9 @@ public class DFIDModelChecker extends AbstractChecker
             int k = 0;
             boolean allSuccDone = true;
             boolean allSuccNonLeaf = true;
-            for (int i = 0; i < this.actions.length; i++)
+            for (int i = 0; i < this.tool.getActions().length; i++)
             {
-                StateVec nextStates = this.tool.getNextStates(this.actions[i], curState);
+                StateVec nextStates = this.tool.getNextStates(this.tool.getActions()[i], curState);
                 int sz = nextStates.size();
                 this.numOfGenStates.getAndAdd(sz);
                 deadLocked = deadLocked && (sz == 0);
@@ -373,29 +385,24 @@ public class DFIDModelChecker extends AbstractChecker
                     if (!this.tool.isGoodState(succState))
                     {
 						synchronized (this) {
-							if (this.setErrState(curState, succState, false)) {
+                            final int errorCode = EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT;
+							if (this.setErrState(curState, succState, false, errorCode)) {
 								final Set<OpDeclNode> unassigned = succState.getUnassigned();
 								String[] parameters;
-								if (this.actions.length == 1) {
+								if (this.tool.getActions().length == 1) {
 									parameters = new String[] { unassigned.size() > 1 ? "s are" : " is",
 											unassigned.stream().map(n -> n.getName().toString())
 													.collect(Collectors.joining(", ")) };
 								} else {
-									parameters = new String[] { this.actions[i].getName().toString(),
+									parameters = new String[] { this.tool.getActions()[i].getName().toString(),
 											unassigned.size() > 1 ? "s are" : " is",
 											unassigned.stream().map(n -> n.getName().toString())
 													.collect(Collectors.joining(", ")) };
 								}
-								this.printTrace(EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT,
-										parameters, curState, succState);
+								this.printTrace(errorCode, parameters, curState, succState);
 							}
 						}
                         return allSuccNonLeaf;
-                    }
-
-                    if (TLCGlobals.coverageInterval >= 0)
-                    {
-                        ((TLCStateMutSource) succState).addCounts(counts);
                     }
 
                     boolean inModel = (this.tool.isInModel(succState) && this.tool.isInActions(curState, succState));
@@ -429,10 +436,10 @@ public class DFIDModelChecker extends AbstractChecker
                     {
                         try
                         {
-                            int len = this.invariants.length;
+                            int len = this.tool.getInvariants().length;
                             for (k = 0; k < len; k++)
                             {
-                                if (!tool.isValid(this.invariants[k], succState))
+                                if (!tool.isValid(this.tool.getInvariants()[k], succState))
                                 {
                                     // We get here because of invariant violation:
                                     synchronized (this)
@@ -444,7 +451,7 @@ public class DFIDModelChecker extends AbstractChecker
                                             break;
                                         } else
                                         {
-                                            if (this.setErrState(curState, succState, false))
+                                            if (this.setErrState(curState, succState, false, EC.TLC_INVARIANT_VIOLATED_BEHAVIOR))
                                             {
                                                 this.printTrace(EC.TLC_INVARIANT_VIOLATED_BEHAVIOR,
                                                         new String[] { this.tool.getInvNames()[k] }, curState,
@@ -461,7 +468,7 @@ public class DFIDModelChecker extends AbstractChecker
                         } catch (Exception e)
                         {
                         	synchronized (this) {
-		                        if (this.setErrState(curState, succState, true))
+		                        if (this.setErrState(curState, succState, true, EC.TLC_INVARIANT_EVALUATION_FAILED))
 		                        {
 		                            this.printTrace(EC.TLC_INVARIANT_EVALUATION_FAILED, new String[] { this.tool
 		                                    .getInvNames()[k] }, curState, succState);
@@ -475,10 +482,10 @@ public class DFIDModelChecker extends AbstractChecker
                     // even if succState is not new.
                     try
                     {
-                        int len = this.impliedActions.length;
+                        int len = this.tool.getImpliedActions().length;
                         for (k = 0; k < len; k++)
                         {
-                            if (!tool.isValid(this.impliedActions[k], curState, succState))
+                            if (!tool.isValid(this.tool.getImpliedActions()[k], curState, succState))
                             {
                                 // We get here because of implied-action violation:
                                 synchronized (this)
@@ -492,9 +499,8 @@ public class DFIDModelChecker extends AbstractChecker
                                         break;
                                     } else
                                     {
-                                        if (this.setErrState(curState, succState, false))
+                                        if (this.setErrState(curState, succState, false, EC.TLC_ACTION_PROPERTY_VIOLATED_BEHAVIOR))
                                         {
-
                                             this.printTrace(EC.TLC_ACTION_PROPERTY_VIOLATED_BEHAVIOR,
                                                     new String[] { this.tool.getImpliedActNames()[k] }, curState,
                                                     succState);
@@ -510,7 +516,7 @@ public class DFIDModelChecker extends AbstractChecker
                     } catch (Exception e)
                     {
                     	synchronized (this) {
-		                    if (this.setErrState(curState, succState, true))
+		                    if (this.setErrState(curState, succState, true, EC.TLC_ACTION_PROPERTY_EVALUATION_FAILED))
 		                    {
 		                        this.printTrace(EC.TLC_ACTION_PROPERTY_EVALUATION_FAILED, new String[] { this.tool
 		                                .getImpliedActNames()[k] }, curState, succState);
@@ -530,7 +536,7 @@ public class DFIDModelChecker extends AbstractChecker
             {
                 synchronized (this)
                 {
-                    if (this.setErrState(curState, null, false))
+                    if (this.setErrState(curState, null, false, EC.TLC_DEADLOCK_REACHED))
                     {
                         this.printTrace(EC.TLC_DEADLOCK_REACHED, null, curState, null);
                         this.notify();
@@ -547,7 +553,7 @@ public class DFIDModelChecker extends AbstractChecker
                 liveNextStates.put(curStateFP, curState);
             	this.allStateWriter.writeState(curState, curState, true, IStateWriter.Visualization.STUTTERING);
                 // Add curState to the behavior graph:
-                liveCheck.addNextState(curState, curStateFP, liveNextStates);
+                liveCheck.addNextState(tool, curState, curStateFP, liveNextStates);
 
 				// Poor man's version of a controller. If necessary, try e.g.
 				// PID controller instead.
@@ -573,19 +579,23 @@ public class DFIDModelChecker extends AbstractChecker
             boolean keep = ((e instanceof StackOverflowError) || (e instanceof OutOfMemoryError));
             synchronized (this)
             {
-                if (this.setErrState(curState, succState, !keep))
+                final int errorCode;
+                if (e instanceof StackOverflowError)
+                {
+                    errorCode = EC.SYSTEM_STACK_OVERFLOW;
+                } else if (e instanceof OutOfMemoryError)
+                {
+                    errorCode = EC.SYSTEM_OUT_OF_MEMORY;
+                } else
+                {
+                    errorCode = EC.GENERAL;
+                }
+
+                if (this.setErrState(curState, succState, !keep, errorCode))
                 {
                     String[] parameters = null;
-                    int errorCode;
-                    if (e instanceof StackOverflowError)
+                    if (errorCode == EC.GENERAL)
                     {
-                        errorCode = EC.SYSTEM_STACK_OVERFLOW;
-                    } else if (e instanceof OutOfMemoryError)
-                    {
-                        errorCode = EC.SYSTEM_OUT_OF_MEMORY;
-                    } else
-                    {
-                        errorCode = EC.GENERAL;
                         // LL changed error message on 7 April 2012
                         parameters = new String[] { 
                                 MP.ECGeneralMsg("computing the set of next states", e) }; 
@@ -607,9 +617,9 @@ public class DFIDModelChecker extends AbstractChecker
      * Set the error state. 
      * <strong>Note:</note> this method must be protected by lock 
      */
-    public boolean setErrState(TLCState curState, TLCState succState, boolean keep)
+    public boolean setErrState(TLCState curState, TLCState succState, boolean keep, int errorCode)
     {
-        boolean result = super.setErrState(curState, succState, keep);
+        boolean result = super.setErrState(curState, succState, keep, errorCode);
         if (!result)
         {
             return false;
@@ -638,16 +648,18 @@ public class DFIDModelChecker extends AbstractChecker
      * Checkpoint: checkpoint three data structures: the state set, the
      *             state queue, and the state trace.
      */
-    public final boolean doPeriodicWork() throws Exception
+    @Override
+    public final int doPeriodicWork() throws Exception
     {
         synchronized (this.theFPSet)
         {
             // Run liveness checking, if needed:
             if (this.checkLiveness)
             {
-                if (!liveCheck.check(false))
+                final int result = liveCheck.check(tool, false);
+                if (result != EC.NO_ERROR)
                 {
-                    return false;
+                    return result;
                 }
             }
 
@@ -672,7 +684,7 @@ public class DFIDModelChecker extends AbstractChecker
             	MP.printMessage(EC.TLC_CHECKPOINT_END);
             }
         }
-        return true;
+        return EC.NO_ERROR;
     }
 
     public final boolean recover() throws IOException

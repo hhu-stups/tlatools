@@ -31,8 +31,11 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+
 import org.junit.Test;
+
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 
 /**
  * see http://tlaplus.codeplex.com/workitem/8
@@ -40,7 +43,7 @@ import tlc2.output.EC;
 public class CodePlexBug08aTest extends ModelCheckerTestCase {
 
 	public CodePlexBug08aTest() {
-		super("MCa", "CodePlexBug08");
+		super("MCa", "CodePlexBug08", ExitStatus.VIOLATION_LIVENESS);
 	}
 	
 	@Test
@@ -71,5 +74,7 @@ public class CodePlexBug08aTest extends ModelCheckerTestCase {
 		
 		// Assert the error trace contains a stuttering step at position 5
 		assertStuttering(9);
+
+	assertZeroUncovered();
 	}
 }

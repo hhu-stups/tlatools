@@ -42,5 +42,7 @@ public class TLCSetInitTest extends ModelCheckerTestCase {
 	@Test
 	public void testSpec() {
 		assertFalse(recorder.recorded(EC.GENERAL));
+
+	assertZeroUncovered();
 	}
 }

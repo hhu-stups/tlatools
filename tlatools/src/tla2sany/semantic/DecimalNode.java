@@ -5,12 +5,13 @@ package tla2sany.semantic;
 import java.math.BigDecimal;
 import java.util.Hashtable;
 
-import tla2sany.explorer.ExploreNode;
-import tla2sany.st.TreeNode;
-import tla2sany.xml.SymbolContext;
-
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+
+import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
+import tla2sany.st.TreeNode;
+import tla2sany.xml.SymbolContext;
 
 /**
  * Describes a decimal like 1347.052.  This number is represented by the
@@ -114,11 +115,13 @@ public class DecimalNode extends ExprNode {
    * Explorer tool.
    */
   @Override
-  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable) {
-    Integer uid = new Integer(myUID);
+  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
 
     semNodesTable.put(uid, this);
+    visitor.preVisit(this);
+    visitor.postVisit(this);
   }
 
   /**

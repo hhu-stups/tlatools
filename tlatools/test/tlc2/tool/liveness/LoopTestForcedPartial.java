@@ -31,8 +31,11 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+
 import org.junit.Test;
+
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 import tlc2.tool.AbstractChecker;
 
 /**
@@ -47,7 +50,7 @@ public class LoopTestForcedPartial extends ModelCheckerTestCase {
 	}
 	
 	public LoopTestForcedPartial() {
-		super("SystemLoop", "Loop");
+		super("SystemLoop", "Loop", ExitStatus.VIOLATION_LIVENESS);
 	}
 
 	@Test
@@ -70,5 +73,7 @@ public class LoopTestForcedPartial extends ModelCheckerTestCase {
 		
 		// Stuttering after the init state.
 		assertStuttering(2);
+
+	assertZeroUncovered();
 	}
 }

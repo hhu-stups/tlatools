@@ -12,7 +12,25 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
-import sun.misc.Unsafe;
+/*
+ * On Java 11 (probably starting with 9) sun.misc.Unsafe is implemented on top
+ * of jdk.internal.misc.Unsafe which provides a similar though not quiet
+ * identical API.  While sun.misc.Unsafe remains available to client code such
+ * as LongArray in Java 11, parts of its API have already been dissolved
+ * (see e.g. https://bugs.openjdk.java.net/browse/JDK-8202999).  This does not
+ * affect LongArray yet, but will probably affect LongArray in the future. 
+ * Refactoring LongArray to replace sun.misc.Unsafe with jdk.internal.misc.Unsafe
+ * requires the following changes:
+ * - Replace sun.misc.Unsafe with jdk.internal.misc.Unsafe
+ * - Change Unsafe#compareAndSwapLong with Unsafe#compareAndSetLong in LongArray#trySet
+ * - Run LongArray on Java 11 with "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED"
+ *   to configure Java's module system (Jigsaw) to expose jdk.internal.misc.Unsafe
+ *   to LongArray.
+ * The last requirement is visible to TLA+ users who run tla2tools.jar on the
+ * command-line.  As we do not want to expose JVM parameters to them, we keep
+ * sun.misc.Unsafe for now.
+ */
+import sun.misc.Unsafe; // jdk.internal.misc.Unsafe;
 import tlc2.output.EC;
 import util.Assert;
 import util.TLCRuntime;
@@ -106,6 +124,17 @@ public final class LongArray {
 					"Trying to use Sun VM specific sun.misc.Unsafe implementation but no Sun based VM detected.",
 					e);
 		}
+	}
+
+	/**
+	 * Initializes the memory by overriding each byte with zero starting at
+	 * <code>baseAddress</code> and ending when all positions have been written.
+	 * 
+	 * @throws IOException
+	 */
+	public final void zeroMemory()
+			throws IOException {
+		this.unsafe.setMemory(baseAddress, length * 8L, (byte) 0); // times 8L because it only writes a single byte.
 	}
 	
 	/**
@@ -225,6 +254,17 @@ public final class LongArray {
 		set(position2, tmp);
 	}
 	
+	/*
+	 * Variant of swap that uses copyMemory. This implementation - suprisingly - is
+	 * *not* faster compared to swap above (see LongArrayBenchmark).
+	 */
+	void swapCopy(final long position1, final long position2) {
+		final long tmp = unsafe.getAddress(log2phy(position1));
+		unsafe.copyMemory(log2phy(position2), log2phy(position1), 8L);
+		unsafe.putAddress(log2phy(position2), tmp);
+	}
+
+	
     /**
      * Returns the number of elements in this array.
      *
@@ -261,5 +301,12 @@ public final class LongArray {
             }
             b.append(", ");
         }
+	}
+	
+	public static void main(final String[] args) throws IOException {
+		final long elements = 1L << Integer.valueOf(args[0]);
+		System.out.format("Allocating LongArray with %,d elements.\n", elements);
+		final LongArray longArray = new LongArray(elements);
+		longArray.zeroMemory();
 	}
 }

@@ -46,5 +46,8 @@ public class Euclid3Test extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "97", "94", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "50"));
+
+		assertUncovered("line 38, col 35 to line 38, col 40 of module Euclid3: 0\n" + 
+				"line 39, col 35 to line 39, col 40 of module Euclid3: 0");
 	}
 }

@@ -31,20 +31,20 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 import tlc2.tool.liveness.ModelCheckerTestCase;
 
 public class TestInvalidInvariant extends ModelCheckerTestCase {
 
 	public TestInvalidInvariant() {
-		super("testinvalidinvariant");
+		super("testinvalidinvariant", ExitStatus.FAILURE_SAFETY_EVAL);
 	}
 
 	@Test
 	public void testSpec() {
 		assertTrue(recorder.recorded(EC.TLC_FINISHED));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_INVARIANT_VIOLATED_LEVEL, "Invariant"));
-		assertTrue(recorder.recordedWithSubStringValue(EC.GENERAL,
-				"The invariant Invariant is not a state predicate (one with no primes or temporal operators)."));
+		assertFalse(recorder.recorded(EC.GENERAL));
 		// See LevelNode.java line 590ff and tlc2.tool.Spec.processConfigInvariants().
 		assertFalse(recorder.recordedWithSubStringValue(EC.GENERAL,
 				"Note that a bug can cause TLC to incorrectly report this error."));

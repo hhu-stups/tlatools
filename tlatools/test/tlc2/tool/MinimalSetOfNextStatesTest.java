@@ -47,5 +47,8 @@ public class MinimalSetOfNextStatesTest extends ModelCheckerTestCase {
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_INIT_GENERATED1, "1"));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "57", "7", "0")); // 57 instead of 71.
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "2"));
+
+		assertUncovered("line 33, col 10 to line 33, col 15 of module MinimalSetOfNextStates: 0\n"
+				+ "line 41, col 10 to line 41, col 15 of module MinimalSetOfNextStates: 0\n");
 	}
 }

@@ -30,12 +30,19 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 
 public class ETest9 extends SuiteETestCase {
+
+	public ETest9() {
+		super(ExitStatus.FAILURE_SPEC_EVAL);
+	}
 
 	@Test
 	public void testSpec() {
 		assertTrue(recorder.recordedWithSubStringValue(EC.GENERAL,
 				"Attempted to check if the value:\n\"a\"\nis an element of Nat."));
+
+		assertUncovered("line 13, col 12 to line 13, col 15 of module etest9: 0\n");
 	}
 }

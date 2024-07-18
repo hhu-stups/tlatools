@@ -25,18 +25,31 @@
  ******************************************************************************/
 package tlc2.tool.suite;
 
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertFalse;
 
 import org.junit.Test;
 
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 
 public class Test214 extends SuiteETestCase {
+
+	public Test214() {
+		super(ExitStatus.ERROR_SPEC_PARSE);
+	}
+	
 	@Test
 	public void testSpec() {
-		assertTrue(recorder.recorded(EC.GENERAL));
-		assertSubstring("*** Errors: 1\n\n" 
-		        + "line 10, col 11 to line 10, col 14 of module test214\n\n"
-				+ "The only expression allowed as a fact in a HIDE is");
+		assertFalse(recorder.recorded(EC.GENERAL));
+		assertSubstring("Semantic errors:\n" + 
+				"\n" + 
+				"*** Errors: 1\n" + 
+				"\n" + 
+				"line 10, col 11 to line 10, col 14 of module test214\n" + 
+				"\n" + 
+				"The only expression allowed as a fact in a HIDE is \n" + 
+				"the name of a theorem, assumption, or step.\n" + 
+				"\n" + 
+				"\n");
 	}
 }

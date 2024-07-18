@@ -6,6 +6,7 @@ package tlc2.tool;
 import java.io.IOException;
 
 import tlc2.TLCGlobals;
+import tlc2.output.EC;
 import tlc2.output.StatePrinter;
 import tlc2.tool.fp.FPSet;
 import tlc2.tool.fp.FPSetConfiguration;
@@ -31,15 +32,15 @@ public abstract class CheckImpl extends ModelChecker {
    * @param fpMemSize : This parameter added by Yuan Yu on 6 Apr 2010 
    * because same parameter was added to the ModelChecker constructor. 
    */
-  public CheckImpl(String specFile, String configFile, String metadir, boolean deadlock,
+  public CheckImpl(ITool tool, String metadir, boolean deadlock,
 		   int depth, String fromChkpt, final FPSetConfiguration fpSetConfig)
   throws IOException {
     // SZ Feb 20, 2009: patched due to changes to ModelCheker
-    super(specFile, configFile, metadir, new NoopStateWriter(), deadlock, fromChkpt, null, null, fpSetConfig); // no name resolver and no specobj
+    super(tool, metadir, new NoopStateWriter(), deadlock, fromChkpt, fpSetConfig, System.currentTimeMillis()); // no name resolver and no specobj
     this.depth = depth;
     this.curState = null;
     this.coverSet = FPSetFactory.getFPSet();
-    this.coverSet.init(TLCGlobals.getNumWorkers(), this.metadir, specFile+"_cs");
+    this.coverSet.init(TLCGlobals.getNumWorkers(), this.metadir, tool.getRootFile()+"_cs");
     this.stateEnum = null;
   }
 
@@ -69,10 +70,11 @@ public abstract class CheckImpl extends ModelChecker {
       this.doInit(false);
     }
     ToolIO.out.println("Creating a partial state space of depth " +
-		       this.depth + " ... ");
-    if (!this.runTLC(this.depth)) {
+           this.depth + " ... ");
+    final int result = this.runTLC(this.depth);
+    if (result != EC.NO_ERROR) {
       ToolIO.out.println("\nExit: failed to create the partial state space.");
-      System.exit(1);
+      System.exit(EC.ExitStatus.errorConstantToExitStatus(result));
     }
     ToolIO.out.println("completed.");
     this.lastTraceTime = System.currentTimeMillis();
@@ -93,8 +95,9 @@ public abstract class CheckImpl extends ModelChecker {
     int depth1= this.trace.getLevel(st.uid) + depth;
     this.theStateQueue = new DiskStateQueue(this.metadir);
     this.theStateQueue.enqueue(st);
-    if (!this.runTLC(depth1)) {
-      System.exit(1);
+    final int result = this.runTLC(depth1);
+    if (result != EC.NO_ERROR) {
+      System.exit(EC.ExitStatus.errorConstantToExitStatus(result));
     }
   }
   
@@ -116,9 +119,9 @@ public abstract class CheckImpl extends ModelChecker {
       StatePrinter.printState(s1);
       return false;
     }
-    int cnt = this.impliedActions.length;
+    int cnt = this.tool.getImpliedActions().length;
     for (int i = 0; i < cnt; i++) {
-      if (!this.tool.isValid(this.impliedActions[i], s0, s1)) {
+      if (!this.tool.isValid(this.tool.getImpliedActions()[i], s0, s1)) {
 	ToolIO.out.println("Error: Action property " + this.tool.getImpliedActNames()[i] +
 			   " is violated.");
 	StatePrinter.printState(s0);
@@ -139,12 +142,11 @@ public abstract class CheckImpl extends ModelChecker {
     boolean seen = this.coverSet.put(fp);
     if (!seen) {
       if (!this.theFPSet.contains(fp)) {
-	long loc = this.trace.writeState(this.curState, fp);
-	state.uid = loc;
+      state.uid = this.trace.writeState(this.curState, fp);
 	// Check invariant properties of the state:
-	int cnt = this.invariants.length;
+	int cnt = this.tool.getInvariants().length;
 	for (int j = 0; j < cnt; j++) {
-	  if (!this.tool.isValid(this.invariants[j], state)) {
+	  if (!this.tool.isValid(this.tool.getInvariants()[j], state)) {
 	    // We get here because of invariant violation:
 	    ToolIO.out.println("Error: Invariant " + this.tool.getInvNames()[j] +
 			       " is violated. The behavior up to this point is:");

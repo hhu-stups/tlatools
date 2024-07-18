@@ -7,14 +7,15 @@ package tla2sany.semantic;
 
 import java.util.Hashtable;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
 import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.parser.SyntaxTreeNode;
 import tla2sany.st.TreeNode;
 import tla2sany.xml.SymbolContext;
 import util.UniqueString;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
 
 /**
  * This class represents operators of arity > 0 used as arguments to
@@ -112,11 +113,12 @@ public class OpArgNode extends ExprOrOpArgNode {
 //  }
 
   @Override
-  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable) {
-    Integer uid = new Integer(myUID);
+  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
 
     semNodesTable.put(uid, this);
+    visitor.preVisit(this);
 
     /***********************************************************************
     * Modified on 28 Mar 2007 by LL to walk the operator node of the       *
@@ -126,7 +128,8 @@ public class OpArgNode extends ExprOrOpArgNode {
     * walking the node representing the declaration or definition of the   *
     * operator.                                                            *
     ***********************************************************************/
-    if (op != null) {op.walkGraph(semNodesTable) ;} ;
+    if (op != null) {op.walkGraph(semNodesTable, visitor) ;} ;
+    visitor.postVisit(this);
   }
 
   @Override

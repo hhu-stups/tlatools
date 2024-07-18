@@ -17,8 +17,8 @@
     label="TLA+">
   <setupTask
       xsi:type="jdt:JRETask"
-      version="JavaSE-1.8"
-      location="${jre.location-1.8}">
+      version="JavaSE-11"
+      location="${jre.location-11}">
     <description>Define the JRE needed to compile and run the Java projects of ${scope.project.label}</description>
   </setupTask>
   <setupTask
@@ -52,7 +52,7 @@
   <setupTask
       xsi:type="setup:VariableTask"
       name="eclipse.target.platform"
-      defaultValue="Mars"
+      defaultValue="2018-09"
       storageURI="scope://Workspace"/>
   <setupTask
       xsi:type="setup.p2:P2Task">
@@ -70,7 +70,13 @@
     <requirement
         name="org.eclipse.egit.feature.group"/>
     <requirement
+        name="org.eclipse.e4.tools.spies.feature.feature.group"/>
+    <requirement
         name="com.abstratt.eclipsegraphviz.feature.feature.group"/>
+    <requirement
+        name="org.eclipse.rcptt.platform.feature.group"/>
+    <requirement
+        name="de.loskutov.BytecodeOutline.feature.feature.group"/>
     <repository
         url="http://download.eclipse.org/technology/swtbot/releases/latest/"/>
     <repository
@@ -78,7 +84,13 @@
     <repository
         url="http://download.eclipse.org/technology/m2e/releases/"/>
     <repository
-        url="jar:http://repository-textuml.forge.cloudbees.com/snapshot/com/abstratt/mdd/com.abstratt.mdd.oss.repository/2.1/com.abstratt.mdd.oss.repository-2.1.zip!/"/>
+        url="http://download.eclipse.org/e4/snapshots/org.eclipse.e4.tools/latest/"/>
+    <repository
+        url="jar:https://dl.bintray.com/abstratt-oss/abstratt-oss/com/abstratt/eclipsegraphviz/com.abstratt.eclipsegraphviz.repository/2.5.201812/com.abstratt.eclipsegraphviz.repository-2.5.201812.zip!/"/>
+    <repository
+        url="https://download.eclipse.org/rcptt/release/2.4.1/repository/"/>
+    <repository
+        url="http://andrei.gmxhome.de/eclipse/"/>
     <description>Install the tools needed in the IDE to work with the source code for ${scope.project.label}</description>
   </setupTask>
   <setupTask

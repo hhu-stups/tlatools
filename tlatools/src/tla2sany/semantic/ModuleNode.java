@@ -20,11 +20,13 @@ import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.List;
+import java.util.stream.Stream;
 
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 
 import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.semantic.Context.Pair;
 import tla2sany.st.TreeNode;
 import tla2sany.utilities.Strings;
@@ -408,6 +410,14 @@ public class ModuleNode extends SymbolNode {
         opDefs[j--] = (OpDefNode)contextVec.elementAt(i);
     }
     return opDefs;
+  }
+
+  public final OpDefNode getOpDef(final String name) {
+	  return getOpDef(UniqueString.uniqueStringOf(name));
+  }
+
+  public final OpDefNode getOpDef(final UniqueString name) {
+	  return Stream.of(getOpDefs()).filter(o -> o.getName() == name).findFirst().orElse(null);
   }
 
   /*************************************************************************
@@ -1077,17 +1087,18 @@ final void addAssumption(TreeNode stn, ExprNode ass, SymbolTable st,
    }
 
   @Override
-  public final void walkGraph (Hashtable<Integer, ExploreNode> semNodesTable) {
-    Integer uid = new Integer(myUID);
+  public final void walkGraph (Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
 
     if (semNodesTable.get(uid) != null) return;
 
     semNodesTable.put(uid, this);
+    visitor.preVisit(this);
     if (ctxt != null) {
-      ctxt.walkGraph(semNodesTable);
+      ctxt.walkGraph(semNodesTable, visitor);
     }
     for (int i = 0; i < topLevelVec.size(); i++) {
-      ((LevelNode)(topLevelVec.elementAt(i))).walkGraph(semNodesTable);
+      ((LevelNode)(topLevelVec.elementAt(i))).walkGraph(semNodesTable, visitor);
     }
 //     for (int i = 0; i < instanceVec.size(); i++) {
 //       ((InstanceNode)(instanceVec.elementAt(i))).walkGraph(semNodesTable);
@@ -1098,6 +1109,7 @@ final void addAssumption(TreeNode stn, ExprNode ass, SymbolTable st,
 //     for (int i = 0; i < assumptionVec.size(); i++) {
 //       ((AssumeNode)(assumptionVec.elementAt(i))).walkGraph(semNodesTable);
 //     }
+    visitor.postVisit(this);
   }
 
   public final void print(int indent, int depth, boolean b) {

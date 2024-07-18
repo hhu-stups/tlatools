@@ -7,7 +7,6 @@ import java.util.Enumeration;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
 
-import tla2sany.semantic.FrontEnd;
 import tlc2.tool.AbstractChecker;
 import tlc2.tool.Simulator;
 
@@ -21,8 +20,10 @@ import tlc2.tool.Simulator;
 public class TLCGlobals
 {
 
-    // The current version of TLC
-    public static String versionOfTLC = "Version 2.13 of 18 July 2018";
+	public static final int DEFAULT_CHECKPOINT_DURATION = (30 * 60 * 1000) + 42;
+
+	// The current version of TLC
+    public static String versionOfTLC = "Version 2.14 of 10 July 2019";
     
     // The bound for set enumeration, used for pretty printing
     public static int enumBound = 2000;
@@ -89,9 +90,16 @@ public class TLCGlobals
     // The main simulator object (null if mainChecker non-null)
     public static Simulator simulator = null;
 
+    // Char to indent nested coverage information.
+	public static final char coverageIndent = '|';
+    
     // Enable collecting coverage information
     public static int coverageInterval = -1;
 
+    public static final boolean isCoverageEnabled() {
+    	return coverageInterval >= 0;
+    }
+    
     // Depth for depth-first iterative deepening
     public static int DFIDMax = -1;
 
@@ -109,7 +117,7 @@ public class TLCGlobals
 
     // The time interval to checkpoint. (in milliseconds)
 	public static long chkptDuration = Integer.getInteger(
-			TLCGlobals.class.getName() + ".chkpt", 30 * 60 * 1000);
+			TLCGlobals.class.getName() + ".chkpt", DEFAULT_CHECKPOINT_DURATION);
     
 	// MAK 08.2012: centralized checkpoint code and added disabling and
 	// externally forced checkpoints
@@ -118,7 +126,12 @@ public class TLCGlobals
     	forceChkpt = true;
     }
     private static long lastChkpt = System.currentTimeMillis();
-    
+
+	public static boolean chkptExplicitlyEnabled() {
+		// Assumption is that a user will always select a different value.
+		return chkptDuration > 0 && chkptDuration != DEFAULT_CHECKPOINT_DURATION;
+	}
+
 	/**
 	 * IMPORTANT NOTE: The method is unsynchronized. It is the caller's
 	 * responsibility to ensure that only a single thread calls this method.
@@ -156,9 +169,6 @@ public class TLCGlobals
     // The flag to control if gzip is applied to Value input/output stream.
     public static boolean useGZIP = false;
 
-    // The tool id number for TLC2.
-    public static int ToolId = FrontEnd.getToolId();
-
     // debugging field
     public static boolean debug = false;
 
@@ -190,4 +200,10 @@ public class TLCGlobals
 		}
 		return null;
 	}
+	
+	public static String getRevisionOrDev() {
+		return TLCGlobals.getRevision() == null ? "development" : TLCGlobals.getRevision();
+	}
+
+	public static boolean expand = true;
 }

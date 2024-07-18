@@ -28,6 +28,6 @@ package tlc2.tool.suite;
 public class Test17 extends SuiteTestCase {
 
 	public Test17() {
-		super("7", "2", "0", "1");
+		super("7", "2", "0", "1", "line 101, col 20 to line 101, col 23 of module test17: 0");
 	}
 }

@@ -47,10 +47,6 @@
          version="0.0.0"/>
 
    <includes
-         id="org.lamport.tlatools.feature"
-         version="0.0.0"/>
-
-   <includes
          id="org.lamport.tla.toolbox.feature.branding"
          version="0.0.0"/>
 
@@ -68,6 +64,10 @@
 
    <includes
          id="de.vonloesch.pdf4eclipse.feature"
+         version="0.0.0"/>
+
+   <includes
+         id="org.lamport.openjdk.feature"
          version="0.0.0"/>
 
    <includes
@@ -297,6 +297,13 @@
          unpack="false"/>
 
    <plugin
+         id="com.google.guava"
+         download-size="0"
+         install-size="0"
+         version="21.0.0.v20170206-1425"
+         unpack="false"/>
+
+   <plugin
          id="org.eclipse.mylyn.commons.ui"
          download-size="0"
          install-size="0"
@@ -321,7 +328,15 @@
          id="org.eclipse.jdt.annotation"
          download-size="0"
          install-size="0"
-         version="1.1.150.v20180322-1206"
+         version="1.1.300.v20180905-0314"
+         unpack="false"/>
+
+   <plugin
+         id="org.lamport.tla.toolbox.rss"
+         download-size="0"
+         install-size="0"
+         version="0.0.0"
+         fragment="true"
          unpack="false"/>
 
 </feature>

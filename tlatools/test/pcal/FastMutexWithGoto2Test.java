@@ -46,5 +46,7 @@ public class FastMutexWithGoto2Test extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "42277", "15900", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "47"));
+
+		assertZeroUncovered();
 	}
 }

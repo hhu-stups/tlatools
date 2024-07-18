@@ -46,6 +46,9 @@ public class MergeSortTest extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "86", "80", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "18"));
+		assertUncovered("line 162, col 32 to line 162, col 61 of module MergeSort: 0\n" + 
+				"line 178, col 32 to line 178, col 61 of module MergeSort: 0\n" + 
+				"line 179, col 32 to line 179, col 37 of module MergeSort: 0");
 	}
 }
 /*

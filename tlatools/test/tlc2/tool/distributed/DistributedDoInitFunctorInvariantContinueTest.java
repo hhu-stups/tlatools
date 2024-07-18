@@ -30,6 +30,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
+
 import tlc2.output.EC;
 import tlc2.tool.liveness.ModelCheckerTestCase;
 
@@ -46,5 +47,7 @@ public class DistributedDoInitFunctorInvariantContinueTest extends ModelCheckerT
 		assertFalse(recorder.recorded(EC.GENERAL));
 
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_INVARIANT_VIOLATED_INITIAL, "NotNine", "x = 9\n"));
+
+	assertZeroUncovered();
 	}
 }

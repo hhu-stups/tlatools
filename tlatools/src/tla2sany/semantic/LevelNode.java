@@ -4,12 +4,12 @@ package tla2sany.semantic;
 import java.util.HashSet;
 import java.util.Iterator;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
 import tla2sany.st.TreeNode;
 import tla2sany.xml.SymbolContext;
 import util.WrongInvocationException;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
 
 /***************************************************************************
 * Note: The SANY1 level checking algorithm is specified in the file        *
@@ -1862,7 +1862,7 @@ public int levelChecked   = 0 ;
 //         (* I believe this shold be OpDeclNode. (LL, Mar 2007)              *)
 //         (*******************************************************************)
 //       param == op.params
-//   IN  /\ n.level = Max(op.level,
+//   IN  /\ n.level = NumMax(op.level,
 //                        SetMax({arg[i].level : i \in 1..p})
 //            (****************************************************************)
 //            (* For an operator parameter, we assume that the weights of     *)

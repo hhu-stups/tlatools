@@ -15,15 +15,16 @@ package tla2sany.semantic;
 
 import java.util.Hashtable;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+
 import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.st.TreeNode;
 import tla2sany.utilities.Strings;
 import tla2sany.xml.SymbolContext;
 import util.UniqueString;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
 
 /**
  * This class represents a theorem
@@ -373,13 +374,15 @@ public class TheoremNode extends LevelNode {
   }
 
   @Override
-  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable) {
-    Integer uid = new Integer(myUID);
+  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
     semNodesTable.put(uid, this);
+    visitor.preVisit(this);
     if (theoremExprOrAssumeProve != null)
-      {theoremExprOrAssumeProve.walkGraph(semNodesTable);} ;
-    if (proof != null) {proof.walkGraph(semNodesTable);} ;
+      {theoremExprOrAssumeProve.walkGraph(semNodesTable, visitor);} ;
+    if (proof != null) {proof.walkGraph(semNodesTable, visitor);} ;
+    visitor.postVisit(this);
   }
 
   /* MR: this does not do anything

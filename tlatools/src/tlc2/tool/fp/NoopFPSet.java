@@ -28,6 +28,8 @@ package tlc2.tool.fp;
 import java.io.IOException;
 import java.rmi.RemoteException;
 
+import tlc2.tool.TLCTrace;
+
 /**
  * An FPSet whose methods are all no-ops.
  */
@@ -42,7 +44,8 @@ public class NoopFPSet extends FPSet {
 	 * @see tlc2.tool.fp.FPSet#init(int, java.lang.String, java.lang.String)
 	 */
 	@Override
-	public void init(int numThreads, String metadir, String filename) throws IOException {
+	public FPSet init(int numThreads, String metadir, String filename) throws IOException {
+		return this;
 	}
 
 	/* (non-Javadoc)
@@ -73,7 +76,7 @@ public class NoopFPSet extends FPSet {
 	 * @see tlc2.tool.fp.FPSet#checkFPs()
 	 */
 	@Override
-	public double checkFPs() throws IOException {
+	public long checkFPs() throws IOException {
 		return 0;
 	}
 
@@ -95,7 +98,7 @@ public class NoopFPSet extends FPSet {
 	 * @see tlc2.tool.fp.FPSet#recover()
 	 */
 	@Override
-	public void recover() throws IOException {
+	public void recover(TLCTrace trace) throws IOException {
 	}
 
 	/* (non-Javadoc)

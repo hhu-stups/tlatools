@@ -30,9 +30,8 @@ import java.io.IOException;
 
 import tlc2.output.EC;
 import tlc2.output.MP;
-import tlc2.tool.Action;
+import tlc2.tool.ITool;
 import tlc2.tool.TLCState;
-import tlc2.tool.Tool;
 import tlc2.tool.Worker;
 import tlc2.util.SetOfStates;
 import tlc2.util.statistics.IBucketStatistics;
@@ -49,8 +48,8 @@ import tlc2.util.statistics.IBucketStatistics;
  */
 public class AddAndCheckLiveCheck extends LiveCheck {
 
-	public AddAndCheckLiveCheck(Tool tool, Action[] actions, String metadir, IBucketStatistics stats) throws IOException {
-		super(tool, actions, metadir, stats);
+	public AddAndCheckLiveCheck(ITool tool, String metadir, IBucketStatistics stats) throws IOException {
+		super(tool, metadir, stats);
 		MP.printWarning(EC.UNIT_TEST, new String[]{ "!!!WARNING: TLC is running in inefficient unit testing mode!!!", ""} );
 	}
 
@@ -58,10 +57,10 @@ public class AddAndCheckLiveCheck extends LiveCheck {
 	 * @see tlc2.tool.liveness.LiveCheck#addInitState(tlc2.tool.TLCState, long)
 	 */
 	@Override
-	public synchronized void addInitState(TLCState state, long stateFP) {
-		super.addInitState(state, stateFP);
+	public synchronized void addInitState(ITool tool, TLCState state, long stateFP) {
+		super.addInitState(tool, state, stateFP);
 		try {
-			check0(false);
+			check0(tool, false);
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		} catch (IOException e) {
@@ -73,10 +72,10 @@ public class AddAndCheckLiveCheck extends LiveCheck {
 	 * @see tlc2.tool.liveness.LiveCheck#addNextState(tlc2.tool.TLCState, long, tlc2.util.SetOfStates)
 	 */
 	@Override
-	public synchronized void addNextState(TLCState s0, long fp0, SetOfStates nextStates) throws IOException {
-		super.addNextState(s0, fp0, nextStates);
+	public synchronized void addNextState(ITool tool, TLCState s0, long fp0, SetOfStates nextStates) throws IOException {
+		super.addNextState(tool, s0, fp0, nextStates);
 		try {
-			check0(false);
+			check0(tool, false);
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		}

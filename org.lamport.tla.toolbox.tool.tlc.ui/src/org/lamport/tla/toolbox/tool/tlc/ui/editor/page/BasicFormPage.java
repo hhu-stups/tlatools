@@ -1,8 +1,8 @@
 package org.lamport.tla.toolbox.tool.tlc.ui.editor.page;
 
-import java.util.Enumeration;
 import java.util.Hashtable;
 import java.util.List;
+import java.util.function.Consumer;
 
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.ListenerList;
@@ -15,6 +15,7 @@ import org.eclipse.swt.SWT;
 import org.eclipse.swt.events.FocusEvent;
 import org.eclipse.swt.events.FocusListener;
 import org.eclipse.swt.graphics.Image;
+import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Layout;
@@ -88,8 +89,17 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
 {
     public static final String CRASHED_TITLE = " ( model checking has crashed )";
     public static final String RUNNING_TITLE = " ( model checking is in progress )";
+    public static final String IMAGE_TEMPLATE_TOKEN = "[XXXXX]";
+    
+    /**
+     * If a section has a data with this key, the returned object is assumed to be an implementor of Consumer<Boolean>
+     * 	which will be invoked during {@link #compensateForExpandableCompositesPoorDesign(Section, boolean)} with
+     *  the boolean value being true if the section is expanding.
+     */
+    protected static final String SECTION_EXPANSION_LISTENER = "_why_oh_why_..._sigh";
+    
     private static final String TLC_ERROR_STRING = "TLC Error";
-
+    
     /** 
      * a list of dirty part listeners, which marks parts as dirty on input and cause the re-validation of the input
      */
@@ -103,9 +113,10 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
      */
     protected String helpId = null;
     /**
-     * Image used in the heading of the page
+     * Image path template used in the heading of the page
      */
-    protected String imagePath = null;
+    private String imagePathTemplate;
+    
     /**
      * Fomr rebuilding listener responsible for page reflow
      */
@@ -218,16 +229,35 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
     };
 
     /**
-     * Creates the main editor page
-     * @param editor
-     * @param id
-     * @param title
-     */
-    public BasicFormPage(FormEditor editor, String id, String title)
-    {
+	 * Creates the main editor page
+	 * 
+	 * @param editor
+	 * @param id
+	 * @param title
+	 * @param pageImagePathTemplate should contain <code>IMAGE_TEMPLATE_TOKEN</code>
+	 *                              which will be replaced with 16 or 24 depending
+	 *                              on the application; images of such naming are
+	 *                              assumed to exist on the filesystem.
+	 */
+	public BasicFormPage(final FormEditor editor, final String id, final String title,
+			final String pageImagePathTemplate) {
         super(editor, id, title);
+        
+        imagePathTemplate = pageImagePathTemplate;
     }
-
+    
+    /**
+     * {@inheritDoc}
+     */
+	@Override
+	public Image getTitleImage() {
+		// Display the page's image left of the page's name on the tar bar. E.g. the
+		// main model page displays three sliders left of its "Model
+		// Overview" label. createFormContent below additionally sets a slightly
+		// larger version of the same image on the page itself (not on the tab bar).
+		return createRegisteredImage(16);
+	}
+	
     /**
      * Called during FormPage life cycle and delegates the form creation
      * to three methods {@link BasicFormPage#createBodyContent(IManagedForm)}, 
@@ -237,9 +267,12 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
     {
         ScrolledForm formWidget = managedForm.getForm();
         formWidget.setText(getTitle());
-        if (imagePath != null)
+        if (imagePathTemplate != null)
         {
-            formWidget.setImage(createRegisteredImage(imagePath));
+			// Show the given image left of the form page's title and beneath the tab
+			// bar. E.g. the main model page displays three sliders left of its "Model
+			// Overview" label.
+            formWidget.setImage(createRegisteredImage(24));
         }
 
         Composite body = formWidget.getBody();
@@ -247,26 +280,11 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
         FormToolkit toolkit = managedForm.getToolkit();
         toolkit.decorateFormHeading(formWidget.getForm());
 
-        // head construction ---------------------
-        IToolBarManager toolbarManager = formWidget.getForm().getToolBarManager();
-
-        // run button
-        toolbarManager.add(new DynamicContributionItem(new RunAction()));
-        toolbarManager.add(new DynamicContributionItem(new GenerateAction()));
-        // stop button
-        toolbarManager.add(new DynamicContributionItem(new StopAction()));
-
-        // refresh the tool-bar
-        toolbarManager.update(true);
-
         /*
-         * The head client is the second row of the header section,
-         * below the title. There should be the same buttons as in the
-         * toolbar on the first row, right corner of the header section
-         * because sometimes those buttons are not visible unless
-         * the user scrolls over to them.
+         * The head client is the second row of the header section, below the title; if we don't create this
+         * with 'NO_FOCUS' then the toolbar will always take focus on a form page that gains focus.
          */
-        ToolBar headClientTB = new ToolBar(formWidget.getForm().getHead(), SWT.HORIZONTAL);
+        ToolBar headClientTB = new ToolBar(formWidget.getForm().getHead(), SWT.HORIZONTAL | SWT.NO_FOCUS);
         headClientTBM = new ToolBarManager(headClientTB);
         // run button
         headClientTBM.add(new DynamicContributionItem(new RunAction()));
@@ -341,10 +359,7 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
      * Subclasses should override this method and fill the data in to the widgets
      * @throws CoreException thrown on any error during loading 
      */
-    protected void loadData() throws CoreException
-    {
-
-    }
+	protected void loadData() throws CoreException { }
 
     /**
      * Method finalizing the page initialization
@@ -406,22 +421,45 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
         }
         return this.formRebuildingListener;
     }
+    
+	// There is no way to exaggerate how poorly designed SWT and SWT-adjacent Eclipse code is... the ExpandableComposite
+	//		does not fire an expansion listener notification on setExpanded and there is no way to get to the
+	//		listeners to do it ourselves... i mean the whole thing is so absurdly bad.
+    // .. and the only reason we have to worry about the listeners being notified is because the form page won't
+    //		layout correct unless we turn the section's grid layout data's vertical grab on and off...
+    // It is disabled turtles all the way down over at eclipse.org...
+	@SuppressWarnings("unchecked") // generic casting
+    protected void compensateForExpandableCompositesPoorDesign(final Section section, final boolean expand) {
+    	section.setExpanded(expand);
+    	
+		if (section.getData(FormHelper.SECTION_IS_NOT_SPACE_GRABBING) == null) {
+			final GridData gd = (GridData) section.getLayoutData();
+			gd.grabExcessVerticalSpace = expand;
+			section.setLayoutData(gd);
+		}
+		
+		final Object o = section.getData(SECTION_EXPANSION_LISTENER);
+		if (o != null) {
+			((Consumer<Boolean>)o).accept(Boolean.valueOf(expand));
+		}
+    }
 
     /**
      * Retrieves the image and remember it for later reuse / dispose
-     * @param imageName
+     * @param size the pixel dimension of the image desired
      * @return
      */
-    protected Image createRegisteredImage(String imageName)
+    protected Image createRegisteredImage(final int size)
     {
-        Image image = (Image) images.get(imageName);
+    	final String imagePath = imagePathTemplate.replace(IMAGE_TEMPLATE_TOKEN, Integer.toString(size));
+        Image image = (Image) images.get(imagePath);
         if (image == null)
         {
-            ImageDescriptor descr = TLCUIActivator.imageDescriptorFromPlugin(TLCUIActivator.PLUGIN_ID, imageName);
-            if (descr != null)
+            final ImageDescriptor id = TLCUIActivator.imageDescriptorFromPlugin(TLCUIActivator.PLUGIN_ID, imagePath);
+            if (id != null)
             {
-                image = descr.createImage();
-                images.put(imageName, image);
+                image = id.createImage();
+                images.put(imagePath, image);
             }
         }
 
@@ -429,7 +467,7 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
     }
 
     public Model getModel() {
-    	return ((ModelEditor) getEditor()).getModel();
+    	return getModelEditor().getModel();
     }
     
     /**
@@ -461,8 +499,12 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
     private void handleProblemMarkers(boolean switchToErrorPage)
     {
         // delegate to the editor
-        ((ModelEditor) getEditor()).handleProblemMarkers(switchToErrorPage);
+        getModelEditor().handleProblemMarkers(switchToErrorPage);
     }
+
+	protected ModelEditor getModelEditor() {
+		return (ModelEditor) getEditor();
+	}
 
     /**
      * Returns if the input is complete and the page contains no errors
@@ -532,11 +574,9 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
      */
     public void dispose()
     {
-        Enumeration<Image> elements = images.elements();
-        while (elements.hasMoreElements())
-        {
-            elements.nextElement().dispose();
-        }
+    	for (final Image i : images.values()) {
+    		i.dispose();
+    	}
         super.dispose();
     }
 
@@ -626,7 +666,13 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
         }
         // retrieve the control
         Control widget = UIHelper.getWidget(dm.getAttributeControl(attributeName));
+        
+        validateUsage(sectionId, widget, values, errorMessagePrefix, elementType, listSourceDescription, addToContext);
+    }
 
+    public void validateUsage(final String sectionId, final Control widget, List<String> values, String errorMessagePrefix, String elementType,
+             String listSourceDescription, boolean addToContext)
+    {
         IMessageManager mm = getManagedForm().getMessageManager();
         SemanticHelper helper = getLookupHelper();
         String message;
@@ -699,7 +745,12 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
         }
         // retrieve the control
         Control widget = UIHelper.getWidget(dm.getAttributeControl(attributeName));
+        
+        validateId(sectionId, widget, values, errorMessagePrefix, elementType);
+    }
 
+    public void validateId(final String sectionId, final Control widget, List<String> values, String errorMessagePrefix, String elementType)
+    {
         String message;
         IMessageManager mm = getManagedForm().getMessageManager();
         for (int i = 0; i < values.size(); i++)
@@ -728,11 +779,16 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
     }
 
     /**
+     * Subclasses may override this to be notified when model checking has been launched.
+     */
+    public void modelCheckingHasBegun() { }
+    
+    /**
      * Retrieves the data binding manager
      */
     public DataBindingManager getDataBindingManager()
     {
-        return ((ModelEditor) getEditor()).getDataBindingManager();
+        return getModelEditor().getDataBindingManager();
     }
 
     /**
@@ -740,7 +796,7 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
      */
     public void doRun()
     {
-        ((ModelEditor) getEditor()).launchModel(TLCModelLaunchDelegate.MODE_MODELCHECK, true);
+        getModelEditor().launchModel(TLCModelLaunchDelegate.MODE_MODELCHECK, true);
     }
 
     /**
@@ -748,7 +804,7 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
      */
     public void doGenerate()
     {
-        ((ModelEditor) getEditor()).launchModel(TLCModelLaunchDelegate.MODE_GENERATE, true);
+        getModelEditor().launchModel(TLCModelLaunchDelegate.MODE_GENERATE, true);
     }
 
     /**
@@ -756,7 +812,7 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
      */
     public void doStop()
     {
-        ((ModelEditor) getEditor()).stop();
+        getModelEditor().stop();
     }
 
     /**

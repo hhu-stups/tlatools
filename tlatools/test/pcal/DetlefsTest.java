@@ -45,5 +45,7 @@ public class DetlefsTest extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "2127012", "952912", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "82"));
+		
+		assertZeroUncovered();
 	}
 }

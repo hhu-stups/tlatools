@@ -38,13 +38,14 @@ import java.util.Arrays;
 import org.junit.Test;
 
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 import tlc2.tool.liveness.ModelCheckerTestCase;
 
 public class DumpAsDotTest extends ModelCheckerTestCase {
 
 	public DumpAsDotTest() {
 		super("MCa", "CodePlexBug08", new String[] { "-dump", "dot,colorize,actionlabels",
-				System.getProperty("java.io.tmpdir") + File.separator + "DumpAsDotTest" });
+				System.getProperty("java.io.tmpdir") + File.separator + "DumpAsDotTest" }, ExitStatus.VIOLATION_LIVENESS);
 	}
 
 	@Test
@@ -61,6 +62,8 @@ public class DumpAsDotTest extends ModelCheckerTestCase {
 		// If the file exist, simply compare it to a correct and manually checked version.
 		final InputStream master = getClass().getResourceAsStream("DumpAsDotTest.dot");
 		assertTrue(Arrays.equals(getBytes(master), getBytes(new FileInputStream(dumpFile))));
+
+		assertZeroUncovered();
 	}
 	
 	// http://stackoverflow.com/a/17861016

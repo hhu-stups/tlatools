@@ -2,6 +2,7 @@ package org.lamport.tla.toolbox.editor.basic;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -16,6 +17,7 @@ import org.eclipse.core.commands.operations.IOperationHistoryListener;
 import org.eclipse.core.commands.operations.IUndoContext;
 import org.eclipse.core.commands.operations.IUndoableOperation;
 import org.eclipse.core.commands.operations.OperationHistoryEvent;
+import org.eclipse.core.filesystem.URIUtil;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IMarkerDelta;
@@ -63,8 +65,10 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.FileDialog;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.IEditorInput;
+import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.IEditorSite;
 import org.eclipse.ui.IFileEditorInput;
+import org.eclipse.ui.IURIEditorInput;
 import org.eclipse.ui.IWorkbenchActionConstants;
 import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.PlatformUI;
@@ -191,6 +195,10 @@ public class TLAEditor extends TextEditor
         }
     }
 
+    protected TLASourceViewerConfiguration getTLASourceViewerConfiguration(IPreferenceStore preferenceStore) {
+    	return new TLASourceViewerConfiguration(preferenceStore, this); 
+    }
+    
     /*
      * (non-Javadoc)
      * @see org.eclipse.ui.texteditor.AbstractTextEditor#init(org.eclipse.ui.IEditorSite, org.eclipse.ui.IEditorInput)
@@ -205,26 +213,13 @@ public class TLAEditor extends TextEditor
                 TLAEditorActivator.getDefault().getPreferenceStore(), EditorsUI.getPreferenceStore() });
 
         // set source viewer configuration
-        setSourceViewerConfiguration(new TLASourceViewerConfiguration(preferenceStore, this));
+        setSourceViewerConfiguration(getTLASourceViewerConfiguration(preferenceStore));
 
         // set preference store
         setPreferenceStore(preferenceStore);
 
-        // setup the content description and image of spec root
-        if (input instanceof FileEditorInput)
-        {
-            FileEditorInput finput = (FileEditorInput) input;
-            if (finput != null)
-            {
-                IPath path = finput.getPath();
-                setContentDescription(path.toString());
-
-                if (ResourceHelper.isRoot(finput.getFile()))
-                {
-                    setTitleImage(rootImage);
-                }
-            }
-        }
+        initEditorNameAndDescription(input);
+        
         // grab context service and activate the context on editor load
         this.contextService = (IContextService) getSite().getService(IContextService.class);
         Assert.isNotNull(contextService);
@@ -280,6 +275,24 @@ public class TLAEditor extends TextEditor
 			}
 		});
     }
+
+	protected void initEditorNameAndDescription(final IEditorInput input) {
+        // setup the content description and image of spec root
+        if (input instanceof FileEditorInput)
+        {
+            final FileEditorInput finput = (FileEditorInput) input;
+            if (finput != null)
+            {
+                final IPath path = finput.getPath();
+                setContentDescription(path.toString());
+
+                if (ResourceHelper.isRoot(finput.getFile()))
+                {
+                    setTitleImage(rootImage);
+                }
+            }
+        }
+	}
 
 	private IUndoContext getUndoContext() {
 		if (getSourceViewer() instanceof ITextViewerExtension6) {
@@ -842,8 +855,21 @@ public class TLAEditor extends TextEditor
      * @return
      */
 	public String getModuleName() {
-		IFile moduleFile = ((FileEditorInput) this.getEditorInput()).getFile();
-		return ResourceHelper.getModuleName(moduleFile);
+		final IEditorInput iei = this.getEditorInput();
+		if (iei instanceof FileEditorInput) {
+			final IFile moduleFile = ((FileEditorInput) iei).getFile();
+			return ResourceHelper.getModuleName(moduleFile);
+		} else if (iei instanceof IURIEditorInput) {
+			final URI uri = ((IURIEditorInput) iei).getURI();
+			if (uri != null) {
+				final IPath path = URIUtil.toPath(uri);
+				if (path != null) {
+					final IFile moduleFile = ResourcesPlugin.getWorkspace().getRoot().getFile(path);
+					return ResourceHelper.getModuleName(moduleFile);
+				}
+			}
+		}
+		return "";
 	}
 
 	public TextViewer getViewer() {
@@ -953,33 +979,29 @@ public class TLAEditor extends TextEditor
      */
     public static final class OpenDeclarationHandler extends AbstractHandler
     {
-        public OpenDeclarationHandler()
-        {
-        }
-
         public Object execute(ExecutionEvent event) throws ExecutionException
         {
+            final IEditorPart activeEditor = HandlerUtil.getActiveEditor(event);
+            final TLAEditor tlaEditor = activeEditor.getAdapter(TLAEditor.class);
 
-            TLAEditorAndPDFViewer editor = (TLAEditorAndPDFViewer) HandlerUtil.getActiveEditor(event);
-            ISourceViewer internalSourceViewer = editor.getTLAEditor().getSourceViewer();
-
-            ITextSelection selection = (ITextSelection) editor.getTLAEditor().getSelectionProvider().getSelection();
-            IRegion region = new Region(selection.getOffset(), selection.getLength());
+            final ITextSelection selection = (ITextSelection) tlaEditor.getSelectionProvider().getSelection();
+            final IRegion region = new Region(selection.getOffset(), selection.getLength());
 
             // get the detectors
-            IHyperlinkDetector[] hyperlinkDetectors = editor.getTLAEditor().getSourceViewerConfiguration()
+            final ISourceViewer internalSourceViewer = tlaEditor.getSourceViewer();
+            final IHyperlinkDetector[] hyperlinkDetectors = tlaEditor.getSourceViewerConfiguration()
                     .getHyperlinkDetectors(internalSourceViewer);
             if (hyperlinkDetectors != null)
             {
                 for (int i = 0; i < hyperlinkDetectors.length; i++)
                 {
                     // detect
-                    IHyperlink[] hyperlinks = hyperlinkDetectors[i].detectHyperlinks(internalSourceViewer, region,
+                    final IHyperlink[] hyperlinks = hyperlinkDetectors[i].detectHyperlinks(internalSourceViewer, region,
                             false);
                     if (hyperlinks != null && hyperlinks.length > 0)
                     {
                         // open
-                        IHyperlink hyperlink = hyperlinks[0];
+                        final IHyperlink hyperlink = hyperlinks[0];
                         hyperlink.open();
                         break;
                     }
@@ -988,5 +1010,4 @@ public class TLAEditor extends TextEditor
             return null;
         }
     }
-
 }

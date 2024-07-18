@@ -31,8 +31,11 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+
 import org.junit.Test;
+
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 
 /**
  * see http://tlaplus.codeplex.com/workitem/8
@@ -40,7 +43,7 @@ import tlc2.output.EC;
 public class CodePlexBug08Test extends ModelCheckerTestCase {
 
 	public CodePlexBug08Test() {
-		super("MC", "CodePlexBug08");
+		super("MC", "CodePlexBug08", ExitStatus.VIOLATION_LIVENESS);
 	}
 	
 	@Test
@@ -68,5 +71,7 @@ public class CodePlexBug08Test extends ModelCheckerTestCase {
 		assertTraceWith(recorder.getRecords(EC.TLC_STATE_PRINT2), expectedTrace);
 
 		assertStuttering(7);
+
+	assertZeroUncovered();
 	}
 }

@@ -39,6 +39,11 @@ import tlc2.tool.TLCState;
  * Writes the given state in dot notation.
  * 
  * @see https://en.wikipedia.org/wiki/DOT_(graph_description_language)
+ * 
+ * 
+ * To ASCII-render a graph (on Debian|Ubuntu) install cpanminus, sudo cpanm Graph::Easy and run:
+ * cat your.dot | graph-easy --from=dot --as_ascii
+ * (https://stackoverflow.com/questions/3211801/graphviz-and-ascii-output)
  */
 public class DotStateWriter extends StateWriter {
 
@@ -52,7 +57,7 @@ public class DotStateWriter extends StateWriter {
 	private final Map<String, Integer> actionToColors = new HashMap<>();
 	
 	// A mapping from ranks to nodes.
-	private final Map<Short, Set<Long>> rankToNodes = new HashMap<>();
+	private final Map<Integer, Set<Long>> rankToNodes = new HashMap<>();
 
 	// Determines whether or not transition edges should be colorized in the state
 	// graph.
@@ -106,22 +111,29 @@ public class DotStateWriter extends StateWriter {
 	}
 
 	/* (non-Javadoc)
+	 * @see tlc2.util.IStateWriter#isDot()
+	 */
+	@Override
+	public boolean isDot() {
+		return true;
+	}
+
+	/* (non-Javadoc)
 	 * @see tlc2.util.StateWriter#writeState(tlc2.tool.TLCState)
 	 */
 	public synchronized void writeState(final TLCState state) {
 		// Marker the state as an initial state by using a filled style.
 		this.writer.append(Long.toString(state.fingerPrint()));
-		this.writer.append(" [style = filled]");
 		this.writer.append(" [label=\"");
 		this.writer.append(states2dot(state));
-		this.writer.append("\"]");
+		this.writer.append("\",style = filled]");
 		this.writer.append("\n");
 		
 		maintainRanks(state);
 	}
 	
 	protected void maintainRanks(final TLCState state) {
-		rankToNodes.computeIfAbsent(state.level, k -> new HashSet<Long>()).add(state.fingerPrint());
+		rankToNodes.computeIfAbsent(state.getLevel(), k -> new HashSet<Long>()).add(state.fingerPrint());
 	}
 
 	/* (non-Javadoc)
@@ -162,28 +174,28 @@ public class DotStateWriter extends StateWriter {
 		this.writer.append(" -> ");
 		this.writer.append(successorsFP);
 		if (visualization == Visualization.STUTTERING) {
-			this.writer.append(" [style=\"dashed\"]");
-		}
-		
-		// Add the transition edge label.
-		if(action!=null) {
-			String transitionLabel = this.dotTransitionLabel(state, successor, action);
-			this.writer.append(transitionLabel);	
-		}
-		
-		this.writer.append(";\n");
-		
-		// If the successor is new, print the state's label. Labels are printed
-		// when writeState sees the successor. It does not print the label for
-		// the current state. If it would print the label for the current state,
-		// the init state labels would be printed twice.
-		if (successorStateIsNew) {
-			// Write the successor's label.
-			this.writer.append(successorsFP);
-			this.writer.append(" [label=\"");
-			this.writer.append(states2dot(successor));
-			this.writer.append("\"]");
+			this.writer.append(" [style=\"dashed\"];\n");
+		} else {
+			// Add the transition edge label.
+			if(action!=null) {
+				String transitionLabel = this.dotTransitionLabel(state, successor, action);
+				this.writer.append(transitionLabel);	
+			}
+			
 			this.writer.append(";\n");
+			
+			// If the successor is new, print the state's label. Labels are printed
+			// when writeState sees the successor. It does not print the label for
+			// the current state. If it would print the label for the current state,
+			// the init state labels would be printed twice.
+			if (successorStateIsNew) {
+				// Write the successor's label.
+				this.writer.append(successorsFP);
+				this.writer.append(" [label=\"");
+				this.writer.append(states2dot(successor));
+				this.writer.append("\"]");
+				this.writer.append(";\n");
+			}
 		}
 		
 		maintainRanks(state);
@@ -233,7 +245,7 @@ public class DotStateWriter extends StateWriter {
 	    // Only add action label if specified.
 		final String actionName = actionLabels ? action.getName().toString() : "" ;
 		
-		final String labelFmtStr = " [label=\"%s\" color=\"%s\" fontcolor=\"%s\"]";
+		final String labelFmtStr = " [label=\"%s\",color=\"%s\",fontcolor=\"%s\"]";
 		return String.format(labelFmtStr, actionName, color, color);
 	}
 	
@@ -250,10 +262,10 @@ public class DotStateWriter extends StateWriter {
 		sb.append(String.format("subgraph %s {", "cluster_legend"));
 		sb.append("graph[style=bold];");
 		sb.append("label = \"Next State Actions\" style=\"solid\"\n");
-		sb.append(String.format("node [ labeljust=\"l\" colorscheme=\"%s\" style=filled shape=record ]\n",
+		sb.append(String.format("node [ labeljust=\"l\",colorscheme=\"%s\",style=filled,shape=record ]\n",
 				dotColorScheme));
 		for (String action : actions) {
-			String str = String.format("%s [label=\"%s\" fillcolor=%d]", action, action,
+			String str = String.format("%s [label=\"%s\",fillcolor=%d]", action, action,
 					this.actionToColors.get(action));
 			sb.append(str);
 			sb.append("\n");
@@ -282,7 +294,8 @@ public class DotStateWriter extends StateWriter {
 
 	protected static String states2dot(final TLCState state) {
 		// Replace "\" with "\\" and """ with "\"".	
-		return state.toString().replace("\\", "\\\\").replace("\"", "\\\"").trim();
+		return state.toString().replace("\\", "\\\\").replace("\"", "\\\"").trim()
+				.replace("\n", "\\n"); // Do not remove remaining (i.e. no danling/leading) "\n". 
 	}
 
 	/* (non-Javadoc)

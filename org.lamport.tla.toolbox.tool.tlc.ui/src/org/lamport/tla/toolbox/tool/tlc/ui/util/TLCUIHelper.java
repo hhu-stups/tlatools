@@ -1,7 +1,9 @@
 package org.lamport.tla.toolbox.tool.tlc.ui.util;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -75,8 +77,9 @@ public class TLCUIHelper
 		}
     }
     
-    protected static List<StyleRange> setTLCLocationHyperlinks(String text) {
+    protected static List<StyleRange> setTLCLocationHyperlinks(final String text) {
     	final List<StyleRange> result = new ArrayList<StyleRange>();
+    	String mutableText = text;
 
     	/*
          * Will be set to the module name
@@ -87,7 +90,7 @@ public class TLCUIHelper
          * the module, but it is the same as the module in the
          * error reported by TLC for the failed assertion.
          */
-        String pcalModuleName = null;
+        String moduleName = null;
 
         /*
          * For each Pattern defined in the Location class, we find
@@ -97,25 +100,24 @@ public class TLCUIHelper
          * to nullLoc, or point to the MC or TE modules.
          */
         Matcher matcher;
-        for (int i = 0; i < Location.ALL_PATTERNS.length; i++)
-        {
-            matcher = Location.ALL_PATTERNS[i].matcher(text);
-            while (matcher.find())
-            {
+		for (int i = 0; i < Location.ALL_PATTERNS.length; i++) {
+            matcher = Location.ALL_PATTERNS[i].matcher(mutableText);
+			while (matcher.find()) {
                 final String locationString = matcher.group();
-                
-                // "consume" location string to prevent pcal matcher from consuming the same text again
-                // @see Bug #269 in general/bugzilla/index.html
-                text = text.replace(locationString, "");
-                
-                Location location = Location.parseLocation(locationString);
-                if (location != null && !location.equals(Location.nullLoc)
+                final Location location = Location.parseLocation(locationString);
+                if ((location != null)
+                		&& !location.equals(Location.nullLoc)
                         && !location.source().equals(ModelHelper.MC_MODEL_NAME)
-                        && !location.source().equals(ModelHelper.TE_MODEL_NAME))
-                {
-                    pcalModuleName = location.source();
+                        && !location.source().equals(ModelHelper.TE_MODEL_NAME)) {
+                    moduleName = location.source();
                     result.add(getHyperlinkStyleRange(location, matcher.start(), matcher.end()));
                 }
+                
+                // remove the matched location string to prevent PCAL_LOC_PATTERN's matcher from consuming
+                //		the same text again in the below code; should there ever be multiple markers
+                //		with the same location string, this would potentially cause problems.
+                // @see Bug #269 in general/bugzilla/index.html
+                mutableText = mutableText.replace(locationString, "");
             }
         }
 
@@ -124,25 +126,22 @@ public class TLCUIHelper
          * of assertion failure statements where the assertion was
          * written in PlusCal.
          */
-        matcher = PCAL_LOC_PATTERN.matcher(text);
-        if (matcher.find())
-        {
-            try
-            {
-                Assert
-                        .isNotNull(pcalModuleName,
+        matcher = PCAL_LOC_PATTERN.matcher(mutableText);
+		if (matcher.find()) {
+			try {
+                Assert.isNotNull(moduleName,
                                 "Found a plus cal assertion failed location without a TLC error location with the module name.");
-                int beginLine = Integer.parseInt(matcher.group(1));
-                int beginColumn = Integer.parseInt(matcher.group(2));
+                final int beginLine = Integer.parseInt(matcher.group(1));
+                final int beginColumn = Integer.parseInt(matcher.group(2));
+                final Location l = new Location(UniqueString.uniqueStringOf(moduleName), beginLine, beginColumn,
+                		beginLine, beginColumn);
 
-                result.add(getHyperlinkStyleRange(new Location(UniqueString
-                        .uniqueStringOf(pcalModuleName), beginLine, beginColumn, beginLine, beginColumn), matcher
-                        .start(), matcher.end()));
-            } catch (NumberFormatException e)
-            {
+                result.add(getHyperlinkStyleRange(l, matcher.start(), matcher.end()));
+			} catch (NumberFormatException e) {
                 TLCUIActivator.getDefault().logError("Error parsing PlusCal assertion failed location.", e);
             }
         }
+		
         return result;
     }
 
@@ -160,6 +159,11 @@ public class TLCUIHelper
      */
     public static void openTLCLocationHyperlink(StyledText styledText, MouseEvent trigger, Model model)
     {
+    	openTLCLocationHyperlink(styledText, trigger, model, new HashSet<>());
+    }
+
+	public static void openTLCLocationHyperlink(StyledText styledText, MouseEvent trigger, Model model, Set<Class<? extends ITextEditor>> blacklist)
+    {
         try
         {
             int offset = styledText.getOffsetAtLocation(new Point(trigger.x, trigger.y));
@@ -169,10 +173,10 @@ public class TLCUIHelper
                 Object data = range.data;
                 if (data instanceof Location)
                 {
-                    boolean jumpToSavedModule = jumpToSavedLocation((Location) data, model);
+                    boolean jumpToSavedModule = jumpToSavedLocation((Location) data, model, blacklist);
                     if (!jumpToSavedModule)
                     {
-                        UIHelper.jumpToLocation((Location) data, (trigger.stateMask & SWT.CTRL) != 0);
+                        UIHelper.jumpToLocation((Location) data, (trigger.stateMask & SWT.MOD1) != 0, null);
                     }
                 }
             }
@@ -232,6 +236,12 @@ public class TLCUIHelper
      */
     public static boolean jumpToSavedLocation(Location location, Model model)
     {
+    	return jumpToSavedLocation(location, model, new HashSet<>());
+    }
+    
+    public static boolean jumpToSavedLocation(Location location, Model model,
+			Set<Class<? extends ITextEditor>> blacklist)
+    {
         IEditorPart editor = model.getAdapter(ModelEditor.class);
         if (editor instanceof ModelEditor)
         {
@@ -239,7 +249,7 @@ public class TLCUIHelper
 
             ITextEditor moduleEditor = modelEditor.getSavedModuleEditor(location.source());
 
-            if (moduleEditor != null)
+            if (moduleEditor != null && !blacklist.contains(moduleEditor.getClass()))
             {
                 try
                 {

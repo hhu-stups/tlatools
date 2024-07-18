@@ -45,6 +45,8 @@ public class SyncConsTest extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "22580", "8754", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "48"));
+
+		assertZeroUncovered();
 	}
 }
 /*

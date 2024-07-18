@@ -10,6 +10,7 @@ import java.rmi.RemoteException;
 
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.tool.TLCTrace;
 import util.Assert;
 import util.BufferedDataInputStream;
 import util.BufferedDataOutputStream;
@@ -72,9 +73,10 @@ public final class MemFPSet2 extends FPSet {
     this.mask = spineSize - 1;
   }
   
-  public void init(int numThreads, String metadir, String fname) {
+  public FPSet init(int numThreads, String metadir, String fname) {
     this.metadir = metadir;
     this.filename = metadir + FileUtil.separator + fname;
+	return this;
   }
 
   public synchronized final long size() { return this.count; }
@@ -140,7 +142,7 @@ public final class MemFPSet2 extends FPSet {
     System.exit(0);    
   }
 
-  public final double checkFPs() {
+  public final long checkFPs() {
     long dis = Long.MAX_VALUE;
     for (int i = 0; i < this.table.length; i++) {
       long low = i & 0xffffffL;	
@@ -189,7 +191,7 @@ public final class MemFPSet2 extends FPSet {
 	}
       }
     }
-    return (1.0/dis);
+    return dis;
   }
 
   public final void beginChkpt(String fname) throws IOException {
@@ -247,7 +249,7 @@ public final class MemFPSet2 extends FPSet {
     this.commitChkpt(this.filename);
   }
 
-  public final void recover() throws IOException {
+  public final void recover(TLCTrace trace) throws IOException {
     this.recover(this.filename);
   }
 

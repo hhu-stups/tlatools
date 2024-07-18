@@ -46,6 +46,8 @@ public class TreeBarrierTest extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "5414", "2095", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "106"));
+
+		assertUncovered("line 120, col 19 to line 120, col 32 of module TreeBarrier: 0");
 	}
 }
 /*

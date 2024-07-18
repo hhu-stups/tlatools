@@ -54,6 +54,7 @@ import tlc2.tool.queue.DiskStateQueue;
 import tlc2.tool.queue.IStateQueue;
 import tlc2.util.FP64;
 import util.Assert;
+import util.Assert.TLCRuntimeException;
 import util.FileUtil;
 import util.MailSender;
 import util.UniqueString;
@@ -201,7 +202,7 @@ public class TLCServer extends UnicastRemoteObject implements TLCServerRMI,
 		final FPSet fpSet = FPSetFactory.getFPSet(work.getFPSetConfiguration());
 		fpSet.init(1, metadir, work.getFileName());
 		return new NonDistributedFPSetManager(fpSet, InetAddress.getLocalHost()
-				.getCanonicalHostName());
+				.getCanonicalHostName(), trace);
 	}
 
 	/* (non-Javadoc)
@@ -451,9 +452,10 @@ public class TLCServer extends UnicastRemoteObject implements TLCServerRMI,
 				// would require synchronization among all (distributed)
 				// workers. In distributed mode, it is of limited use anyway. 
 				if (e instanceof EvalException
-						&& ((EvalException) e).getErrorCode() == EC.TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE
-						&& (((EvalException) e).getMessage().contains("tlc2.module.TLC.TLCSet")
-								|| ((EvalException) e).getMessage().contains("tlc2.module.TLC.TLCGet"))) {
+						&& ((EvalException) e).getErrorCode() == EC.TLC_MODULE_TLCGET_UNDEFINED
+						&& (((EvalException) e).getMessage().contains("TLCSet")
+								|| ((EvalException) e).getMessage().contains("TLCGet"))
+						|| (e instanceof TLCRuntimeException && ((TLCRuntimeException) e).errorCode == EC.TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE)) {
 					MP.printError(EC.TLC_FEATURE_UNSUPPORTED,
 							"TLCSet & TLCGet operators not supported by distributed TLC.");
 				} else {
@@ -528,9 +530,13 @@ public class TLCServer extends UnicastRemoteObject implements TLCServerRMI,
 					distinctStatesPerMinute = (long) ((fpSetSize - oldFPSetSize) / factor);
 			        
 					// print to system.out
-					MP.printMessage(EC.TLC_PROGRESS_STATS, new String[] { String.valueOf(trace.getLevelForReporting()),
-			                String.valueOf(numOfGenStates), String.valueOf(fpSetSize),
-			                String.valueOf(getNewStates()), String.valueOf(statesPerMinute), String.valueOf(distinctStatesPerMinute) });
+					MP.printMessage(EC.TLC_PROGRESS_STATS, new String[] {
+							String.valueOf(trace.getLevelForReporting()),
+							MP.format(numOfGenStates),
+							MP.format(fpSetSize),
+							MP.format(getNewStates()),
+							MP.format(statesPerMinute),
+							MP.format(distinctStatesPerMinute) });
 					
 					// Make the TLCServer main thread sleep for one report interval
 					wait(REPORT_INTERVAL);
@@ -602,9 +608,9 @@ public class TLCServer extends UnicastRemoteObject implements TLCServerRMI,
 		// Postprocessing:
 		if (hasNoErrors()) {
 			// We get here because the checking has succeeded.
-			final double actualProb = fpSetManager.checkFPs();
+			final long actualDistance = fpSetManager.checkFPs();
 			final long statesSeen = fpSetManager.getStatesSeen();
-			ModelChecker.reportSuccess(finalNumberOfDistinctStates, actualProb, statesSeen);
+			ModelChecker.reportSuccess(finalNumberOfDistinctStates, actualDistance, statesSeen);
 		} else if (keepCallStack) {
 			// We redo the work on the error state, recording the call stack.
 			work.setCallStack();
@@ -677,9 +683,12 @@ public class TLCServer extends UnicastRemoteObject implements TLCServerRMI,
     public static final void printSummary(int level, long statesGenerated, long statesLeftInQueue, long distinctStates, boolean success) throws IOException
     {
 		if (TLCGlobals.tool) {
-            MP.printMessage(EC.TLC_PROGRESS_STATS, new String[] { String.valueOf(level),
-                    String.valueOf(statesGenerated), String.valueOf(distinctStates),
-                    String.valueOf(statesLeftInQueue), "0", "0" });
+            MP.printMessage(EC.TLC_PROGRESS_STATS, new String[] {
+                    String.valueOf(level),
+                    MP.format(statesGenerated),
+                    MP.format(distinctStates),
+                    MP.format(statesLeftInQueue),
+                    "0", "0" });
         }
 
         MP.printMessage(EC.TLC_STATS, new String[] { String.valueOf(statesGenerated),

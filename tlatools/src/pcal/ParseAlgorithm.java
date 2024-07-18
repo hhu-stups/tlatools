@@ -108,11 +108,11 @@ package pcal;
 
 import java.util.Hashtable;
 import java.util.Vector;
+
 import pcal.exception.ParseAlgorithmException;
 import pcal.exception.TLAExprException;
 import pcal.exception.TokenizerException;
 import pcal.exception.UnrecoverableException;
-import tla2sany.parser.ParseError;
 import tla2tex.Debug;
 
 
@@ -314,7 +314,8 @@ public class ParseAlgorithm
      * should be set to the position of the PcalParams.BeginAlg string by  *
      * whatever method finds that string and calls GetAlgorithm.           *
      **********************************************************************/
-     { Init(charR) ;
+     { try {
+	   Init(charR) ;
        if (fairAlgorithm) {
     	   String nextToken = GetAlgToken() ;
     	   if (!nextToken.equals(PcalParams.BeginFairAlg2)) {
@@ -545,6 +546,14 @@ public class ParseAlgorithm
                              GetLastLocationEnd())) ;
            return uniproc ;
          }
+       } catch (final RuntimeException e) {
+			// Catch generic/unhandled errors (ArrayIndexOutOfbounds/NullPointers/...) that
+			// the nested code might throw at us. Not converting them into a
+			// ParseAlgorithmException means the Toolbox silently fails to translate an
+			// algorithm (see Github issue at https://github.com/tlaplus/tlaplus/issues/313)
+	    	ParsingError("Unknown error at or before");
+    	    return null;
+       }
      }
 
    /**
@@ -954,6 +963,8 @@ public class ParseAlgorithm
          }
        else
          { result.unlabDo = GetCStmt() ; } ;
+       if (result.unlabDo.size() == 0)
+         { ParsingError("Missing body of while statement at"); }
        result.labDo = new Vector() ;
          /******************************************************************
          * For historical reasons, some methods expect a labDo field to    *

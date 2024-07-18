@@ -92,4 +92,20 @@ public interface TLCStatisticsMXBean {
 	 * @return The name of the model curreclty being checked by TLC.
 	 */
 	String getModelName();
+
+	/**
+	 * Force TLC to stop model checking.
+	 */
+	void stop();
+	
+	/**
+	 * Suspend model checking until resume is called.
+	 */
+	void suspend();
+	
+	/**
+	 * Resumes model checking after a suspend. Do not resume an running model checker.
+	 * It could interfere with model checking.
+	 */
+	void resume();
 }

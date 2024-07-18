@@ -33,13 +33,17 @@ import java.io.IOException;
 import java.rmi.RemoteException;
 
 import org.junit.Before;
+import org.junit.runner.RunWith;
+import org.junit.runners.BlockJUnit4ClassRunner;
 
 import tlc2.TLCGlobals;
 import tlc2.output.MP;
 import tlc2.tool.fp.FPSetConfiguration;
 import tlc2.tool.fp.MSBDiskFPSet;
 import tlc2.tool.liveness.ModelCheckerTestCase;
+import util.ToolIO;
 
+@RunWith(BlockJUnit4ClassRunner.class)
 public abstract class TLCServerTestCase extends ModelCheckerTestCase {
 
 	public TLCServerTestCase(String spec) {
@@ -64,9 +68,12 @@ public abstract class TLCServerTestCase extends ModelCheckerTestCase {
 			
 			final String fqSpec = BASE_DIR + TEST_MODEL + path + File.separator + spec;
 			final FPSetConfiguration fpSetConfig = new DummyFPSetConfig();
-			final TLCApp app = new TLCApp(fqSpec, fqSpec, false, null, fpSetConfig);
+			ToolIO.setUserDir(BASE_DIR + File.separator + TEST_MODEL + path + File.separator);
+			final TLCApp app = new TLCApp(fqSpec, spec, false, null, fpSetConfig);
 			final TLCServer server = new TLCServer(app);
 			server.modelCheck();
+			//TODO Implement exit status for distributed TLC
+			actualExitStatus = 0;
 		} catch (Exception e) {
 			fail(e.getMessage());
 		}

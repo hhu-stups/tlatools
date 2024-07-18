@@ -2,14 +2,13 @@ package org.lamport.tla.toolbox.tool.tlc.job;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Status;
-import org.eclipse.core.runtime.SubProgressMonitor;
 import org.eclipse.debug.core.DebugException;
 import org.eclipse.debug.core.DebugPlugin;
 import org.eclipse.debug.core.ILaunch;
@@ -30,6 +29,7 @@ import org.lamport.tla.toolbox.tool.tlc.output.internal.BroadcastStreamListener;
 import org.lamport.tla.toolbox.util.ResourceHelper;
 
 import tlc2.TLC;
+import tlc2.output.EC;
 import tlc2.tool.fp.FPSetFactory;
 import tlc2.tool.fp.NoopFPSet;
 import tlc2.tool.fp.OffHeapDiskFPSet;
@@ -87,31 +87,42 @@ public class TLCProcessJob extends TLCJob
 			// Add 3rd party libraries to classpath. Star acts as wildcard
 			// picking up all .jar files (added by MAK on 07/31/2012)
 			final String libClasspath = runtimeClasspath + File.separator + "lib" + File.separator + "*";
+			final String libMailClasspath = runtimeClasspath + File.separator + "lib" + File.separator + "javax.mail"
+					+ File.separator + "*";
 			// classpath during toolbox development within Eclipse (will simply not
 			// exist in packaged toolbox)
 			final String devClasspath = runtimeClasspath + File.separator + "class";
-			String[] classPath = new String[] { runtimeClasspath, libClasspath, devClasspath };
+			
+			// Add TLA+ library path entries to the class path in case any one of them
+			// includes module overwrites.  It is the last element on the classpath.
+			final Spec spec = Activator.getSpecManager().getSpecByName(specName);
+			final String libraryPathClassPath = spec.getTLALibraryPathAsClassPath();
+			
+			final String[] classPath = new String[] { runtimeClasspath, libClasspath, libMailClasspath, devClasspath, libraryPathClassPath };
 
             // arguments
             String[] arguments = constructProgramArguments();
 
-            // log output
-			TLCActivator
-					.logInfo("TLC ARGUMENTS: " + Arrays.toString(arguments));
-
             final List<String> vmArgs = new ArrayList<String>();
 
             // get max heap size as fraction from model editor
-            final double maxHeapSize = launch.getLaunchConfiguration().getAttribute(LAUNCH_MAX_HEAP_SIZE, HEAP_SIZE_DEFAULT) / 100d;
+            int maxHeapSize = launch.getLaunchConfiguration().getAttribute(LAUNCH_MAX_HEAP_SIZE, HEAP_SIZE_DEFAULT);
+            if (maxHeapSize < 1 || maxHeapSize > 99) {
+				TLCActivator.logInfo(String.format(
+						"Defaulting fraction of physical memory to %s because %s is out of range (0,100). Value can be adjusted on the model editor's \"Advanced TLC option\" tab.",
+						HEAP_SIZE_DEFAULT, maxHeapSize));
+            	// Dealing with a legacy model (absolute memory values) or somehow bogus input.
+            	maxHeapSize = HEAP_SIZE_DEFAULT;
+            }
 			final TLCRuntime instance = TLCRuntime.getInstance();
-			long absolutePhysicalSystemMemory = instance.getAbsolutePhysicalSystemMemory(maxHeapSize);
+			long absolutePhysicalSystemMemory = instance.getAbsolutePhysicalSystemMemory(maxHeapSize / 100d);
 
 			// Get class name of the user selected FPSet. If it is unset, try and load the
 			// OffHeapDiskFPSet (which might not be supported). In unsupported, revert to
 			// TLC's default set.
 			// If the user happened to select OffHeapDiskFPSet, the -XX:MaxDirectMemorySize
 			// is set by getVMArguments.
-			String clazz = launch.getLaunchConfiguration().getAttribute(LAUNCH_FPSET_IMPL, (String) null);
+			String clazz = getOptimalFPsetImpl();
 			if (!hasSpec(launch.getLaunchConfiguration())) {
 				// If a spec has no behaviors, TLC won't need a fingerprint set. Thus, use the
 				// NoopFPSet whose initialization cost is next to nothing. Real fpsets on the
@@ -143,6 +154,9 @@ public class TLCProcessJob extends TLCJob
 				vmArgs.add("-D" + FPSetFactory.IMPL_PROPERTY + "=" + clazz);
 			}
 			
+			// specify Java8+ acceptable GC
+			vmArgs.add("-XX:+UseParallelGC");
+			
             // add remaining VM args
             vmArgs.addAll(getAdditionalVMArgs());
 
@@ -154,10 +168,8 @@ public class TLCProcessJob extends TLCJob
             tlcConfig.setVMArguments((String[]) vmArgs.toArray(new String[vmArgs.size()]));
             tlcConfig.setWorkingDirectory(ResourceHelper.getParentDirName(rootModule));
             // Following added for testing by LL on 6 Jul 2012
-            TLCActivator.logInfo("JAVA VM ARGUMENTS: " + Arrays.toString(tlcConfig.getVMArguments()));             
             final IVMInstall vmInstall = getVMInstall();
-            TLCActivator.logInfo("Nested JVM used for model checker is: "
-					+ vmInstall.getInstallLocation());
+            
             
 			final IVMRunner runner = vmInstall.getVMRunner(ILaunchManager.RUN_MODE);
 
@@ -170,11 +182,18 @@ public class TLCProcessJob extends TLCJob
             try
             {
                 // step 3
-                runner.run(tlcConfig, launch, new SubProgressMonitor(monitor, STEP));
+                runner.run(tlcConfig, launch, new NullProgressMonitor());
                 tlcStartTime = System.currentTimeMillis();
             } catch (CoreException e)
             {
-                return new Status(IStatus.ERROR, TLCActivator.PLUGIN_ID, "Error launching TLC modle checker", e);
+            	// Include command-line for users to figure out what failed.
+				return new Status(IStatus.ERROR, TLCActivator.PLUGIN_ID,
+						String.format("Error launching TLC with command-line (CWD: %s): %s%sbin%sjava -cp %s %s %s %s",
+								tlcConfig.getWorkingDirectory(), vmInstall.getInstallLocation(), File.separator,
+								File.separator, String.join(File.pathSeparator, tlcConfig.getClassPath()),
+								String.join(" ", tlcConfig.getVMArguments()),
+								String.join(" ", tlcConfig.getClassToLaunch()), String.join(" ", arguments)),
+						e);
             }
 
             // find the running process
@@ -187,6 +206,14 @@ public class TLCProcessJob extends TLCJob
             // process found
             if (this.process != null)
             {
+				// Log command-line that can (almost) copied&pasted verbatim to a shell to
+				// run TLC directly.
+				// (Working directory needed because TLC does not find MC.tla even if -metadir
+				// is set).
+            	final String cmd = this.process.getAttribute(IProcess.ATTR_CMDLINE);
+            	final String cwd = this.process.getAttribute(DebugPlugin.ATTR_WORKING_DIRECTORY);
+            	TLCActivator.logInfo(String.format("TLC COMMAND-LINE (CWD: %s): %s", cwd, cmd));
+            	
                 // step 5
                 monitor.worked(STEP);
                 monitor.subTask("Model checking...");
@@ -313,22 +340,15 @@ public class TLCProcessJob extends TLCJob
         }
     }
 
+	protected String getOptimalFPsetImpl() throws CoreException {
+		return launch.getLaunchConfiguration().getAttribute(LAUNCH_FPSET_IMPL, (String) null);
+	}
+
 	/**
 	 * @return A list of additional vm arguments
 	 */
 	protected List<String> getAdditionalVMArgs() throws CoreException {
 		final List<String> result = new ArrayList<String>(0);
-
-		/*
-		 * Allow access to the java.activation module on Java9 
-		 * https://bugs.eclipse.org/493761
-		 * http://download.java.net/java/jdk9/docs/api/java.activation-summary.html
-		 * 
-		 * This is needed by MailSender.java.
-		 */
-		result.add("--add-modules=java.activation");
-		// Have < Java9 ignore --add-modules=java.activation flag
-		result.add("-XX:+IgnoreUnrecognizedVMOptions");
 		
 		// Library Path
 		final Spec spec = Activator.getSpecManager().getSpecByName(specName);
@@ -424,6 +444,10 @@ public class TLCProcessJob extends TLCJob
     			shouldNotHappen.printStackTrace();
     		}
     	}
-    	return -1;
+    	return 255;
     }
+
+	public boolean hasCrashed() {
+		return EC.ExitStatus.exitStatusToCrash(getExitValue());
+	}
 }

@@ -39,7 +39,7 @@ import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Path;
 import org.eclipse.core.runtime.QualifiedName;
 import org.eclipse.core.runtime.Status;
-import org.eclipse.core.runtime.SubProgressMonitor;
+import org.eclipse.core.runtime.SubMonitor;
 import org.eclipse.core.runtime.jobs.ISchedulingRule;
 import org.eclipse.core.runtime.jobs.MultiRule;
 import org.eclipse.jface.dialogs.MessageDialog;
@@ -98,13 +98,10 @@ import util.FilenameToStream;
 import util.UniqueString;
 
 /**
- * A toolbox with resource related methods
+ * A utility class with resource related methods
  * @author Simon Zambrovski
- * @version $Id$
  */
-public class ResourceHelper
-{
-
+public class ResourceHelper {
     /**
      * Filename suffix for {@link TLAtoPCalMapping} files
      */
@@ -436,7 +433,7 @@ public class ResourceHelper
                     String name = members[i].getName();
                     IPath newLocation = newLocationParent.append(name);
                     
-                    members[i].delete(true, new SubProgressMonitor(monitor, 1));
+                    members[i].delete(true, SubMonitor.convert(monitor).split(1));
                     if (newLocation.toFile().exists())
                     {
                         getLinkedFile(project, ResourceHelper.PARENT_ONE_PROJECT_LOC + name, true);
@@ -628,6 +625,9 @@ public class ResourceHelper
         {
             return null;
         }
+        if (resource.getLocation() == null) {
+        	return null;
+        }
         return getModuleName(resource.getLocation().toOSString());
     }
 
@@ -732,11 +732,15 @@ public class ResourceHelper
     public static StringBuffer getModuleClosingTag()
     {
         StringBuffer buffer = new StringBuffer();
-        buffer.append(
-                StringHelper.copyString("=", Activator.getDefault().getPreferenceStore().getInt(
-                        EditorPreferencePage.EDITOR_RIGHT_MARGIN))).append("\n"+modificationHistory).append(
-                StringHelper.newline).append("\\* Created ").append(new Date()).append(" by ").append(
-                System.getProperty("user.name")).append(StringHelper.newline);
+        IPreferenceStore preferencesStore = Activator.getDefault().getPreferenceStore();
+        int rightMarginWidth = preferencesStore.getInt(EditorPreferencePage.EDITOR_RIGHT_MARGIN);
+        buffer.append(StringHelper.copyString("=", rightMarginWidth)).append(StringHelper.newline);
+
+        if (preferencesStore.getBoolean(EditorPreferencePage.EDITOR_ADD_MODIFICATION_HISTORY)) {
+            buffer.append(modificationHistory).append(StringHelper.newline)
+                .append("\\* Created ").append(new Date()).append(" by ")
+                .append(System.getProperty("user.name")).append(StringHelper.newline);
+        }
         return buffer;
     }
 
@@ -757,11 +761,13 @@ public class ResourceHelper
      * @param moduleFileName, name of the file 
      * @return the stream with content
      */
-    public static StringBuffer getExtendingModuleContent(String moduleFilename, String extendedModuleName)
+    public static StringBuffer getExtendingModuleContent(String moduleFilename, String... extendedModuleName)
     {
-        StringBuffer buffer = new StringBuffer();
-        buffer.append("---- MODULE ").append(ResourceHelper.getModuleNameChecked(moduleFilename, false)).append(
-                " ----\n").append("EXTENDS ").append(extendedModuleName).append(", TLC").append("\n\n");
+		final StringBuffer buffer = new StringBuffer();
+		buffer.append("---- MODULE ").append(ResourceHelper.getModuleNameChecked(moduleFilename, false))
+				.append(" ----\n").append("EXTENDS ");
+		buffer.append(String.join(", ", extendedModuleName));
+		buffer.append("\n\n");
         return buffer;
     }
 
@@ -2312,8 +2318,10 @@ public class ResourceHelper
 	public static boolean isValidLibraryLocation(final String location) {
 		if (location != null && location.length() > 0) {
 			IPath path = new Path(location);		
-			File directory = path.toFile();
-			return directory.exists() && directory.isDirectory();
+			File directoryOrArchive = path.toFile();
+			// Not checking file extension here bc UI dialog only accepts .jar and .zip
+			// anyway.
+			return directoryOrArchive.exists();
 		}
 		return false;
 	}

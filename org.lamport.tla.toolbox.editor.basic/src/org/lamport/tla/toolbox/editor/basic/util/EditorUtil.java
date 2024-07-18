@@ -83,17 +83,18 @@ public class EditorUtil
      */
     public static TLAEditor getTLAEditorWithFocus()
     {
-        IEditorPart activeEditor = UIHelper.getActiveEditor();
-        // activeEditor.getAdapter(ITexto)
-        if (activeEditor instanceof TLAEditorAndPDFViewer)
-        {
-            TLAEditor editor = ((TLAEditorAndPDFViewer) activeEditor).getTLAEditor();
-            if (editor != null && editor.getViewer().getTextWidget().isFocusControl())
-            {
-                return editor;
-            }
-        }
-
+		IEditorPart activeEditor = UIHelper.getActiveEditor();
+		if (activeEditor instanceof TLAEditorAndPDFViewer) {
+			TLAEditor editor = ((TLAEditorAndPDFViewer) activeEditor).getTLAEditor();
+			if (editor != null && editor.getViewer().getTextWidget().isFocusControl()) {
+				return editor;
+			}
+		} else if (activeEditor != null && activeEditor.getAdapter(TLAEditor.class) != null) {
+			TLAEditor editor = activeEditor.getAdapter(TLAEditor.class);
+			if (editor != null && editor.getViewer().getTextWidget().isFocusControl()) {
+				return editor;
+			}
+		}
         return null;
     }
 
@@ -114,9 +115,9 @@ public class EditorUtil
         if (activeEditor instanceof TLAEditorAndPDFViewer)
         {
             return ((TLAEditorAndPDFViewer) activeEditor).getTLAEditor();
-        }
+		}
 
-        return null;
+        return activeEditor.getAdapter(TLAEditor.class);
     }
 
     /**
@@ -644,14 +645,15 @@ public class EditorUtil
      * @param moduleFileName name of the module with .tla extension.
      * @return
      */
-    public static TLAEditor openTLAEditor(String moduleFileName)
+    public static TLAEditor openTLAEditor(final String moduleFileName)
     {
-        IResource module = ResourceHelper.getResourceByName(moduleFileName);
-        if (module != null && module instanceof IFile)
-        {
-            IEditorPart editor = UIHelper.openEditor(TLAEditor.ID, (IFile) module);
-            if (editor instanceof TLAEditorAndPDFViewer)
-            {
+        final IResource module = ResourceHelper.getResourceByName(moduleFileName);
+		if ((module != null) && (module instanceof IFile)) {
+            final IEditorPart editor = UIHelper.openEditor(TLAEditor.ID, (IFile) module);
+            
+            if (editor instanceof TLAEditor) {
+            	return (TLAEditor)editor;
+			} else if (editor instanceof TLAEditorAndPDFViewer) {
                 return ((TLAEditorAndPDFViewer) editor).getTLAEditor();
             }
         }
@@ -708,12 +710,16 @@ public class EditorUtil
         IDocument document = editor.getDocumentProvider().getDocument(editor.getEditorInput());
 
         // check if editor's file is currently parsed.
-        IFile file = ((FileEditorInput) editor.getEditorInput()).getFile();
-        String moduleName = ResourceHelper.getModuleName(file);
-
-        ParseResult parseResult = ResourceHelper.getValidParseResult(file);
-
-        return ResourceHelper.getTheoremNodeWithCaret(parseResult, moduleName, textSelection, document);
+        
+        if (editor.getEditorInput() instanceof FileEditorInput) {
+        	IFile file = ((FileEditorInput) editor.getEditorInput()).getFile();
+        	String moduleName = ResourceHelper.getModuleName(file);
+        	
+        	ParseResult parseResult = ResourceHelper.getValidParseResult(file);
+        	
+        	return ResourceHelper.getTheoremNodeWithCaret(parseResult, moduleName, textSelection, document);
+        }
+        return null;
     }
 
     /**
@@ -802,8 +808,7 @@ public class EditorUtil
         if (srcEditor != null)
         {
             Spec spec = ToolboxHandle.getCurrentSpec();
-            spec.setOpenDeclModuleName(srcEditor.getEditorInput().getName());
-            spec.setOpenDeclSelection((ITextSelection) srcEditor.getSelectionProvider().getSelection());
+            spec.setOpenDeclModuleName(srcEditor);
         }
     }
 

@@ -2,6 +2,7 @@
 
 package util;
 
+import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
 import java.util.List;
@@ -164,5 +165,34 @@ public class TLCRuntime {
 			return ARCH.x86_64;
 		}
 		return ARCH.x86;
+	}
+
+	// See java.lang.ProcessHandle.current().pid() or -1 when Java version -lt 9.
+	@SuppressWarnings({ "unchecked", "rawtypes" })
+	public long pid() {
+		// Once Java9 is minimum BREE, change to:
+        // return java.lang.ProcessHandle.current().pid();
+		try {
+			// Get class.
+			final ClassLoader classLoader = getClass().getClassLoader();
+	        final Class aClass = classLoader.loadClass("java.lang.ProcessHandle");
+	        // Execute static current()
+	        final Object o = aClass.getMethod("current").invoke(null, (Object[]) null);
+	        // Execute instance method pid()
+	        return (long) aClass.getMethod("pid").invoke(o, (Object[]) null);
+	    } catch (Exception e) {
+			return -1;
+		}
+	}
+
+	public boolean isThroughputOptimizedGC() {
+		final List<GarbageCollectorMXBean> gcs = ManagementFactory.getGarbageCollectorMXBeans();
+		for (GarbageCollectorMXBean gc : gcs) {
+			// This might not be a reliable way to identify the currently active GC.
+			if ("PS Scavenge".equals(gc.getName())) {
+				return true;
+			}
+		}
+		return false;
 	}
 }

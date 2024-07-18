@@ -25,10 +25,13 @@
  ******************************************************************************/
 package org.lamport.tla.toolbox.jcloud;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -38,9 +41,11 @@ import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.equinox.app.IApplication;
 import org.eclipse.equinox.app.IApplicationContext;
+import org.lamport.tla.toolbox.tool.tlc.job.ITLCJobStatus;
 import org.lamport.tla.toolbox.tool.tlc.job.TLCJobFactory;
 
 import tlc2.TLCGlobals;
+import util.ExecutionStatisticsCollector;
 
 public class Application implements IApplication {
 
@@ -59,7 +64,18 @@ public class Application implements IApplication {
 		final String modelDirectory = args[0];
 		
 		final Properties props = initializeFromFile(modelDirectory);
+		// By default send mail to the root account (might be overwritten below).
+		// Without specifying any email address, MailSender will not set up
+		// /mnt/tlc/MC.out and most of CloudDistributedTLCJob's functionality will not
+		// work (no TLC process output will be received).  Do not add if cloud.properties
+		// file has defined it already.
+		props.putIfAbsent(TLCJobFactory.MAIL_ADDRESS, "root@localhost");
 		props.put(TLCJobFactory.MAIN_CLASS, tlc2.TLC.class.getName());
+		
+		final ExecutionStatisticsCollector udc = new ExecutionStatisticsCollector();
+		if (udc.isEnabled()) {
+			props.put(ExecutionStatisticsCollector.PROP, udc.getIdentifier());
+		}
 
 		// Optional parameters
 		final String cloud = args.length >= 2 ? args[1] : "aws-ec2";
@@ -106,16 +122,32 @@ public class Application implements IApplication {
 		final TLCJobFactory factory = new CloudTLCJobFactory();
 		final CloudDistributedTLCJob job = (CloudDistributedTLCJob) factory.getTLCJob(cloud, new File(modelDirectory), 1, props, tlcParams.toString());
 		job.setIsCLI(true);
-		job.setDoJfr(true);
+//		job.setDoJfr(true); //Todo Reactivate once CloudTLC copies the JFR dump file to the local machine.
 		final IStatus status = job.run(new MyProgressMonitor(9));
 		// Show error message if any such as invalid credentials.
-		if (status.getSeverity() == IStatus.ERROR) {
+		if (status.getSeverity() == IStatus.ERROR || !(status instanceof ITLCJobStatus)) {
 			System.err.println(status.getMessage());
 			final Throwable exception = status.getException();
 			if (exception instanceof CloudDistributedTLCJob.ScriptException) {
 				System.err.printf("\n###############################\n\n%s\n###############################\n",
 						exception.getMessage());
 			}
+			// Signal unsuccessful execution.
+			return new Integer(1);
+		}
+		
+		// If no error above, read the (remote) TLC process output (stdout, no stderr)
+		// and print it on the local stdout.
+		final InputStream output = ((ITLCJobStatus) status).getOutput();
+		try {
+			final BufferedReader in = new BufferedReader(
+					new InputStreamReader(output));
+			String line;
+			while ((line = in.readLine()) != null) {
+				System.out.println(line);
+			}
+		} catch (IOException e) {
+			System.err.println(status.getMessage());
 			// Signal unsuccessful execution.
 			return new Integer(1);
 		}
@@ -136,9 +168,10 @@ public class Application implements IApplication {
 	 * @see org.eclipse.equinox.app.IApplication#stop()
 	 */
 	public void stop() {
+		// cannot be stopped!
 	}
 	
-	private static class MyProgressMonitor implements IProgressMonitor {
+	static class MyProgressMonitor implements IProgressMonitor {
 		private final DateFormat formatter = new SimpleDateFormat( "YYYY-MM-dd HH:mm:ss.SSS" );
 		private final int totalSteps;
 		private int steps = 1;
@@ -168,5 +201,9 @@ public class Application implements IApplication {
 		public void setTaskName(String name) {}
 
 		public void worked(int work) {}
+
+		public void incSteps(int steps) {
+			this.steps += steps;
+		}
 	}
 }

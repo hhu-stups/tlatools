@@ -6,13 +6,14 @@ package tla2sany.semantic;
 
 import java.util.Hashtable;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
 import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.st.TreeNode;
 import tla2sany.utilities.Strings;
 import tla2sany.xml.SymbolContext;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
 
 /***************************************************************************
 * An assume prove node represents something like                           *
@@ -351,16 +352,18 @@ public class AssumeProveNode extends LevelNode {
   }
 
   @Override
-  public final void walkGraph(Hashtable<Integer, ExploreNode> h) {
-    Integer uid = new Integer(myUID);
+  public final void walkGraph(Hashtable<Integer, ExploreNode> h, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (h.get(uid) != null) return;
     h.put(uid, this);
+    visitor.preVisit(this);
     int i = 0 ;
     while (i <  assumes.length) {
-      assumes[i].walkGraph(h) ;
+      assumes[i].walkGraph(h, visitor) ;
       i = i+1;
      } ;
-    prove.walkGraph(h) ;
+    prove.walkGraph(h, visitor) ;
+    visitor.postVisit(this);
   } // end walkGraph()
 
 

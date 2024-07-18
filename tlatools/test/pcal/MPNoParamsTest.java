@@ -46,5 +46,7 @@ public class MPNoParamsTest extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "250", "96", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "13"));
+
+	assertZeroUncovered();
 	}
 }

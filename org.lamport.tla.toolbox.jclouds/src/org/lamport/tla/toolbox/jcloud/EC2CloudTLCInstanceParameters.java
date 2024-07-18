@@ -30,7 +30,9 @@ import java.util.Properties;
 
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
+import org.jclouds.aws.ec2.compute.AWSEC2TemplateOptions;
 import org.jclouds.aws.ec2.reference.AWSEC2Constants;
+import org.jclouds.compute.options.TemplateOptions;
 import org.jclouds.location.reference.LocationConstants;
 
 public class EC2CloudTLCInstanceParameters extends CloudTLCInstanceParameters {
@@ -92,6 +94,29 @@ public class EC2CloudTLCInstanceParameters extends CloudTLCInstanceParameters {
 		// (i.e. South America).
 		properties.setProperty(LocationConstants.PROPERTY_REGIONS, getRegion());
 	}
+	
+	/* (non-Javadoc)
+	 * @see org.lamport.tla.toolbox.jcloud.CloudTLCInstanceParameters#mungeTemplateOptions(org.jclouds.compute.options.TemplateOptions)
+	 */
+	@Override
+	public void mungeTemplateOptions(TemplateOptions templateOptions) {
+		//TODO Create (and the reuse) subnet automatically for instance types that require it.
+		final String subnetId = System.getProperty("aws-ec2.subnetid");
+		if (subnetId != null) {
+			// Manually create a subnet first:
+			// 1) Log into https://console.aws.amazon.com/vpc/ and select the correct region (match getRegion())
+			// 1a) Optionally choose tenancy "dedicated" for more predictable performance
+			// 2) Create a VPC (defaults are fine)
+			// 3) Create a subnet (accept defaults) associated with VPC
+			// 3a) "Modify auto-assign IP settings" of newly created subnet to automatically assign a public ip
+			// 4) Create an Internet Gateway associated with the VPC
+			// 4a) Associate with VPC 
+			// 5) Create a Route Table for the VPC
+			// 5a) Create a route with CIDR 0.0.0.0/0 via the gateway created in 4)
+			// 6) Modify inbound rules of (automatically) created security group to include ssh/22,http/80,https/443 with source "0.0.0.0/0"
+			templateOptions.as(AWSEC2TemplateOptions.class).subnetId(subnetId);
+		}
+	}
 
 	@Override
 	public String getHostnameSetup() {
@@ -113,7 +138,7 @@ public class EC2CloudTLCInstanceParameters extends CloudTLCInstanceParameters {
 		// for paravirtual vs. hvm (if instance startup fails with funny errors
 		// such as symlinks failing to be created, you accidentally picked paravirtual.
 		 // "us-east-1,bionic,amd64,hvm:instance-store"
-		final String imageId = System.getProperty("aws-ec2.image", "ami-9fedbbe0");
+		final String imageId = System.getProperty("aws-ec2.image", "ami-053295bb822a154ba");
 		return getRegion() + "/" + imageId;
 	}
 
@@ -142,7 +167,7 @@ public class EC2CloudTLCInstanceParameters extends CloudTLCInstanceParameters {
 		// Create a raid0 out of the two instance store
 		// disks and optimize its fs towards performance
 		// by sacrificing data durability.
-		return "umount /mnt && "
+		return "umount /mnt ; "
 		+ "/usr/bin/yes|/sbin/mdadm --create --force --auto=yes /dev/md0 --level=0 --raid-devices=2 --assume-clean --name=tlaplus /dev/xvdb /dev/xvdc && "
 		+ "/sbin/mdadm --detail --scan >> /etc/mdadm/mdadm.conf && "
 		+ "sed -i '\\?^/dev/xvdb?d' /etc/fstab && "
@@ -156,7 +181,8 @@ public class EC2CloudTLCInstanceParameters extends CloudTLCInstanceParameters {
 	 */
 	@Override
 	public String getJavaVMArgs() {
-		return System.getProperty("aws-ec2.vmargs", super.getJavaVMArgs("-Xmx56G -Xms56G"));
+		return System.getProperty("aws-ec2.vmargs",
+				super.getJavaVMArgs(System.getProperty("aws-ec2.vmargs.memory", "-Xmx56G -Xms56G")));
 	}
 
 	/* (non-Javadoc)
@@ -164,7 +190,7 @@ public class EC2CloudTLCInstanceParameters extends CloudTLCInstanceParameters {
 	 */
 	@Override
 	public String getTLCParameters() {
-		return System.getProperty("aws-ec2.tlcparams", super.getTLCParameters(32));
+		return System.getProperty("aws-ec2.tlcparams", super.getTLCParameters(Integer.getInteger("aws-ec2.tlcparams.workers", 32)));
 	}
 
 	/* (non-Javadoc)
@@ -172,6 +198,7 @@ public class EC2CloudTLCInstanceParameters extends CloudTLCInstanceParameters {
 	 */
 	@Override
 	public String getJavaWorkerVMArgs() {
-		return System.getProperty("aws-ec2.vmworkerargs", super.getJavaWorkerVMArgs("-Xmx24G -Xms24G -XX:MaxDirectMemorySize=32g"));
+		return System.getProperty("aws-ec2.vmworkerargs", super.getJavaWorkerVMArgs(
+				System.getProperty("aws-ec2.vmworkerargs.memory", "-Xmx24G -Xms24G -XX:MaxDirectMemorySize=32g")));
 	}
 }

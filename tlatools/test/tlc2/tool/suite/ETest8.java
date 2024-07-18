@@ -31,11 +31,12 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 
 public class ETest8 extends SuiteETestCase {
 
 	public ETest8() {
-		super(new String[]{"-simulate"});
+		super(new String[]{"-simulate"}, ExitStatus.ERROR /*ExitStatus.VIOLATION_ASSERT*/); //TODO Simulator doesn't report correct exit status.
 	}
 	
 	/* (non-Javadoc)
@@ -50,5 +51,7 @@ public class ETest8 extends SuiteETestCase {
 		assertTrue(recorder.recorded(EC.TLC_FINISHED));
 		assertTrue(recorder.recorded(EC.TLC_STATS_SIMU));
 		assertFalse(recorder.recorded(EC.TLC_DEADLOCK_REACHED));
+		
+		assertUncovered("line 18, col 15 to line 18, col 22 of module etest8: 0\n");
 	}
 }

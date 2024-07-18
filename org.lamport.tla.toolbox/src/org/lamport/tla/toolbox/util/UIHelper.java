@@ -1,10 +1,12 @@
 package org.lamport.tla.toolbox.util;
 
+import java.awt.Frame;
 import java.io.File;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.eclipse.core.commands.Command;
 import org.eclipse.core.commands.ExecutionException;
@@ -22,8 +24,10 @@ import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IAdaptable;
 import org.eclipse.core.runtime.IConfigurationElement;
 import org.eclipse.core.runtime.IExtensionRegistry;
+import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Platform;
+import org.eclipse.core.runtime.Status;
 import org.eclipse.e4.core.contexts.IEclipseContext;
 import org.eclipse.e4.ui.model.application.ui.MElementContainer;
 import org.eclipse.e4.ui.model.application.ui.MUIElement;
@@ -44,10 +48,15 @@ import org.eclipse.jface.viewers.StructuredSelection;
 import org.eclipse.jface.viewers.Viewer;
 import org.eclipse.jface.window.IShellProvider;
 import org.eclipse.swt.SWT;
+import org.eclipse.swt.awt.SWT_AWT;
 import org.eclipse.swt.custom.BusyIndicator;
 import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.graphics.Rectangle;
+import org.eclipse.swt.internal.DPIUtil;
+import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.widgets.Button;
+import org.eclipse.swt.widgets.Combo;
+import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.FileDialog;
@@ -70,6 +79,7 @@ import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.WorkbenchException;
 import org.eclipse.ui.commands.ICommandService;
 import org.eclipse.ui.editors.text.FileDocumentProvider;
+import org.eclipse.ui.forms.widgets.TableWrapData;
 import org.eclipse.ui.handlers.IHandlerService;
 import org.eclipse.ui.ide.FileStoreEditorInput;
 import org.eclipse.ui.part.FileEditorInput;
@@ -96,11 +106,12 @@ import tla2sany.st.Location;
 
 /**
  * A Helper for handling the RCP Objects like windows, editors and views
- * 
- * @version $Id$
- * @author zambrovski
  */
+@SuppressWarnings("restriction")  // DPIUtil is restricted - another heckuva job by the SWT folks
 public class UIHelper {
+	private static final boolean PLATFORM_IS_LINUX = Platform.getOS().equals(Platform.OS_LINUX);
+	private static final AtomicBoolean SCALE_DETERMINATION_ATTEMPTED = new AtomicBoolean(false);
+	private static double DISPLAY_SCALE = 1.0;
 
 	/**
 	 * Closes all windows with a perspective
@@ -839,6 +850,8 @@ public class UIHelper {
 			return (Control) control;
 		} else if (control instanceof Spinner) {
 			return (Control) control;
+		} else if (control instanceof Combo) {
+			return (Control) control;
 		} else if (control instanceof Control) {
 			// why not return the control when object is instanceof control?
 			return null;
@@ -868,7 +881,7 @@ public class UIHelper {
 	 * @see UIHelper#jumpToLocation(Location, boolean)
 	 */
 	public static void jumpToLocation(final Location location) {
-		jumpToLocation(location, false);
+		jumpToLocation(location, false, null);
 	}
 
 	/**
@@ -876,8 +889,11 @@ public class UIHelper {
 	 * editor on the module if an editor is not already open on it.
 	 * 
 	 * @param location
+	 * @param jumpToPCal
+	 * @param workbenchPart if non-null, this part will be given focus on the workbench after selecting the document
+	 * 							location.
 	 */
-	public static void jumpToLocation(Location location, final boolean jumpToPCal) {
+	public static void jumpToLocation(Location location, final boolean jumpToPCal, final IWorkbenchPart workbenchPart) {
 		if (location != null) {
 			// the source of a location is the module name
 			IResource moduleResource = ResourceHelper.getResourceByModuleName(location.source());
@@ -984,7 +1000,7 @@ public class UIHelper {
 										}
 									}
 								}
-
+								
 								if (textEditor != null) {
 									// the text editor may not be active, so set
 									// it active
@@ -1011,6 +1027,14 @@ public class UIHelper {
 					 * is not necessary in this context.
 					 */
 					fileDocumentProvider.disconnect(fileEditorInput);
+					
+					if (workbenchPart != null) {
+						final IWorkbenchPage activePage = getActivePage();
+						
+						if (activePage != null) {
+							activePage.activate(workbenchPart);
+						}
+					}
 				}
 			}
 		}
@@ -1139,40 +1163,44 @@ public class UIHelper {
 					(IFile) moduleResource));
 
 			if (editor != null) {
-				ITextEditor textEditor;
-				/*
-				 * Try to get the text editor that contains the module. The
-				 * module may be open in a multipage editor.
-				 */
-				if (editor instanceof ITextEditor) {
-					textEditor = (ITextEditor) editor;
-				} else {
-					textEditor = (ITextEditor) editor.getAdapter(ITextEditor.class);
-				}
+				jumpToSelection(editor, its);
+			}
+		}
+	}
 
-				if (editor instanceof MultiPageEditorPart) {
-					/*
-					 * In this case, get all editors that are part of the
-					 * multipage editor. Iterate through until a text editor is
-					 * found.
-					 */
-					IEditorPart[] editors = ((MultiPageEditorPart) editor).findEditors(editor.getEditorInput());
-					for (int i = 0; i < editors.length; i++) {
-						if (editors[i] instanceof ITextEditor) {
-							textEditor = (ITextEditor) editors[i];
-						}
-					}
-				}
+	public static void jumpToSelection(IEditorPart editor, ITextSelection its) {
+		ITextEditor textEditor;
+		/*
+		 * Try to get the text editor that contains the module. The
+		 * module may be open in a multipage editor.
+		 */
+		if (editor instanceof ITextEditor) {
+			textEditor = (ITextEditor) editor;
+		} else {
+			textEditor = (ITextEditor) editor.getAdapter(ITextEditor.class);
+		}
 
-				if (textEditor != null) {
-					// the text editor may not be active, so set it active
-					if (editor instanceof MultiPageEditorPart) {
-						((MultiPageEditorPart) editor).setActiveEditor(textEditor);
-					}
-					// getActivePage().activate(textEditor);
-					textEditor.selectAndReveal(its.getOffset(), its.getLength());
+		if (editor instanceof MultiPageEditorPart) {
+			/*
+			 * In this case, get all editors that are part of the
+			 * multipage editor. Iterate through until a text editor is
+			 * found.
+			 */
+			IEditorPart[] editors = ((MultiPageEditorPart) editor).findEditors(editor.getEditorInput());
+			for (int i = 0; i < editors.length; i++) {
+				if (editors[i] instanceof ITextEditor) {
+					textEditor = (ITextEditor) editors[i];
 				}
 			}
+		}
+
+		if (textEditor != null) {
+			// the text editor may not be active, so set it active
+			if (editor instanceof MultiPageEditorPart) {
+				((MultiPageEditorPart) editor).setActiveEditor(textEditor);
+			}
+			// getActivePage().activate(textEditor);
+			textEditor.selectAndReveal(its.getOffset(), its.getLength());
 		}
 	}
 
@@ -1363,4 +1391,104 @@ public class UIHelper {
 		}
 		return false;
 	}
+	
+	/**
+	 * This appropriately scales the non-zero spatial values contained in the
+	 * <code>TableWrapData</code> instance to observe display scaling.
+	 * 
+	 * @param tableWrapData the <code>TableWrapData</code> which should be altered
+	 */
+	public static void appropriatelyScaleTableWrapData(final TableWrapData tableWrapData) {
+		// Windows and Mac appear to do the correct thing
+		if (Platform.getOS().equals(Platform.OS_LINUX)) {
+			final double scale = getDisplayScaleFactor();
+			
+			tableWrapData.indent = (int)((double)tableWrapData.indent * scale);
+			
+			if (tableWrapData.maxWidth != SWT.DEFAULT) {
+				tableWrapData.maxWidth = (int)((double)tableWrapData.maxWidth * scale);
+			}
+			if (tableWrapData.maxHeight != SWT.DEFAULT) {
+				tableWrapData.maxHeight = (int)((double)tableWrapData.maxHeight * scale);
+			}
+			if (tableWrapData.heightHint != SWT.DEFAULT) {
+				tableWrapData.heightHint = (int)((double)tableWrapData.heightHint * scale);
+			}
+		}
+	}
+	
+	/**
+	 * This appropriately scales the non-zero spatial values contained in the
+	 * <code>GridData</code> instance to observe display scaling.
+	 * 
+	 * @param gridData the <code>GridData</code> which should be altered
+	 */
+	public static void appropriatelyScaleGridData(final GridData gridData) {
+		// Windows and Mac appear to do the correct thing.
+		if (Platform.getOS().equals(Platform.OS_LINUX)) {
+			final double scale = getDisplayScaleFactor();
+			
+			gridData.horizontalIndent = (int)((double)gridData.horizontalIndent * scale);
+			gridData.verticalIndent = (int)((double)gridData.verticalIndent * scale);
+			
+			if (gridData.widthHint != SWT.DEFAULT) {
+				gridData.widthHint = (int)((double)gridData.widthHint * scale);
+			}
+			if (gridData.heightHint != SWT.DEFAULT) {
+				gridData.heightHint = (int)((double)gridData.heightHint * scale);
+			}
+			gridData.minimumWidth = (int)((double)gridData.minimumWidth * scale);
+			gridData.minimumHeight = (int)((double)gridData.minimumHeight * scale);
+		}
+	}
+	
+	/**
+	 * "HiDPI" on Linux (Ubu 18.04 GNOME) is a total hot mess. With the Tweaks font scaling set to 1.7, we see:
+	 * 			gsettings com.ubuntu.user-interface.desktop text-scaling-factor 1.0
+	 * 			gsettings org.gnome.desktop.interface text-scaling-factor 1.7
+	 * 			DPIUtil.getDeviceZoom() == 100
+	 * 			Toolkit's DPI == 95
+	 * 			SWT Display's DPI == 96
+	 * 			GraphicsConfiguration's default AffineTransform's scale == 2.0
+	 * 
+	 * I'm not thrilled with relying on executing an external process to invoke gsettings and process that response.		
+	 * 
+	 * @return the scaling factor of the screen on which the app is running (<b>OR, NOTE</b> on the screen which the
+	 * 				Eclipse which launched the app is sitting, if launched from Eclipse.)
+	 */
+	public static double getDisplayScaleFactor() {
+		if (!SCALE_DETERMINATION_ATTEMPTED.getAndSet(true)) {
+			if (PLATFORM_IS_LINUX) {
+				Shell s = null;
+				Composite c = null;
+				
+				try {
+					final Display d = PlatformUI.getWorkbench().getDisplay();
+					
+					s = new Shell(d);
+					c = new Composite(s, SWT.EMBEDDED);
+					
+					final Frame f = SWT_AWT.new_Frame(c);
+					DISPLAY_SCALE = f.getGraphicsConfiguration().getDefaultTransform().getScaleX();
+				} catch (Exception e) {
+					Activator.getDefault().getLog().log(new Status(IStatus.ERROR, Activator.PLUGIN_ID,
+							"Exception fetching Linux display scale.", e));
+					
+					DISPLAY_SCALE = 1.0;
+				} finally {
+					if (c != null) {
+						c.dispose();
+					}
+					
+					if (s != null) {
+						s.dispose();
+					}
+				}
+			} else {
+				DISPLAY_SCALE = (double)DPIUtil.getDeviceZoom() / 100.0;
+			}
+		}
+		
+		return DISPLAY_SCALE;
+    }
 }

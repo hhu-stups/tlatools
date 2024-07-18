@@ -46,5 +46,11 @@ public class ULFactorial2Test extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "10", "9", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "9"));
+
+		assertUncovered("line 53, col 24 to line 53, col 43 of module ULFactorial2: 0\n"
+				+ "line 54, col 24 to line 54, col 41 of module ULFactorial2: 0\n"
+				+ "line 55, col 24 to line 55, col 47 of module ULFactorial2: 0\n"
+				+ "line 56, col 24 to line 56, col 43 of module ULFactorial2: 0\n"
+				+ "line 57, col 24 to line 57, col 55 of module ULFactorial2: 0");
 	}
 }

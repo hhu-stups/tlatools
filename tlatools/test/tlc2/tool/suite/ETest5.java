@@ -25,16 +25,24 @@
  ******************************************************************************/
 package tlc2.tool.suite;
 
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertFalse;
 
 import org.junit.Test;
 
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 
 public class ETest5 extends SuiteETestCase {
 
+	public ETest5() {
+		super(ExitStatus.ERROR_SPEC_PARSE);
+	}
+
 	@Test
 	public void testSpec() {
-		assertTrue(recorder.recorded(EC.GENERAL));
+		assertFalse(recorder.recorded(EC.GENERAL));
+		assertSubstring("*** Errors: 1\n\n"
+				+ "line 13, col 17 to line 13, col 20 of module etest5\n\n"
+				+ "Unknown operator: `Init'.");
 	}
 }

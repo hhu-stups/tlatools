@@ -25,7 +25,8 @@
  ******************************************************************************/
 package tlc2.tool;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,12 +34,13 @@ import java.util.List;
 import org.junit.Test;
 
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 import tlc2.tool.liveness.ModelCheckerTestCase;
 
 public class RandomElementTest extends ModelCheckerTestCase {
 
 	public RandomElementTest() {
-		super("RandomElement", new String[] {"-seed", Long.toString(8006803340504660123L)});
+		super("RandomElement", new String[] {"-seed", Long.toString(8006803340504660123L)}, ExitStatus.VIOLATION_SAFETY);
 	}
 
 	@Test
@@ -62,5 +64,7 @@ public class RandomElementTest extends ModelCheckerTestCase {
 		expectedTrace.add("/\\ x = 151\n/\\ y = 9");
 		expectedTrace.add("/\\ x = 767\n/\\ y = 10");
 		assertTraceWith(recorder.getRecords(EC.TLC_STATE_PRINT2), expectedTrace);
+
+	assertZeroUncovered();
 	}
 }

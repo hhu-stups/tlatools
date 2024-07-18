@@ -1,10 +1,12 @@
 package org.lamport.tla.toolbox.spec;
 
 import java.io.File;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,8 +25,9 @@ import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Platform;
-import org.eclipse.core.runtime.SubProgressMonitor;
+import org.eclipse.core.runtime.SubMonitor;
 import org.eclipse.jface.text.ITextSelection;
+import org.eclipse.ui.texteditor.ITextEditor;
 import org.lamport.tla.toolbox.Activator;
 import org.lamport.tla.toolbox.spec.parser.IParseConstants;
 import org.lamport.tla.toolbox.tool.SpecLifecycleParticipant;
@@ -35,7 +38,10 @@ import org.lamport.tla.toolbox.util.pref.PreferenceStoreHelper;
 
 import pcal.TLAtoPCalMapping;
 import tla2sany.modanalyzer.SpecObj;
+import tla2sany.semantic.Context;
+import tla2sany.semantic.ExternalModuleTable;
 import util.SimpleFilenameToStream;
+import util.UniqueString;
 
 /**
  * Represents a specification handle in the toolbox
@@ -69,13 +75,11 @@ public class Spec implements IAdaptable {
     private final Map<String, TLAtoPCalMapping> spec2mappings = new HashMap<String, TLAtoPCalMapping>();
 
     /**
-     * The following fields are used for remembering the jumping-off point for a
+     * The following stack is used for remembering the jumping-off point for a
      * Goto Declaration or ShowDefinitions command, so we can return to it with
-     * a Return from Goto Declaration command. They should probably be changed
-     * to arrays so we can call return from a Sequence of such commands.
+     * a Return from Goto Declaration command.
      */
-    private String openDeclModuleName;
-    private ITextSelection openDeclSelection;
+    private final Deque<Pair> openDecls = new ArrayDeque<>();
 
     /**
      * The following fields are used to remember the result of a Show Uses
@@ -382,33 +386,31 @@ public class Spec implements IAdaptable {
     }
 
     /**
-     * @param openDeclModuleName
-     *            the openDeclModuleName to set
+     * @param editor
+     *            the ITextEditor whose current ITextSelection to remember.
      */
-    public void setOpenDeclModuleName(String openDeclModuleName) {
-        this.openDeclModuleName = openDeclModuleName;
-    }
+	public void setOpenDeclModuleName(ITextEditor editor) {
+		this.setOpenDeclModuleName(editor, (ITextSelection) editor.getSelectionProvider().getSelection());
+	}
 
-    /**
+    public void setOpenDeclModuleName(ITextEditor editor, ITextSelection selection) {
+    	this.openDecls.push(new Pair(editor, selection));
+    }
+    
+   /**
      * @return the openDeclModuleName
      */
-    public String getOpenDeclModuleName() {
-        return openDeclModuleName;
+    public Pair getOpenDeclModuleName() {
+        return this.openDecls.poll();
     }
-
-    /**
-     * @param openDeclSelection
-     *            the openDeclSelection to set
-     */
-    public void setOpenDeclSelection(ITextSelection openDeclSelection) {
-        this.openDeclSelection = openDeclSelection;
-    }
-
-    /**
-     * @return the openDeclSelection
-     */
-    public ITextSelection getOpenDeclSelection() {
-        return openDeclSelection;
+    
+    public static class Pair {
+    	public final ITextEditor editor;
+    	public final ITextSelection selection;
+        public Pair(ITextEditor editor, ITextSelection selection) {
+			this.editor = editor;
+			this.selection = selection;
+		}
     }
 
     /**
@@ -491,6 +493,31 @@ public class Spec implements IAdaptable {
 
             for (final String location : tlaLibraryPath) {
                 buf.append(location);
+                buf.append(File.pathSeparator);
+            }
+
+            final String vmArg = buf.toString();
+
+            // remove dangling pathSeparator
+            return vmArg.substring(0, vmArg.length() - 1);
+        } else {
+            return "";
+        }
+    }
+    
+    public String getTLALibraryPathAsClassPath() {
+        final String[] tlaLibraryPath = getTLALibraryPath();
+
+        if (tlaLibraryPath.length > 0) {
+            final StringBuffer buf = new StringBuffer(tlaLibraryPath.length * 2);
+
+            for (final String location : tlaLibraryPath) {
+            	if (new File(location).isDirectory()) {
+            		// For directories include everything.
+            		buf.append(location + File.separator + "*") ;
+            	} else {
+            		buf.append(location);
+            	}
                 buf.append(File.pathSeparator);
             }
 
@@ -585,8 +612,7 @@ public class Spec implements IAdaptable {
             // nested.
             if (!mapping.equals(oldMapping)) {
                 // Use a submonitor to show progress as well as failure
-                final SubProgressMonitor subProgressMonitor = new SubProgressMonitor(
-                        monitor, 1);
+				final SubMonitor subProgressMonitor = SubMonitor.convert(monitor, 1);
                 subProgressMonitor
                         .setTaskName("Writing TLA+ to PCal mapping for "
                                 + filename);
@@ -627,6 +653,16 @@ public class Spec implements IAdaptable {
 		return Activator.getSpecManager().getSpecLoaded() == this;
 	}
 
+	public Module getModule(final String moduleName) {
+		final List<Module> modules = getModules();
+		for (Module module : modules) {
+			if (moduleName.equals(module.getModuleName())) {
+				return module;
+			}
+		}
+		return null;
+	}
+	
 	public List<Module> getModules() {
 		final List<Module> modules = new ArrayList<Module>();
 		final IResource[] moduleResources = getModuleResources();
@@ -640,5 +676,31 @@ public class Spec implements IAdaptable {
 			modules.add(module);
 		}
 		return modules;
+	}
+
+	public boolean declares(final String str) {
+		return declares(UniqueString.uniqueStringOf(str));
+	}
+
+	public boolean declares(final UniqueString us) {
+		if (getRootModule() != null) {
+			final ExternalModuleTable externalModuleTable = getRootModule().getExternalModuleTable();
+			final Context context = externalModuleTable.getContextForRootModule();
+			if (context != null) {
+				return context.occurSymbol(us);
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Transitively deletes the given marker type on all modules (including the root
+	 * module) of the spec.
+	 */
+	public void deleteMarker(final String markerType) throws CoreException {
+		getRootFile().deleteMarkers(markerType, true, IResource.DEPTH_INFINITE);
+		for (IResource r : getModuleResources()) {
+			r.deleteMarkers(markerType, true, IResource.DEPTH_INFINITE);
+		}
 	}
 }

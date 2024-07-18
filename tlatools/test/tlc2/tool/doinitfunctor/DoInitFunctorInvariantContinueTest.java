@@ -33,13 +33,14 @@ import static org.junit.Assert.assertTrue;
 import java.util.List;
 
 import org.junit.Test;
+
 import tlc2.output.EC;
 import tlc2.tool.liveness.ModelCheckerTestCase;
 
 public class DoInitFunctorInvariantContinueTest extends ModelCheckerTestCase {
 	
 	public DoInitFunctorInvariantContinueTest() {
-		super("DoInitFunctorInvariantContinue", "DoInitFunctor", new String[] {"-continue"});
+		super("DoInitFunctorInvariantContinue", "DoInitFunctor", new String[] {"-continue"}/*, ExitStatus.VIOLATION_SAFETY*/);  //TODO The exit status is incorrect because TLC shows "no error" regardless of the number of violations with "-continue"
 	}
 
 	@Test
@@ -57,5 +58,7 @@ public class DoInitFunctorInvariantContinueTest extends ModelCheckerTestCase {
 			assertEquals("Inv", violation[0]);
 			assertEquals("x = " + (j+1) + "\n", violation[1]);
 		}
+
+		assertZeroUncovered();
 	}
 }

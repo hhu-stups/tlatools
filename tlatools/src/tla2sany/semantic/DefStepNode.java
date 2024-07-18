@@ -3,14 +3,15 @@ package tla2sany.semantic;
 
 import java.util.Hashtable;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
 import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.st.TreeNode;
 import tla2sany.utilities.Strings;
 import tla2sany.xml.SymbolContext;
 import util.UniqueString;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
 
 /***************************************************************************
 * This class represents definition step of a proof, which consists of a    *
@@ -59,13 +60,15 @@ public class DefStepNode extends LevelNode {
    }
 
   @Override
-  public void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable) {
-    Integer uid = new Integer(myUID);
+  public void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
     semNodesTable.put(uid, this);
+    visitor.preVisit(this);
     for (int  i = 0; i < defs.length; i++) {
-      defs[i].walkGraph(semNodesTable);
+      defs[i].walkGraph(semNodesTable, visitor);
       } ;
+      visitor.postVisit(this);
    }
 
   @Override

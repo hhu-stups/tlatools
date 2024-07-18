@@ -30,6 +30,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
+
 import tlc2.output.EC;
 
 /**
@@ -51,5 +52,7 @@ public class LoopTestWeakFair extends ModelCheckerTestCase {
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "4"));
 
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_CHECKING_TEMPORAL_PROPS, "complete", "4"));
+
+	assertZeroUncovered();
 	}
 }

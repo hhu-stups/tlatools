@@ -31,9 +31,12 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.util.List;
+
 import org.junit.Test;
+
 import tlc2.TLC;
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 import tlc2.tool.Simulator;
 import tlc2.tool.TLCStateInfo;
 import tlc2.tool.liveness.ModelCheckerTestCase;
@@ -48,10 +51,10 @@ public class LiveCheckSimulationTest2a extends ModelCheckerTestCase {
 	}
 
 	public LiveCheckSimulationTest2a() {
-		super("Test2a", "/", new String[] {"-simulate", "-depth", "10"});
+		super("Test2a", "/", new String[] {"-simulate", "-depth", "10"}, ExitStatus.VIOLATION_LIVENESS);
 		
 		// Stop after 100 traces due to lack of general timeout regardless of outcome
-		TLC.traceNum = 100;
+		TLC.setTraceNum(100);
 	}
 	
 	@Test

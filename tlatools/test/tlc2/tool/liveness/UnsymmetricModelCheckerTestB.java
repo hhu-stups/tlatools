@@ -30,6 +30,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
+
 import tlc2.output.EC;
 
 public class UnsymmetricModelCheckerTestB extends ModelCheckerTestCase {
@@ -51,5 +52,7 @@ public class UnsymmetricModelCheckerTestB extends ModelCheckerTestCase {
 	
 		// Contrary to UMCTA, B doesn't find a counter-example. This is due to
 		// the CHOOSE on S and the selected initial state.
+
+		assertUncovered("line 37, col 31 to line 37, col 36 of module Unsymmetric: 0");
 	}
 }

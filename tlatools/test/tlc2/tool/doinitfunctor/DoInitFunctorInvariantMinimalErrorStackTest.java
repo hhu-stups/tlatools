@@ -25,35 +25,34 @@
  ******************************************************************************/
 package tlc2.tool.doinitfunctor;
 
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 import tlc2.tool.liveness.ModelCheckerTestCase;
 
 public class DoInitFunctorInvariantMinimalErrorStackTest extends ModelCheckerTestCase {
 
 	public DoInitFunctorInvariantMinimalErrorStackTest() {
-		super("DoInitFunctorMinimalErrorStack", "DoInitFunctor");
+		super("DoInitFunctorMinimalErrorStack", "DoInitFunctor", ExitStatus.FAILURE_SPEC_EVAL);
 	}
 
 	@Test
 	public void testSpec() {
 		assertTrue(recorder.recorded(EC.TLC_FINISHED));
-		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "2", "2", "2"));
-		assertFalse(recorder.recorded(EC.GENERAL));
+		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "1", "1", "1"));
 
-		assertTrue(recorder.recordedWithStringValues(EC.TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE,
-				"public static tlc2.value.BoolValue tlc2.module.Naturals.GEQ(tlc2.value.Value,tlc2.value.Value)",
-				"The first argument of > should be an integer, but instead it is:\n" + 
-				"<<1, 1>>"));
+		assertTrue(recorder.recordedWithStringValues(EC.TLC_MODULE_ARGUMENT_ERROR_AN,
+				"first", ">", "integer", "<<1, 1>>"));
 
 		String errorStack = "0. Line 8, column 3 to line 9, column 13 in DoInitFunctorMinimalErrorStack\n"
 				+ "1. Line 8, column 6 to line 8, column 25 in DoInitFunctorMinimalErrorStack\n"
 				+ "2. Line 9, column 6 to line 9, column 13 in DoInitFunctorMinimalErrorStack\n"
 				+ "3. Line 14, column 8 to line 14, column 13 in DoInitFunctorMinimalErrorStack\n\n";
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_NESTED_EXPRESSION, errorStack));
+
+		assertUncovered("line 11, col 20 to line 11, col 33 of module DoInitFunctorMinimalErrorStack: 0");
 	}
 }

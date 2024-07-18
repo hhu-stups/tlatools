@@ -44,5 +44,7 @@ public class AssignmentInitTest extends ModelCheckerTestCase {
 		assertTrue(recorder.recorded(EC.TLC_FINISHED));
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "6", "5", "0"));
+
+	assertZeroUncovered();
 	}
 }

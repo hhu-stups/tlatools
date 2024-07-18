@@ -46,6 +46,7 @@ public class MultiAssignmentTest extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "56", "27", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "7"));
+		assertZeroUncovered();
 	}
 }
 /*

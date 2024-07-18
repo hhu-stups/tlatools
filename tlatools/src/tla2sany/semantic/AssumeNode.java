@@ -5,13 +5,15 @@ package tla2sany.semantic;
 import java.util.HashSet;
 import java.util.Hashtable;
 
-import tla2sany.explorer.ExploreNode;
-import tla2sany.st.TreeNode;
-import tla2sany.utilities.Strings;
-import tla2sany.xml.SymbolContext;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
+
+import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
+import tla2sany.st.TreeNode;
+import tla2sany.utilities.Strings;
+import tla2sany.xml.SymbolContext;
 
 /**
  * This class represents an assumption about the constants in a module.
@@ -184,13 +186,15 @@ public AssumeNode(TreeNode stn, ExprNode expr, ModuleNode mn,
    * Explorer tool.
    */
   @Override
-  public final void walkGraph (Hashtable<Integer, ExploreNode> semNodesTable) {
-    Integer uid = new Integer(myUID);
+  public final void walkGraph (Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
 
     if (semNodesTable.get(uid) != null) return;
 
     semNodesTable.put(uid, this);
-    if (assumeExpr != null) {assumeExpr.walkGraph(semNodesTable);} ;
+    visitor.preVisit(this);
+    if (assumeExpr != null) {assumeExpr.walkGraph(semNodesTable, visitor);} ;
+    visitor.postVisit(this);
   }
 
   /* MR: This is the same as SymbolNode.exportDefinition. Exports the actual theorem content, not only a reference.

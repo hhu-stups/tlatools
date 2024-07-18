@@ -34,6 +34,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -48,6 +49,7 @@ import org.apache.commons.io.filefilter.NotFileFilter;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IFolder;
 import org.eclipse.core.resources.IMarker;
+import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.IResourceRuleFactory;
 import org.eclipse.core.resources.IWorkspace;
@@ -63,9 +65,11 @@ import org.eclipse.core.runtime.Platform;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.SubMonitor;
 import org.eclipse.core.runtime.jobs.ISchedulingRule;
+import org.eclipse.debug.core.DebugException;
 import org.eclipse.debug.core.DebugPlugin;
 import org.eclipse.debug.core.ILaunch;
 import org.eclipse.debug.core.ILaunchConfiguration;
+import org.eclipse.debug.core.ILaunchConfigurationType;
 import org.eclipse.debug.core.ILaunchConfigurationWorkingCopy;
 import org.eclipse.debug.core.ILaunchManager;
 import org.eclipse.jface.text.BadLocationException;
@@ -77,7 +81,10 @@ import org.eclipse.ui.part.FileEditorInput;
 import org.lamport.tla.toolbox.spec.Spec;
 import org.lamport.tla.toolbox.tool.ToolboxHandle;
 import org.lamport.tla.toolbox.tool.tlc.TLCActivator;
+import org.lamport.tla.toolbox.tool.tlc.launch.IConfigurationConstants;
+import org.lamport.tla.toolbox.tool.tlc.launch.IConfigurationDefaults;
 import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationConstants;
+import org.lamport.tla.toolbox.tool.tlc.launch.TLCModelLaunchDelegate;
 import org.lamport.tla.toolbox.tool.tlc.model.Model.StateChangeListener.ChangeEvent;
 import org.lamport.tla.toolbox.tool.tlc.model.Model.StateChangeListener.ChangeEvent.State;
 import org.lamport.tla.toolbox.tool.tlc.traceexplorer.SimpleTLCState;
@@ -128,11 +135,15 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	}
 
 	/**
-	 * @param fullQualifiedModelName The full-qualified (includes the Spec name and separator too) name of the Model.
+	 * @param modelName The full-qualified (includes the Spec name and separator too) name of the Model.
 	 * @return A Model, iff a Model by the given name exists and <code>null</code> otherwise.
 	 */
 	public static Model getByName(final String modelName) {
 		return TLCModelFactory.getByName(modelName);
+	}
+	
+	public static String fullyQualifiedNameFromSpecNameAndModelName(final String specName, final String modelName) {
+		return specName + SPEC_MODEL_DELIM + modelName;
 	}
 	       
 	/**
@@ -248,16 +259,55 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		return this.spec;
 	}
 
-	public Model copy(String newModelName) {
-		newModelName = sanitizeName(newModelName);
+	public Model copy(final String newModelName) {
+		final String sanitizedNewName = sanitizeName(newModelName);
 		try {
-			final ILaunchConfigurationWorkingCopy copy = this.launchConfig
-					.copy(getSpec().getName() + SPEC_MODEL_DELIM + newModelName);
-            copy.setAttribute(ModelHelper.MODEL_NAME, newModelName);
+			final String fullyQualified = fullyQualifiedNameFromSpecNameAndModelName(spec.getName(), sanitizedNewName);
+			final ILaunchConfigurationWorkingCopy copy = this.launchConfig.copy(fullyQualified);
+	        copy.setAttribute(IConfigurationConstants.SPEC_NAME, spec.getName());
+            copy.setAttribute(IConfigurationConstants.MODEL_NAME, sanitizedNewName);
             return copy.doSave().getAdapter(Model.class);
 		} catch (CoreException e) {
 			TLCActivator.logError("Error cloning model.", e);
 			return null;
+		}
+	}
+	
+	public Model copyIntoForeignSpec(final Spec foreignSpec, final String newModelName) {
+		final IProject foreignProject = foreignSpec.getProject();
+		final ILaunchManager launchManager = DebugPlugin.getDefault().getLaunchManager();
+		final ILaunchConfigurationType launchConfigurationType
+				= launchManager.getLaunchConfigurationType(TLCModelLaunchDelegate.LAUNCH_CONFIGURATION_TYPE);
+		final String sanitizedNewName = sanitizeName(newModelName);
+		final String wholeName = fullyQualifiedNameFromSpecNameAndModelName(foreignSpec.getName(), sanitizedNewName);
+		
+		try {
+			final ILaunchConfigurationWorkingCopy copy = launchConfigurationType.newInstance(foreignProject, wholeName);
+			copyAttributesFromForeignModelToWorkingCopy(this, copy);
+	        copy.setAttribute(IConfigurationConstants.SPEC_NAME, foreignSpec.getName());
+            copy.setAttribute(IConfigurationConstants.MODEL_NAME, sanitizedNewName);
+            return copy.doSave().getAdapter(Model.class);
+		} catch (CoreException e) {
+			TLCActivator.logError("Error cloning foreign model.", e);
+			return null;
+		}
+	}
+	
+	// There is actually a method ILaunchConfigurationWorkingCopy.copyAttributes however the launch configuration
+	//		need be a prototype; so we do this by hand.
+	private void copyAttributesFromForeignModelToWorkingCopy(final Model foreignModel,
+			final ILaunchConfigurationWorkingCopy copy) throws CoreException {
+		final ILaunchConfiguration foreignILC = foreignModel.getLaunchConfiguration();
+		final Map<String, Object> workingCopyAttributes = copy.getAttributes();
+		final Map<String, Object> foreignAttributes = foreignILC.getAttributes();
+
+		for (final Map.Entry<String, Object> me : foreignAttributes.entrySet()) {
+			copy.setAttribute(me.getKey(), me.getValue());
+			workingCopyAttributes.remove(me.getKey());
+		}
+		
+		for (final String key : workingCopyAttributes.keySet()) {
+			copy.removeAttribute(key);
 		}
 	}
 
@@ -299,8 +349,8 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	private void renameLaunch(final Spec newSpec, String newModelName) {
 		try {
 			// create the model with the new name
-			final ILaunchConfigurationWorkingCopy copy = this.launchConfig
-					.copy(newSpec.getName() + SPEC_MODEL_DELIM + newModelName);
+			final String fullyQualifiedName = fullyQualifiedNameFromSpecNameAndModelName(newSpec.getName(), newModelName);
+			final ILaunchConfigurationWorkingCopy copy = this.launchConfig.copy(fullyQualifiedName);
 			copy.setAttribute(SPEC_NAME, newSpec.getName());
 			copy.setAttribute(ModelHelper.MODEL_NAME, newModelName);
 			copy.setContainer(newSpec.getProject());
@@ -422,7 +472,16 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	}
 
 	public boolean isSnapshot() {
-		return getName().matches(".*" + SNAPSHOT_REGEXP);
+		final String name = getName();
+		if (name == null) {
+			// When deleting a set of model and snapshots from the spec explorer, the spec
+			// explorer internally might access one of the already deleted models. A deleted
+			// model however has no name (name is null) causing a NullPointerException here.
+			// For the sake of simplicity, we define a model without a name to not be a
+			// snapshot.
+			return false;
+		}
+		return name.matches(".*" + SNAPSHOT_REGEXP);
 	}
 
 	public boolean hasSnapshots() {
@@ -754,11 +813,34 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
         return (IFolder) getSpec().getProject().findMember(getName());
 	}
 
+	public List<IFile> getSavedTLAFiles() {
+		try {
+			final List<IFile> res = new ArrayList<>();
+			final IFolder targetDirectory = getTargetDirectory();
+			if (targetDirectory == null) {
+				// Model has not been run yet.
+				return res;
+			}
+			final List<IResource> asList = Arrays.asList(targetDirectory.members());
+			for (final IResource iResource : asList) {
+				if (iResource instanceof IFile) {
+					final IFile f = (IFile) iResource;
+					if (f.exists() && "tla".equalsIgnoreCase(f.getFileExtension())) {
+						res.add(f);
+					}
+				}
+			}
+			return res;
+		} catch (CoreException e) {
+			return new ArrayList<>();
+		}
+	}
+	
 	/**
-	 * Retrieves the TLA file that is being model checked on the model run
+	 * Retrieves the TLA file that is being model checked on the model run. This is
+	 * the MC.tla file.
 	 * 
-	 * @param config
-	 *            configuration representing the model
+	 * @param config configuration representing the model
 	 * @return a file handle or <code>null</code>
 	 */
 	public IFile getTLAFile() {
@@ -1036,12 +1118,23 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
         return new Vector<SimpleTLCState>();
     }
     
-    /* (non-Javadoc)
-     * @see java.lang.Object#toString()
+    /**
+     * This currently invokes {@link #getFullyQualifiedName()}
+     * 
+     * {@inheritDoc}
      */
     public String toString() {
-    	// The model's full-qualified name
-    	return getSpec().getName() + SPEC_MODEL_DELIM + getName();
+    	return getFullyQualifiedName();
+    }
+
+    /**
+     * It's more sensible to have this explicitly named method, than rely on having the arcane knowledge that
+     * 	<code>toString()</code> returns this value.
+     * 
+     * @return the fully qualified name of the model, which includes the spec name.
+     */
+    public String getFullyQualifiedName() {
+    	return fullyQualifiedNameFromSpecNameAndModelName(getSpec().getName(), getName());
     }
 
 	public List<String> getTraceExplorerExpressions() {
@@ -1054,6 +1147,22 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		}
 	}
 
+	public List<Formula> getTraceExplorerExpressionsAsFormula() {
+		final List<String> traceExplorerExpressions = getTraceExplorerExpressions();
+		return ModelHelper.deserializeFormulaList(traceExplorerExpressions);
+	}
+	
+	public Map<String, Formula> getNamedTraceExplorerExpressionsAsFormula() {
+		final List<Formula> traceExplorerExpressionsAsFormula = getTraceExplorerExpressionsAsFormula();
+		final Map<String, Formula> result = new HashMap<>();
+		for (Formula formula : traceExplorerExpressionsAsFormula) {
+			if (formula.isNamed()) {
+				result.put(formula.getLeftHandSide(), formula);
+			}
+		}
+		return result;
+	}
+
 	public void setTraceExplorerExpression(List<String> serializedInput) {
 		// TODO Why is this written into a working copy? => One can only write
 		// into a working copy, which is synced on save. Thus, make sure never
@@ -1062,6 +1171,23 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
         	getWorkingCopy().setAttribute(IModelConfigurationConstants.TRACE_EXPLORE_EXPRESSIONS, serializedInput);
 		} catch (CoreException shouldNotHappen) {
 			TLCActivator.logError(shouldNotHappen.getMessage(), shouldNotHappen);
+		}
+	}
+	
+	public void setOpenTabsValue(final int value) {
+        try {
+        	getWorkingCopy().setAttribute(IModelConfigurationConstants.EDITOR_OPEN_TABS, value);
+		} catch (CoreException shouldNotHappen) {
+			TLCActivator.logError(shouldNotHappen.getMessage(), shouldNotHappen);
+		}
+	}
+	
+	public int getOpenTabsValue() {
+        try {
+			return getWorkingCopy().getAttribute(IModelConfigurationConstants.EDITOR_OPEN_TABS,
+					IModelConfigurationConstants.EDITOR_OPEN_TAB_NONE);
+		} catch (CoreException shouldNotHappen) {
+			return -1;
 		}
 	}
 
@@ -1093,7 +1219,7 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 				TLCActivator.logError(shouldNotHappen.getMessage(), shouldNotHappen);
 			}
 		}
-		TLCActivator.logDebug("Trying to save a clean Model.");
+//		TLCActivator.logDebug("Trying to save a clean Model.");
 		
 		// Fluent
 		return this;
@@ -1119,6 +1245,10 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		}
 	}
 
+	public boolean hasAttribute(final String key) throws CoreException {
+		return this.launchConfig.hasAttribute(key);
+	}
+	
 	public int getAttribute(String key, int defaultValue) throws CoreException {
 		// TODO Replace this generic lookup method with real getters for the
 		// various keys. E.g. see getEvalExpression/unsavedSetEvalExpression
@@ -1181,6 +1311,42 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		} catch (CoreException shouldNotHappen) {
 			TLCActivator.logError(shouldNotHappen.getMessage(), shouldNotHappen);
 		}
+	}
+	
+	// TLC's coverage implementation (see tlc2.tool.coverage.CostModelCreator) only
+	// supports two modes: Off and On. However, we consider On too much information
+	// for novice users who are (likely) only interested in identifying spec errors
+	// that leave a subset of actions permanently disabled. The Toolbox therefore
+	// adds a third mode "Action" which filters TLC's output for All. This obviously
+	// means that the overhead of collecting coverage in Action and On mode is
+	// identical.  This shouldn't matter however as novice users don't create large
+	// specs anyway and the Toolbox warns users when a large spec has been
+	// configured with coverage.
+	// (see org.lamport.tla.toolbox.tool.tlc.output.data.CoverageUINotification)
+	// Alternatively, tlc2.tool.coverage.ActionWrapper.report() could be changed to
+	// omit the report of its children (line 126) to effectively create the Action
+	// mode at the TLC layer. I decided against it though, because I didn't want to
+	// extend the -coverage TLC parameter.
+	public enum Coverage {
+		OFF, ACTION, ON;
+	}
+	
+	public Coverage setCoverage(final Coverage c) {
+		setAttribute(LAUNCH_COVERAGE, c.ordinal());
+		return c;
+	}
+	
+	public Coverage getCoverage() {
+		try {
+			final int ordinal = getAttribute(LAUNCH_COVERAGE, IConfigurationDefaults.LAUNCH_COVERAGE_DEFAULT);
+			return Coverage.values()[ordinal];
+		} catch (DebugException legacyException) {
+			// Occurs for old models where the type wasn't int but bool.
+		} catch (CoreException shouldNotHappen) {
+			// We log the exceptions on setAttribute but expose exceptions with getAttribute %-)
+			TLCActivator.logError(shouldNotHappen.getMessage(), shouldNotHappen);
+		}
+		return Coverage.ACTION;
 	}
 	
 	/* IAdaptable */

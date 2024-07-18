@@ -1,16 +1,17 @@
 package tlc2.tool;
 
-import java.io.File;
 import java.io.IOException;
-import java.util.Hashtable;
+import java.math.BigDecimal;
+import java.math.MathContext;
+import java.util.Timer;
+import java.util.TimerTask;
 
-import tla2sany.modanalyzer.SpecObj;
-import tla2sany.semantic.SemanticNode;
-import tla2sany.st.Location;
+import tlc2.TLC;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.output.OutputCollector;
+import tlc2.tool.coverage.CostModelCreator;
 import tlc2.tool.liveness.AddAndCheckLiveCheck;
 import tlc2.tool.liveness.ILiveCheck;
 import tlc2.tool.liveness.LiveCheck;
@@ -18,19 +19,17 @@ import tlc2.tool.liveness.Liveness;
 import tlc2.tool.liveness.NoOpLiveCheck;
 import tlc2.util.IStateWriter;
 import tlc2.util.IdThread;
-import tlc2.util.ObjLongTable;
 import tlc2.util.statistics.ConcurrentBucketStatistics;
 import tlc2.util.statistics.DummyBucketStatistics;
 import tlc2.util.statistics.IBucketStatistics;
-import tlc2.value.Value;
+import tlc2.value.IValue;
 import util.DebugPrinter;
-import util.FilenameToStream;
 
 /**
  * The abstract checker
  * @author Simon Zambrovski
  */
-public abstract class AbstractChecker implements Cancelable
+public abstract class AbstractChecker
 {
 	/**
 	 * True when unit tests explicitly request to use
@@ -45,30 +44,21 @@ public abstract class AbstractChecker implements Cancelable
 	
     protected TLCState predErrState;
     protected TLCState errState;
+    protected int errorCode;
     protected boolean done;
     protected boolean keepCallStack;
-    protected boolean checkDeadlock;
-    protected boolean checkLiveness;
-    protected String fromChkpt;
-    public String metadir;
-    public Tool tool;
-    public final SpecObj specObj;
-    public Action[] invariants;
-    public Action[] impliedActions;
-    public Action[] impliedInits;
-    public Action[] actions;
+    protected final boolean checkDeadlock;
+    protected final boolean checkLiveness;
+    protected final String fromChkpt;
+    public final String metadir;
+    public final ITool tool;
     protected final IStateWriter allStateWriter;
-    protected boolean cancellationFlag;
     protected IWorker[] workers;
 	protected final ILiveCheck liveCheck;
-
-	protected final ThreadLocal<Integer> threadLocal = new ThreadLocal<Integer>() {
-		protected Integer initialValue() {
-			return 1;
-		}
-	};
-
-	protected static final int INITIAL_CAPACITY = 16;
+    /**
+     * Timestamp of when model checking started.
+     */
+	protected final long startTime;
 
     /**
      * Constructor of the abstract model checker
@@ -81,20 +71,14 @@ public abstract class AbstractChecker implements Cancelable
      * @param resolver
      * @param spec - pre-built specification object (e.G. from calling SANY from the tool previously)
      */
-    public AbstractChecker(String specFile, String configFile, String metadir, final IStateWriter stateWriter, boolean deadlock, String fromChkpt,
-            boolean preprocess, FilenameToStream resolver, SpecObj spec) throws EvalException, IOException
-    {
-        this.cancellationFlag = false;
-
-        this.checkDeadlock = deadlock;
-
-        final File f = new File(specFile);
-        this.tool = new Tool(f.isAbsolute() ? f.getParent() : "", specFile, configFile, resolver);
-
-        this.specObj = this.tool.init(preprocess, spec);
+	public AbstractChecker(ITool tool, String metadir, final IStateWriter stateWriter,
+			boolean deadlock, String fromChkpt, final long startTime) throws EvalException, IOException {
+        this.tool = tool;
+		
+		this.checkDeadlock = deadlock;
         this.checkLiveness = !this.tool.livenessIsTrue();
 
-        OutputCollector.setModuleNode(this.tool.rootModule);
+        OutputCollector.setModuleNode(this.tool.getRootModule());
 
         // moved to file utilities
         this.metadir = metadir;
@@ -102,17 +86,19 @@ public abstract class AbstractChecker implements Cancelable
         this.errState = null;
         this.predErrState = null;
         this.done = false;
+        this.errorCode = EC.NO_ERROR;
         this.keepCallStack = false;
 
         this.fromChkpt = fromChkpt;
         
         this.allStateWriter = stateWriter;
+        
+        this.startTime = startTime;
 
-        this.impliedInits = this.tool.getImpliedInits(); // implied-inits to be checked
-        this.invariants = this.tool.getInvariants(); // invariants to be checked
-        this.impliedActions = this.tool.getImpliedActions(); // implied-actions to be checked
-        this.actions = this.tool.getActions(); // the sub-actions
-
+        if (TLCGlobals.isCoverageEnabled()) {
+        	CostModelCreator.create(this.tool);
+        }
+        
         if (this.checkLiveness) {
         	if (tool.hasSymmetry()) {
         		// raise warning...
@@ -126,14 +112,21 @@ public abstract class AbstractChecker implements Cancelable
 						"DiskGraphsOutDegree");
 			}
 			if (LIVENESS_TESTING_IMPLEMENTATION) {
-				this.liveCheck = new AddAndCheckLiveCheck(this.tool, this.actions, this.metadir, stats);
+				this.liveCheck = new AddAndCheckLiveCheck(this.tool, this.metadir, stats);
 			} else {
-				this.liveCheck = new LiveCheck(this.tool, this.actions, this.metadir, stats, stateWriter);
+				this.liveCheck = new LiveCheck(this.tool, this.metadir, stats, stateWriter);
 			}
             report("liveness checking initialized");
         } else {
         	this.liveCheck = new NoOpLiveCheck(this.tool, this.metadir);
         }
+        
+        scheduleTermination(new TimerTask() {
+			@Override
+			public void run() {
+				AbstractChecker.this.stop();
+			}
+		});
     }
 
     public final void setDone()
@@ -145,7 +138,7 @@ public abstract class AbstractChecker implements Cancelable
      * Set the error state. 
      * <strong>Note:</note> this method must be protected by lock 
      */
-    public boolean setErrState(TLCState curState, TLCState succState, boolean keep)
+    public boolean setErrState(TLCState curState, TLCState succState, boolean keep, int errorCode)
     {
        assert Thread.holdsLock(this) : "Caller thread has to hold monitor!";
        if (!TLCGlobals.continuation && this.done)
@@ -153,6 +146,7 @@ public abstract class AbstractChecker implements Cancelable
         IdThread.resetCurrentState();
         this.predErrState = curState;
         this.errState = (succState == null) ? curState : succState;
+        this.errorCode = errorCode;
         this.done = true;
         this.keepCallStack = keep;
         return true;
@@ -165,58 +159,42 @@ public abstract class AbstractChecker implements Cancelable
     protected void reportCoverage(IWorker[] workers)
     {
 		// Without actions (empty spec) there won't be any statistics anyway.
-		if (TLCGlobals.coverageInterval >= 0 && this.actions.length > 0)
+		if (TLCGlobals.isCoverageEnabled() && this.tool.getActions().length > 0)
 		{
-            MP.printMessage(EC.TLC_COVERAGE_START);
-            // First collecting all counts from all workers:
-            ObjLongTable counts = this.tool.getPrimedLocs();
-            OutputCollector.setModuleNode(this.tool.rootModule);
-            Hashtable<String, Location> locationTable = new Hashtable<String, Location>();
-            for (int i = 0; i < workers.length; i++)
-            {
-                ObjLongTable counts1 = workers[i].getCounts();
-                ObjLongTable.Enumerator keys = counts1.keys();
-                Object key;
-                while ((key = keys.nextElement()) != null)
-                {
-                    String loc = ((SemanticNode) key).getLocation().toString();
-                    counts.add(loc, counts1.get(key));
-                    locationTable.put(loc, ((SemanticNode) key).getLocation());
-                }
-            }
-            // Reporting:
-            Object[] skeys = counts.sortStringKeys();
-            for (int i = 0; i < skeys.length; i++)
-            {
-                long val = counts.get(skeys[i]);
-                //MP.printMessage(EC.TLC_COVERAGE_VALUE, new String[] { skeys[i].toString(), String.valueOf(val) });
-                Location location = locationTable.get(skeys[i]);
-                if(location != null){
-                    OutputCollector.putLineCount(location, val);
-                }
-            }
-            MP.printMessage(EC.TLC_COVERAGE_END);
+            CostModelCreator.report(this.tool, this.startTime);
         }
     }
     
-    public static final void reportSuccess(final long numOfDistinctStates, final double actualProb, final long numOfGenStates) throws IOException
-    {
-        // shown as 'calculated' in Toolbox
-        final double optimisticProb = numOfDistinctStates * ((numOfGenStates - numOfDistinctStates) / Math.pow(2, 64));
-        /* The following code added by LL on 3 Aug 2009 to print probabilities
-         * to only one decimal point.  Removed by LL on 17 April 2012 because it
-         * seemed to report probabilities > 10-4 as probability 0.
-         */
-         // final PrintfFormat fmt = new PrintfFormat("val = %.1G");
-         // final String optimisticProbStr = fmt.sprintf(optimisticProb);
-         // final String actualProbStr = fmt.sprintf(actualProb);
-        
-        // Following two lines added by LL on 17 April 2012
-        final String optimisticProbStr = "val = " + ProbabilityToString(optimisticProb, 2);
-        // shown as 'observed' in Toolbox
-        final String actualProbStr = "val = " + ProbabilityToString(actualProb, 2);
-        MP.printMessage(EC.TLC_SUCCESS, new String[] { optimisticProbStr, actualProbStr });
+    public static final double calculateOptimisticProbability(final long numOfDistinctStates, final long numOfGenStates) {
+        return numOfDistinctStates * ((numOfGenStates - numOfDistinctStates) / Math.pow(2, 64));
     }
+    
+	public static final void reportSuccess(final long numOfDistinctStates, final long numOfGenStates)
+			throws IOException {
+		final double optimisticProb = calculateOptimisticProbability(numOfDistinctStates, numOfGenStates);
+		MP.printMessage(EC.TLC_SUCCESS, new String[] { "val = " + ProbabilityToString(optimisticProb, 2) });
+	}
+   
+	public static final void reportSuccess(final long numOfDistinctStates, final long actualDistance,
+			final long numOfGenStates) throws IOException {
+		// Prevent div-by-zero when calculating collision probabilities when no states
+		// are generated.
+		if (numOfDistinctStates == numOfGenStates && numOfGenStates == 0) {
+			// When the number of states is zero, printing a collision probability is
+			// useless anyway. But the Toolbox will probably crash if omitted.
+			MP.printMessage(EC.TLC_SUCCESS, new String[] { "val = 0.0", "val = 0.0" });
+			return;
+		}
+		// shown as 'calculated' in Toolbox
+		final String optimisticProbStr = "val = "
+				+ ProbabilityToString(calculateOptimisticProbability(numOfDistinctStates, numOfGenStates), 2);
+
+		// shown as 'observed' in Toolbox
+		final BigDecimal actualProb = BigDecimal.valueOf(1d).divide(BigDecimal.valueOf(actualDistance),
+				new MathContext(2));
+		final String actualProbStr = "val = " + ProbabilityToString(actualProb.doubleValue(), 2);
+		MP.printMessage(EC.TLC_SUCCESS, new String[] { optimisticProbStr, actualProbStr });
+	}
     
     /**
      * This method added by LL on 17 April 2012 to replace the use of the PrintfFormat
@@ -391,10 +369,10 @@ public abstract class AbstractChecker implements Cancelable
 
     /**
      * Initialize the model checker
-     * @return
+     * @return an error code, or <code>EC.NO_ERROR</code> on success
      * @throws Throwable
      */
-    public abstract boolean doInit(boolean ignoreCancel) throws Throwable;
+    public abstract int doInit(boolean ignoreCancel) throws Throwable;
 
     /**
      * I believe this method is called after the initial states are computed
@@ -403,17 +381,11 @@ public abstract class AbstractChecker implements Cancelable
      * Create the partial state space for given starting state up
      * to the given depth or the number of states.
      */
-    public final boolean runTLC(int depth) throws Exception
+    public final int runTLC(int depth) throws Exception
     {
-        // SZ Feb 23, 2009: exit if canceled
-        if (this.cancellationFlag)
-        {
-            return false;
-        }
-
         if (depth < 2)
         {
-            return true;
+            return EC.NO_ERROR;
         }
 
         workers = startWorkers(this, depth);
@@ -453,11 +425,13 @@ public abstract class AbstractChecker implements Cancelable
         // SZ Feb 23, 2009: exit if canceled
         // added condition to run in the cycle
         // while (true) {
-        while (!this.cancellationFlag)
+        int result = EC.NO_ERROR;
+        while (true)
         {
-            if (!this.doPeriodicWork())
+            result = this.doPeriodicWork();
+            if (result != EC.NO_ERROR)
             {
-                return false;
+                return result;
             }
             synchronized (this)
             {
@@ -484,21 +458,16 @@ public abstract class AbstractChecker implements Cancelable
         {
             workers[i].join();
         }
-        return true;
-    }
-
-    public void setCancelFlag(boolean flag)
-    {
-        this.cancellationFlag = flag;
+        return EC.NO_ERROR;
     }
     
-	public final void setAllValues(int idx, Value val) {
+	public final void setAllValues(int idx, IValue val) {
 		for (int i = 0; i < this.workers.length; i++) {
 			workers[i].setLocalValue(idx, val);
 		}
 	}
 
-	public final Value getValue(int i, int idx) {
+	public final IValue getValue(int i, int idx) {
 		return workers[i].getLocalValue(idx);
 	}
 
@@ -524,10 +493,10 @@ public abstract class AbstractChecker implements Cancelable
      * Check liveness: check liveness properties on the partial state graph.
      * Checkpoint: checkpoint three data structures: the state set, the
      *             state queue, and the state trace.
-     * @return
+     * @return an error code, or <code>EC.NO_ERROR</code> on success
      * @throws Exception
      */
-    public abstract boolean doPeriodicWork() throws Exception;
+    public abstract int doPeriodicWork() throws Exception;
 
     /**
      * Method called from the main worker loop
@@ -539,7 +508,55 @@ public abstract class AbstractChecker implements Cancelable
 
     /**
      * Main method of the model checker
+     * @return an error code, or <code>EC.NO_ERROR</code> on success
      * @throws Exception
      */
-    public abstract void modelCheck() throws Exception;
+    final public int modelCheck() throws Exception {
+        final int result = modelCheckImpl();
+        return (result != EC.NO_ERROR) ? result : errorCode;
+    }
+
+    protected abstract int modelCheckImpl() throws Exception;
+
+	public int getProgress() {
+		return -1;
+	}
+	
+	public void stop() {
+		throw new UnsupportedOperationException("stop not implemented");
+	}
+	
+	public void suspend() {
+		throw new UnsupportedOperationException("suspend not implemented");
+	}
+	
+	public void resume() {
+		throw new UnsupportedOperationException("resume not implemented");
+	}
+	
+	static void scheduleTermination(final TimerTask tt) {
+		// Stops model checker after the given time in seconds. If model checking
+		// terminates before stopAfter seconds, the timer task will never run.
+		// Contrary to TLCSet("exit",...) this does not require a spec modification. Is
+		// is likely of little use for regular TLC users. In other words, this is meant
+		// to be a developer only feature and thus configured via a system property and
+		// not a regular TLC parameter.
+		final long stopAfter = Long.getLong(TLC.class.getName() + ".stopAfter", -1L);
+		if (stopAfter > 0) {
+			final Timer stopTimer = new Timer("TLCStopAfterTimer");
+			stopTimer.schedule(tt, stopAfter * 1000L); // seconds to milliseconds.
+		}
+	}
+	
+	protected boolean isTimeBound() {
+		return Long.getLong(TLC.class.getName() + ".stopAfter", -1L) != -1;
+	}
+
+	public long getStateQueueSize() {
+		return -1;
+	}
+
+	public long getDistinctStatesGenerated() {
+		return -1;
+	}
 }

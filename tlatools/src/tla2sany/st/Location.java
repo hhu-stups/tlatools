@@ -8,8 +8,6 @@ import java.util.regex.Pattern;
 
 import pcal.PCalLocation;
 import pcal.Region;
-
-import tlc2.output.EC;
 import util.Assert;
 import util.UniqueString;
 
@@ -21,7 +19,7 @@ import util.UniqueString;
  * @author Leslie Lamport, Simon Zambrovski
  * @version $Id$                                                              
  */
-public final class Location
+public final class Location implements Comparable<Location>
 {
     // strings used in toString() and Regex
     private static final String LINE = "line ";
@@ -94,7 +92,12 @@ public final class Location
     protected UniqueString name;
     protected int bLine, bColumn, eLine, eColumn;
 
-    /**
+	public Location(final String fName, final String bl, final String bc, final String el, final String ec) {
+		this(UniqueString.uniqueStringOf(fName), Integer.valueOf(bl), Integer.valueOf(bc), Integer.valueOf(el),
+				Integer.valueOf(ec));
+	}
+    
+   /**
      * Constructs a location
      * @param fName name of the source
      * @param bl begin line
@@ -218,6 +221,11 @@ public final class Location
         }
     }
 
+    public static Location parseCoordinates(final String source, final String coordinates) {
+    	final String[] c = coordinates.split(" ");
+		return new Location(source, c[0], c[1], c[2], c[3]);
+    }
+    
     /**
      * Returns an array of {@link Location} that can be parsed
      * from the input. More precisely, this method returns all
@@ -295,6 +303,10 @@ public final class Location
         return this.eLine;
     }
 
+    public final int[] getCoordinates() {
+		return new int[] { bLine, bColumn, eLine, eColumn };
+    }
+    
     /** 
      * gets the end column number of this location. 
      */
@@ -308,7 +320,7 @@ public final class Location
      */
     public final String source()
     {
-        return name.toString();
+        return name != null ? name.toString() : null;
     }
 
     /**
@@ -357,6 +369,21 @@ public final class Location
         return false;
     }
 
+    /* (non-Javadoc)
+     * @see java.lang.Object#hashCode()
+     */
+    @Override
+	public int hashCode() {
+		final int prime = 31;
+		int result = 1;
+		result = prime * result + bColumn;
+		result = prime * result + bLine;
+		result = prime * result + eColumn;
+		result = prime * result + eLine;
+		result = prime * result + ((name == null) ? 0 : name.hashCode());
+		return result;
+	}
+
 	/**
 	 * Translates the {@link Location} into a PCal {@link Region} adjusting the
 	 * 1-based offset to a 0-based one.
@@ -366,5 +393,65 @@ public final class Location
 	public Region toRegion() {
 		return new pcal.Region(new PCalLocation(bLine - 1, bColumn - 1),
 				new PCalLocation(eLine - 1, eColumn - 1));
+	}
+
+	@Override
+	public int compareTo(final Location other) {
+		if (this.equals(other)) {
+			return 0;
+		}
+		if (this.name.compareTo(other.name) != 0) {
+			return this.name.compareTo(other.name);
+		}
+
+		if (this.bLine > other.bLine) {
+			return 1;
+		} else if (this.bLine < other.bLine) {
+			return -1;
+		}
+
+		if (this.bColumn > other.bColumn) {
+			return 1;
+		} else if (this.bColumn < other.bColumn) {
+			return -1;
+		}
+		
+		if (this.eLine > other.eLine) {
+			return 1;
+		} else if (this.eLine < other.eLine) {
+			return -1;
+		}
+
+		if (this.eColumn < other.eColumn) {
+			return -1;
+		}
+		return 1;
+	}
+	
+	/**
+	 * @return true if other is a location within this location (same module file
+	 *         and the range of chars is within this range of chars).
+	 */
+	public boolean includes(final Location other) {
+		if (this.name != other.name) {
+			return false;
+		}
+		if (this.bLine > other.bLine) {
+			return false;
+		}
+		if (this.eLine < other.eLine) {
+			return false;
+		}
+		if (this.bColumn > other.bColumn) {
+			return false;
+		}
+		if (this.eColumn < other.eColumn) {
+			return false;
+		}
+		return true;
+	}
+
+	public String linesAndColumns() {
+		return toString().replaceAll(OF_MODULE + ".*", "");
 	}
 }

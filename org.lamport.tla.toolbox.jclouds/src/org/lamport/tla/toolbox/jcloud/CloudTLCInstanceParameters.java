@@ -30,6 +30,8 @@ import java.util.Properties;
 
 import org.eclipse.core.runtime.IStatus;
 import org.jclouds.ContextBuilder;
+import org.jclouds.compute.domain.TemplateBuilder;
+import org.jclouds.compute.options.TemplateOptions;
 
 import tlc2.tool.distributed.fp.TLCWorkerAndFPSet;
 
@@ -81,14 +83,18 @@ public abstract class CloudTLCInstanceParameters {
 			return getJavaWorkerVMArgs();
 		}
 		// See org.lamport.tla.toolbox.tool.tlc.job.TLCProcessJob.getAdditionalVMArgs()
-		return ("--add-modules=java.activation -XX:+IgnoreUnrecognizedVMOptions " + extraVMArgs).trim();
+		return ("-XX:+IgnoreUnrecognizedVMOptions "
+				+ "-XX:+UseParallelGC " // Java > 1.8 has switched to a low-latency GC which isn't optimized for
+										// throughput anymore. Obviously, we are not interested in latency but primarily
+										// in throughput.
+				+ extraVMArgs).trim();
 	}
 
 	public abstract String getJavaWorkerVMArgs();
 	
 	protected String getJavaWorkerVMArgs(final String extraWorkerVMArgs) {
 		// See org.lamport.tla.toolbox.tool.tlc.job.TLCProcessJob.getAdditionalVMArgs()
-		return ("--add-modules=java.activation -XX:+IgnoreUnrecognizedVMOptions "
+		return ("-XX:+IgnoreUnrecognizedVMOptions -XX:+UseParallelGC "
 				+ extraWorkerVMArgs).trim();
 	}
 
@@ -134,23 +140,25 @@ public abstract class CloudTLCInstanceParameters {
 		// Nothing to be done here
 	}
 
+	public void mungeTemplateOptions(TemplateOptions templateOptions) {
+		// no-op, subclass may override
+	}
+
 	public String getOSFilesystemTuning() {
 		return "/bin/true"; // no-op, because concat with && ... && in CDTJ.
 	}
 	
 	public String getFlightRecording() {
-		return "-XX:+UnlockCommercialFeatures "
-				+ "-XX:+FlightRecorder "
+		return "-XX:StartFlightRecording=settings=default,disk=true,dumponexit=true,maxage=12h,filename=/mnt/tlc/tlc.jfr "
 				+ "-XX:+UnlockDiagnosticVMOptions "
-				+ "-XX:+DebugNonSafepoints "
-				+ "-XX:FlightRecorderOptions=defaultrecording=true,disk=true,repository=/mnt/tlc,dumponexit=true,dumponexitpath=/mnt/tlc/tlc.jfr,maxage=12h";
+				+ "-XX:+DebugNonSafepoints";
 	}
 
 	public String getHostnameSetup() {
 		return "/bin/true"; // no-op, because concat with && ... && in CDTJ.
 	}
 
-	public String getCloudAPIShutdown() {
+	public String getCloudAPIShutdown(final String credentials, final String groupName) {
 		return "/bin/true"; // no-op, because concat with && ... && in CDTJ.
 	}
 
@@ -160,5 +168,9 @@ public abstract class CloudTLCInstanceParameters {
 
 	public String getExtraPackages() {
 		return ""; // no-op, because concat with && ... && in CDTJ.
+	}
+
+	public void mungeTemplateBuilder(final TemplateBuilder templateBuilder) {
+		// no-op, subclass may override
 	}
 }

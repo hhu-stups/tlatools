@@ -31,13 +31,16 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+
 import org.junit.Test;
+
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 
 public class Test3 extends ModelCheckerTestCase {
 
 	public Test3() {
-		super("Test3");
+		super("Test3", ExitStatus.VIOLATION_LIVENESS);
 	}
 	
 	@Test
@@ -61,5 +64,7 @@ public class Test3 extends ModelCheckerTestCase {
 		assertTraceWith(recorder.getRecords(EC.TLC_STATE_PRINT2), expectedTrace);
 		
 		assertBackToState(1);
+
+	assertZeroUncovered();
 	}
 }

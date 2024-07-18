@@ -19,6 +19,7 @@ import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.output.StatePrinter;
 import tlc2.tool.EvalException;
+import tlc2.tool.ITool;
 import tlc2.tool.TLCStateInfo;
 import tlc2.util.IdThread;
 import tlc2.util.IntStack;
@@ -65,8 +66,11 @@ public class LiveWorker extends IdThread {
 	 */
 	private final int numWorkers;
 
-	public LiveWorker(int id, int numWorkers, final ILiveCheck liveCheck, final BlockingQueue<ILiveChecker> queue, final boolean finalCheck) {
+	private final ITool tool;
+
+	public LiveWorker(final ITool tool, int id, int numWorkers, final ILiveCheck liveCheck, final BlockingQueue<ILiveChecker> queue, final boolean finalCheck) {
 		super(id);
+		this.tool = tool;
 		this.numWorkers = numWorkers;
 		this.liveCheck = liveCheck;
 		this.queue = queue;
@@ -136,7 +140,7 @@ public class LiveWorker extends IdThread {
 	 * @see http://dx.doi.org/10.1137%2F0201010
 	 * 
 	 */
-	private final void checkSccs() throws IOException, InterruptedException, ExecutionException {
+	private final void checkSccs(final ITool tool) throws IOException, InterruptedException, ExecutionException {
 		// Initialize this.dg:
 		this.dg.makeNodePtrTbl();
 		
@@ -287,7 +291,7 @@ public class LiveWorker extends IdThread {
 						// element (endstate - 1). This goes on until either the
 						// initial state is reached or an intermediate state has
 						// unexplored successors with DFS.
-						final boolean isOK = this.checkComponent(curState, curTidx, comStack);
+						final boolean isOK = this.checkComponent(tool, curState, curTidx, comStack);
 						if (!isOK) {
 							// Found a "bad" cycle of one to comStack.size()
 							// nodes, no point in searching for more SCCs as we
@@ -375,9 +379,8 @@ public class LiveWorker extends IdThread {
 								// P-satisfiability.
 								//
 								// This check is related to the fairness spec.
-								// Usually, it evals to true when no or weak
-								// fairness have been specified. False on strong
-								// fairness.
+								// Skip to check the other conjuncts of the PossibleErrorModel (PEM) if the
+								// action check is false (thus does not satisfy the PEM).
 								if (gnode.getCheckAction(slen, alen, i, eaaction)) {
 									// If the node's nextLink still points to
 									// disk, it means it has no link assigned
@@ -500,7 +503,7 @@ public class LiveWorker extends IdThread {
 	 * @throws ExecutionException 
 	 * @throws InterruptedException 
 	 */
-	private boolean checkComponent(final long state, final int tidx, final IntStack comStack) throws IOException, InterruptedException, ExecutionException {
+	private boolean checkComponent(final ITool tool, final long state, final int tidx, final IntStack comStack) throws IOException, InterruptedException, ExecutionException {
 		final long comStackSize = comStack.size();
 		// There is something to pop and each is a well formed tuple <<fp, tidx, loc>> 
 		assert comStackSize >= 5 && comStackSize % 5 == 0; // long + int + long
@@ -528,7 +531,7 @@ public class LiveWorker extends IdThread {
 		// collision handling. NodePtrTable uses open addressing (see
 		// http://en.wikipedia.org/wiki/Open_addressing).
 		//
-		// Initializing the NTPT with 128 buckets/slows is a significant memory
+		// Initializing the TNPT with 128 buckets/slots is a significant memory
 		// overhead (especially when comStack contains < 10 elements) which
 		// regularly results in OutOfMemoryErrors being thrown. To alleviate the
 		// problem the key-space of the comStack elements could be checked and
@@ -566,6 +569,7 @@ public class LiveWorker extends IdThread {
 		final boolean[] AEStateRes = new boolean[aeslen];
 		final boolean[] AEActionRes = new boolean[aealen];
 		final boolean[] promiseRes = new boolean[plen];
+		final int[] eaaction = this.pem.EAAction;
 
 		// Extract a node from the nodePtrTable "com".
 		// Note the upper limit is NodePtrTable#getSize() instead of
@@ -634,13 +638,51 @@ public class LiveWorker extends IdThread {
 					// processed SCC (com). Successors, which are not part of
 					// the current SCC have obviously no relevance here. After
 					// all, we check the SCC.
-					if (com.getLoc(nextState, nextTidx) != -1) {
-						for (int j = 0; j < aealen; j++) {
-							// Only set false to true, but never true to false. 
-							if (!AEActionRes[j]) {
-								final int idx = this.pem.AEAction[j];
-								AEActionRes[j] = curNode.getCheckAction(slen, alen, i, idx);
-							}
+					if (com.getLoc(nextState, nextTidx) == -1) {
+						continue;
+					}
+					// MAK 10/23/2018:
+					// Line 380 above "if(gnode.getCheckAction)" causes a transition A from state s
+					// -> t to be skipped even if a belongs to an SCC iff the transition A does not
+					// satisfy the EA action of the PossibleErrorModel (if the EA action(s) is not
+					// satisfied, the PEM cannot hold at all).
+					// However, some state graphs are such that there exists not just the transition
+					// A from s -> t but a second transition A' from t -> s - which satisfies the EA
+					// action(s) of the PEM. In the case of a "bidirectional" transition, the states
+					// s and t will be in the set of states 'com' (which make up the SCC). Thus, the
+					// transition A from s -> t will be incorrectly traversed here unless it is
+					// skipped (again). Not skipping the transition A will result in TLC reporting a
+					// (bogus) counterexample even if the liveness is not violated.
+					// 
+					// Consider the spec BT for which TLC incorrectly reports a liveness property 
+					// violation and prints a bogus counterexample:
+					//
+					// ---- BT -----
+					// EXTENDS Naturals
+					// VARIABLE x
+					// A == \/ x' = (x + 1) % 3
+					// B == x' \in 0..2
+					// Spec == (x=0) /\ [][A \/ B]_x/\ WF_x(A)
+					// Prop == Spec /\ WF_x(A) /\ []<><<A>>_x
+					// =============
+					//
+					// > Temporal properties were violated.
+					// > The following behavior constitutes a counter-example:
+					// > 1: <Initial predicate>
+					// > x = 0
+					// > 2: <A line xx...BT>
+					// > x = 1
+					// > 1: Back to state: <B line xx... BT>
+					//
+					// (see tlc2.tool.BidirectionalTransitions1Test and BidirectionalTransitions2Test)
+					if(!curNode.getCheckAction(slen, alen, i, eaaction)) {
+						continue;
+					}
+					for (int j = 0; j < aealen; j++) {
+						// Only set false to true, but never true to false. 
+						if (!AEActionRes[j]) {
+							final int idx = this.pem.AEAction[j];
+							AEActionRes[j] = curNode.getCheckAction(slen, alen, i, idx);
 						}
 					}
 				}
@@ -694,7 +736,7 @@ public class LiveWorker extends IdThread {
 		// conditions are satisfied. So, print a counter-example (if this thread
 		// is the first one to find a counter-example)!
 		if (setErrFound()) {
-			this.printTrace(state, tidx, com);
+			this.printTrace(tool, state, tidx, com);
 		}
 		return false;
 	}
@@ -753,7 +795,7 @@ public class LiveWorker extends IdThread {
 	 * @throws ExecutionException 
 	 * @throws InterruptedException 
 	 */
-	private void printTrace(final long state, final int tidx, final TableauNodePtrTable nodeTbl) throws IOException, InterruptedException, ExecutionException {
+	private void printTrace(ITool tool, final long state, final int tidx, final TableauNodePtrTable nodeTbl) throws IOException, InterruptedException, ExecutionException {
 //		writeDotViz(state, tidx, nodeTbl, new java.io.File(liveCheck.getMetaDir() + java.io.File.separator
 //				+ "pSatisfiableSCC_" + System.currentTimeMillis() + ".dot"));
 
@@ -782,7 +824,7 @@ public class LiveWorker extends IdThread {
 				// LongVec with just a single element. This happens when the parameter
 				// state is one of the init states already.
 				long fp = prefix.elementAt(plen - 1);
-				TLCStateInfo sinfo = liveCheck.getTool().getState(fp);
+				TLCStateInfo sinfo = tool.getState(fp);
 				if (sinfo == null) {
 					throw new EvalException(EC.TLC_FAILED_TO_RECOVER_INIT);
 				}
@@ -798,7 +840,7 @@ public class LiveWorker extends IdThread {
 					// It won't be correct to shorten a path <<fp1,fp2,fp1>> to
 					// <<fp2,fp1>> though.
 					if (curFP != fp) {
-						sinfo = liveCheck.getTool().getState(curFP, sinfo);
+						sinfo = tool.getState(curFP, sinfo);
 						states.add(sinfo);	
 						fp = curFP;
 					}
@@ -848,7 +890,17 @@ public class LiveWorker extends IdThread {
 		// Wait for the prefix-path to be searched/generated and fully printed.
 		// get() is a blocking call that makes this thread wait for the executor
 		// to finish its job of searching and printing the prefix-path.
-		final List<TLCStateInfo> states = future.get();
+		List<TLCStateInfo> states = new ArrayList<>(0);
+		try {
+			states = future.get();
+		} catch (ExecutionException ee) {
+			// Do not "leak" ExecutionException to user if root cause is actually an
+			// EvalException.
+			if (ee.getCause() instanceof EvalException) {
+				throw (EvalException) ee.getCause();
+			}
+			throw ee;
+		}
 		
 		/*
 		 * At this point everything from the initial state up to the start state
@@ -872,7 +924,7 @@ public class LiveWorker extends IdThread {
 			// efficiency reason. Regenerating the next state might be
 			// expensive.
 			if (curFP != sinfo.fingerPrint()) {
-				sinfo = liveCheck.getTool().getState(curFP, sinfo);
+				sinfo = tool.getState(curFP, sinfo);
 				StatePrinter.printState(sinfo);
 			}
 		}
@@ -886,7 +938,7 @@ public class LiveWorker extends IdThread {
 		if (sinfo.fingerPrint() == cycleState.fingerPrint()) {
 			StatePrinter.printStutteringState(stateNumber);
 		} else {
-			sinfo = liveCheck.getTool().getState(cycleState.fingerPrint(), sinfo);
+			sinfo = tool.getState(cycleState.fingerPrint(), sinfo);
 			// The print stmts below claim there is a cycle, thus assert that
 			// there is indeed one. Index-based lookup into states array is
 			// reduced by one because cyclePos is human-readable.
@@ -898,6 +950,10 @@ public class LiveWorker extends IdThread {
 	// BFS search
 	private LongVec bfsPostFix(final long state, final int tidx, final TableauNodePtrTable nodeTbl, GraphNode curNode)
 			throws IOException {
+		final int slen = this.oos.getCheckState().length;
+		final int alen = this.oos.getCheckAction().length;
+		final int[] eaaction = this.pem.EAAction;
+		
 		final LongVec postfix = new LongVec(16);
 		final long startState = curNode.stateFP;
 		final long startTidx = curNode.tindex;
@@ -942,6 +998,13 @@ public class LiveWorker extends IdThread {
 						if (curState == nextState && curTidx == nextTidx) {
 							assert TableauNodePtrTable.isSeen(nodes);
 							continue SUCCESSORS;
+						}
+						
+						// Prevent bogus counterexample: Do not close the loop by taking an action which
+						// does not satisfy the PossibleErrorModel (read more about it on line 640 in
+						// checkComponent).
+						if(!curNode.getCheckAction(slen, alen, j, eaaction)) {
+							continue;
 						}
 						
 						if (nextState == state && nextTidx == tidx) {
@@ -992,6 +1055,7 @@ public class LiveWorker extends IdThread {
 		final boolean[] AEStateRes = new boolean[this.pem.AEState.length];
 		final boolean[] AEActionRes = new boolean[this.pem.AEAction.length];
 		final boolean[] promiseRes = new boolean[this.oos.getPromises().length];
+		final int[] eaaction = this.pem.EAAction;
 		// The number/count of all liveness checks. The while loop A) terminates
 		// once it has accumulated all states that violate all checks (we know
 		// that the states in nodeTbl have to violate the liveness property
@@ -1052,18 +1116,26 @@ public class LiveWorker extends IdThread {
 					nodes = nodeTbl.getNodes(nextState);
 					if (nodes != null) {
 						tloc = nodeTbl.getIdx(nodes, nextTidx);
-						if (tloc != -1) {
-							// <nextState, nextTidx> is in nodeTbl.
-							nextState1 = nextState;
-							nextTidx1 = nextTidx;
-							tloc1 = tloc;
-							nodes1 = nodes;
-							for (int j = 0; j < this.pem.AEAction.length; j++) {
-								int idx = this.pem.AEAction[j];
-								if (!AEActionRes[j] && curNode.getCheckAction(slen, alen, i, idx)) {
-									AEActionRes[j] = true;
-									cnt--;
-								}
+						// See checkComponent line 637.
+						if (tloc == -1) {
+							continue;
+						}
+						// Prevent bogus counterexample: Do not close the loop by taking an action which
+						// does not satisfy the PossibleErrorModel (read more about it on line 640 in
+						// checkComponent).
+						if(!curNode.getCheckAction(slen, alen, i, eaaction)) {
+							continue;
+						}
+						// <nextState, nextTidx> is in nodeTbl.
+						nextState1 = nextState;
+						nextTidx1 = nextTidx;
+						tloc1 = tloc;
+						nodes1 = nodes;
+						for (int j = 0; j < this.pem.AEAction.length; j++) {
+							int idx = this.pem.AEAction[j];
+							if (!AEActionRes[j] && curNode.getCheckAction(slen, alen, i, idx)) {
+								AEActionRes[j] = true;
+								cnt--;
 							}
 						}
 					}
@@ -1164,7 +1236,7 @@ public class LiveWorker extends IdThread {
 				for (int i = 0; i < pems.length; i++) {
 					if (!hasErrFound()) {
 						this.pem = pems[i];
-						this.checkSccs();
+						this.checkSccs(tool);
 					}
 				}
 				this.dg.destroyCache();

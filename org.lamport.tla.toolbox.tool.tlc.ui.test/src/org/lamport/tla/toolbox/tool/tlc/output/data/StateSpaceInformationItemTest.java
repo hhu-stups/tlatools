@@ -2,6 +2,9 @@
 
 package org.lamport.tla.toolbox.tool.tlc.output.data;
 
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+
 import junit.framework.TestCase;
 
 /**
@@ -81,6 +84,71 @@ public class StateSpaceInformationItemTest extends TestCase {
 		assertEquals(1, parsed.getDistinctStates());
 		assertEquals(2, parsed.getFoundStates());
 		assertEquals(1, parsed.getLeftStates());
+		assertEquals(0, parsed.getSpm());
+		assertEquals(0, parsed.getDistinctSPM());
+	}
+
+	public void testParseInit5() throws ParseException {
+		StateSpaceInformationItem parsed = StateSpaceInformationItem
+				.parseInit("Finished computing initial states: 2 distinct states generated at 2018-07-03 16:10:44.");
+
+		assertEquals(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").parse("2018-07-03 16:10:44"), parsed.getTime());
+		assertEquals(0, parsed.getDiameter());
+		assertEquals(2, parsed.getDistinctStates());
+		assertEquals(2, parsed.getFoundStates());
+		assertEquals(2, parsed.getLeftStates());
+		assertEquals(0, parsed.getSpm());
+		assertEquals(0, parsed.getDistinctSPM());
+	}
+
+	public void testParseInit6() throws ParseException {
+		StateSpaceInformationItem parsed = StateSpaceInformationItem.parseInit(
+				"Finished computing initial states: 2 states generated, with 1 of them distinct at 2018-07-03 16:10:44.");
+
+		assertEquals(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").parse("2018-07-03 16:10:44"), parsed.getTime());
+		assertEquals(0, parsed.getDiameter());
+		assertEquals(1, parsed.getDistinctStates());
+		assertEquals(2, parsed.getFoundStates());
+		assertEquals(1, parsed.getLeftStates());
+		assertEquals(0, parsed.getSpm());
+		assertEquals(0, parsed.getDistinctSPM());
+	}
+	
+	public void testParseOldComma() throws ParseException {
+		StateSpaceInformationItem parsed = StateSpaceInformationItem.parseOld(
+				"Progress(57) at 2019-03-21 10:20:20: 48,613 states generated, 25,188 distinct states found, 556,000 states left on queue.");
+		
+		assertEquals(57, parsed.getDiameter());
+		assertEquals(48613, parsed.getFoundStates());
+		assertEquals(25188, parsed.getDistinctStates());
+		assertEquals(556000, parsed.getLeftStates());
+		
+		assertEquals(0, parsed.getSpm());
+		assertEquals(0, parsed.getDistinctSPM());
+	}
+	
+	public void testParseOldDot() throws ParseException {
+		StateSpaceInformationItem parsed = StateSpaceInformationItem.parseOld(
+				"Progress(57) at 2019-03-21 10:20:20: 48.613 states generated, 25.188 distinct states found, 556.000 states left on queue.");
+		
+		assertEquals(57, parsed.getDiameter());
+		assertEquals(48613, parsed.getFoundStates());
+		assertEquals(25188, parsed.getDistinctStates());
+		assertEquals(556000, parsed.getLeftStates());
+		
+		assertEquals(0, parsed.getSpm());
+		assertEquals(0, parsed.getDistinctSPM());
+	}
+	
+	public void testParseOld() throws ParseException {
+		StateSpaceInformationItem parsed = StateSpaceInformationItem.parseOld(
+				"Progress(57) at 2019-03-21 10:20:20: 48613 states generated, 25188 distinct states found, 556000 states left on queue.");
+		
+		assertEquals(57, parsed.getDiameter());
+		assertEquals(48613, parsed.getFoundStates());
+		assertEquals(25188, parsed.getDistinctStates());
+		assertEquals(556000, parsed.getLeftStates());
+		
 		assertEquals(0, parsed.getSpm());
 		assertEquals(0, parsed.getDistinctSPM());
 	}

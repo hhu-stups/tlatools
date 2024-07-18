@@ -35,16 +35,18 @@ import java.util.Map;
 import org.junit.Test;
 
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 import tlc2.tool.liveness.ModelCheckerTestCase;
-import tlc2.value.BoolValue;
-import tlc2.value.IntValue;
-import tlc2.value.Value;
+import tlc2.value.IBoolValue;
+import tlc2.value.IValue;
+import tlc2.value.impl.BoolValue;
+import tlc2.value.impl.IntValue;
 import util.UniqueString;
 
 public class RandomSubsetTest extends ModelCheckerTestCase {
 
 	public RandomSubsetTest() {
-		super("RandomSubset");
+		super("RandomSubset", ExitStatus.VIOLATION_SAFETY);
 	}
 
 	@Test
@@ -54,7 +56,7 @@ public class RandomSubsetTest extends ModelCheckerTestCase {
 		
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_INIT_GENERATED1, "2002"));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "2003", "2003", "2001"));
-		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "2"));
+		assertEquals(2, recorder.getRecordAsInt(EC.TLC_SEARCH_DEPTH));
 
 		assertTrue(recorder.recorded(EC.TLC_STATE_PRINT2));
 		
@@ -63,7 +65,7 @@ public class RandomSubsetTest extends ModelCheckerTestCase {
 		
 		final TLCStateInfo first = (TLCStateInfo) ((Object[]) actual.get(0))[0];
 		assertTrue(((String) first.info).startsWith("<Initial predicate>"));
-		final Map<UniqueString, Value> firstState = first.state.getVals();
+		final Map<UniqueString, IValue> firstState = first.state.getVals();
 		assertEquals(3, firstState.size());
 		
 		// Check x and y values are within defined ranges.
@@ -73,16 +75,18 @@ public class RandomSubsetTest extends ModelCheckerTestCase {
 		assertTrue(100000000 <= firstY.val && firstX.val <= 100000010);
 
 		// Check z is true
-		assertEquals(BoolValue.ValTrue, (BoolValue) firstState.get(UniqueString.uniqueStringOf("z")));
+		assertEquals(BoolValue.ValTrue, (IBoolValue) firstState.get(UniqueString.uniqueStringOf("z")));
 		
 		final TLCStateInfo second = (TLCStateInfo) ((Object[]) actual.get(1))[0];
 		assertTrue(((String) second.info).startsWith("<Next line 10, col 9 to line 11, col 21 of module RandomSubset>"));
-		final Map<UniqueString, Value> secondState = second.state.getVals();
+		final Map<UniqueString, IValue> secondState = second.state.getVals();
 		assertEquals(3, secondState.size());
 		// UNCHANGED x,y
 		assertEquals(firstX.val, ((IntValue) secondState.get(UniqueString.uniqueStringOf("x"))).val);
 		assertEquals(firstY.val, ((IntValue) secondState.get(UniqueString.uniqueStringOf("y"))).val);
 		// Check z is false
-		assertEquals(BoolValue.ValFalse, (BoolValue) secondState.get(UniqueString.uniqueStringOf("z")));
+		assertEquals(BoolValue.ValFalse, (IBoolValue) secondState.get(UniqueString.uniqueStringOf("z")));
+
+		assertZeroUncovered();
 	}
 }

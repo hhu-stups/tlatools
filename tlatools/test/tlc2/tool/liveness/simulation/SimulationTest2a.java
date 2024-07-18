@@ -31,8 +31,11 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.util.List;
+
 import org.junit.Test;
+
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 import tlc2.tool.TLCStateInfo;
 import tlc2.tool.liveness.ModelCheckerTestCase;
 
@@ -42,7 +45,7 @@ import tlc2.tool.liveness.ModelCheckerTestCase;
 public class SimulationTest2a extends ModelCheckerTestCase {
 
 	public SimulationTest2a() {
-		super("Test2a", "/", new String[] {"-simulate", "-depth", "6"});
+		super("Test2a", "/", new String[] {"-simulate", "-depth", "6"}, ExitStatus.VIOLATION_LIVENESS);
 	}
 	
 	@Test

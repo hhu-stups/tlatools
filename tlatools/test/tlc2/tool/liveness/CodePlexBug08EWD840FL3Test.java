@@ -31,8 +31,11 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+
 import org.junit.Test;
+
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 
 /**
  * see http://tlaplus.codeplex.com/workitem/8
@@ -40,7 +43,7 @@ import tlc2.output.EC;
 public class CodePlexBug08EWD840FL3Test extends ModelCheckerTestCase {
 
 	public CodePlexBug08EWD840FL3Test() {
-		super("EWD840MC3", "CodePlexBug08");
+		super("EWD840MC3", "CodePlexBug08", ExitStatus.VIOLATION_LIVENESS);
 	}
 	
 	@Test
@@ -95,5 +98,7 @@ public class CodePlexBug08EWD840FL3Test extends ModelCheckerTestCase {
 		
 		// last state loops back to state 1
 		assertBackToState(1);
+
+	assertZeroUncovered();
 	}
 }

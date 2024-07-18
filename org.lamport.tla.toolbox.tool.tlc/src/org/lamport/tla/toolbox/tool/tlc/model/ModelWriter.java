@@ -25,6 +25,7 @@
  ******************************************************************************/
 package org.lamport.tla.toolbox.tool.tlc.model;
 
+import java.util.ArrayList;
 import java.util.Hashtable;
 import java.util.List;
 import java.util.Vector;
@@ -131,7 +132,7 @@ public class ModelWriter
      */
     public void addPrimer(String moduleFilename, String extendedModuleName)
     {
-        tlaBuffer.append(ResourceHelper.getExtendingModuleContent(moduleFilename, extendedModuleName));
+        tlaBuffer.append(ResourceHelper.getExtendingModuleContent(moduleFilename, new String[] {extendedModuleName, "TLC"}));
     }
 
     /**
@@ -464,9 +465,14 @@ public class ModelWriter
             }
         }
     }
-
+    public void addFormulaList(String element, String keyword, String attributeName) {
+    	final List<String[]> elements = new ArrayList<>(1);
+    	elements.add(new String[] {element, EMPTY_STRING});
+    	addFormulaList(elements, keyword, attributeName);
+    }
+    
     /**
-     * Puts (String[])element[0] to CFG file and element[1] to TLA_MC file
+     * Puts (String[])element[0] to CFG file and element[1] to TLA_MC file, if element[2] present, uses it as index.
      * 
      * @param elements a list of String[] elements
      * @param keyword the keyword to be used in the CFG file
@@ -485,12 +491,12 @@ public class ModelWriter
         {
             String[] element = elements.get(i);
             cfgBuffer.append(element[0]).append(CR);
-            // when a definition in the root module is overriden as a model value
+            // when a definition in the root module is overridden as a model value
             // there is nothing to add to the MC.tla file so, we do not do the following
             if (!element[1].equals(EMPTY_STRING))
             {
                 tlaBuffer.append(COMMENT).append(keyword + " definition ").append(ATTRIBUTE).append(attributeName)
-                        .append(INDEX).append(i).append(CR);
+                        .append(INDEX).append(element.length > 2 ? element[2] : i).append(CR);
                 tlaBuffer.append(element[1]).append(CR).append(SEP).append(CR);
             }
         }
@@ -560,7 +566,12 @@ public class ModelWriter
     public static List<String[]> createFormulaListContent(List<String> serializedFormulaList, String labelingScheme)
     {
         List<Formula> formulaList = ModelHelper.deserializeFormulaList(serializedFormulaList);
-        return (createListContent(formulaList, labelingScheme));
+        return createFormulaListContentFormula(formulaList, labelingScheme);
+    }
+    
+    public static List<String[]> createFormulaListContentFormula(List<Formula> serializedFormulaList, String labelingScheme)
+    {
+    	return createListContent(serializedFormulaList, labelingScheme);
     }
 
     /**
@@ -719,7 +730,7 @@ public class ModelWriter
             // formulas
             // to .cfg : <id>
             // to _MC.tla : <id> == <expression>
-            content = new String[] { label, label + DEFINES_CR + formulaList.get(i).getFormula() };
+            content = new String[] { label, label + DEFINES_CR + formulaList.get(i).getFormula(), String.valueOf(i) };
             resultContent.add(content);
         }
         return resultContent;

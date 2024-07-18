@@ -31,14 +31,17 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+
 import org.junit.Test;
+
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 import tlc2.tool.liveness.ModelCheckerTestCase;
 
 public class DepthFirstDieHardTest extends ModelCheckerTestCase {
 
 	public DepthFirstDieHardTest() {
-		super("DieHard", "", new String[] {"-dfid", "7"});
+		super("DieHard", "", new String[] {"-dfid", "7"}, ExitStatus.VIOLATION_SAFETY);
 	}
 
 	@Test
@@ -60,5 +63,6 @@ public class DepthFirstDieHardTest extends ModelCheckerTestCase {
 		
 		expectedTrace.add("/\\ action = \"pour big to small\"\n/\\ smallBucket = 3\n/\\ bigBucket = 4\n/\\ water_to_pour = 1");
 		assertTraceWith(recorder.getRecords(EC.TLC_STATE_PRINT1), expectedTrace);
+		assertZeroUncovered();
 	}
 }

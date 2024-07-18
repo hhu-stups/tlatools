@@ -63,16 +63,21 @@ public class Translator
      */
 	public boolean translate() {
 		final Vector<String> in = new Vector<String>();
-		final String[] lines = input.split(System.getProperty("line.separator"));
+		// The input .tla file might have unix or windows line ending. If we fail to
+		// properly split the input (a line per array cell), the pcal translator will
+		// silently fail as well.
+		final String[] lines = input.split("\\r?\\n");
 		for (String line : lines) {
 			in.add(line);
 		}
 		
-		final Vector<String> out = trans.runMe(in, PcalParams.tlaPcalMapping);
+		final Vector<String> out = trans.runMe(in);
 		if (out != null) {
 			final StringBuffer buf = new StringBuffer(out.size());
 			for (String line : out) {
 				buf.append(line);
+				// The output .tla file will use the OS's line ending which is in line with the
+				// the translator's legacy behavior.
 				buf.append(System.getProperty("line.separator"));
 			}
 			output = buf.toString();

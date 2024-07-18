@@ -52,6 +52,8 @@ public class DiameterTest extends ModelCheckerTestCase {
 		// or a lower number.
 		final int level = recorder.getRecordAsInt(EC.TLC_SEARCH_DEPTH);
 		assertTrue(String.format("Level below threshold: %s", level), level >= 8);
+
+		assertZeroUncovered();
 	}
 
 	/* (non-Javadoc)

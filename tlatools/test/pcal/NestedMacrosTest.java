@@ -46,5 +46,7 @@ public class NestedMacrosTest extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "14", "9", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "5"));
+
+	assertZeroUncovered();
 	}
 }

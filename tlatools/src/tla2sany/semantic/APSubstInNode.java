@@ -21,15 +21,16 @@ import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Iterator;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
 import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.st.TreeNode;
 import tla2sany.utilities.Strings;
 import tla2sany.utilities.Vector;
 import tla2sany.xml.SymbolContext;
 import util.UniqueString;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
 
 public class APSubstInNode extends LevelNode {
   /**
@@ -435,18 +436,20 @@ public class APSubstInNode extends LevelNode {
   }
 
   @Override
-  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable) {
-    Integer uid = new Integer(myUID);
+  public final void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
 
     semNodesTable.put(uid, this);
+    visitor.preVisit(this);
 
     if (this.substs != null) {
       for (int i = 0; i < this.substs.length; i++) {
-        if (this.substs[i] != null) this.substs[i].walkGraph(semNodesTable);
+        if (this.substs[i] != null) this.substs[i].walkGraph(semNodesTable, visitor);
       }
     }
-    if (this.body != null) this.body.walkGraph(semNodesTable);
+    if (this.body != null) this.body.walkGraph(semNodesTable, visitor);
+    visitor.postVisit(this);
     return;
   }
 

@@ -46,6 +46,8 @@ public class FischerTest extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "2487", "1002", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "24"));
+
+		assertZeroUncovered();
 	}
 }
 /*

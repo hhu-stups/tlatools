@@ -31,14 +31,17 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+
 import org.junit.Test;
+
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 import tlc2.tool.liveness.ModelCheckerTestCase;
 
 public class DepthFirstErrorTraceTest extends ModelCheckerTestCase {
 
 	public DepthFirstErrorTraceTest() {
-		super("DepthFirstErrorTrace", "", new String[] {"-dfid", "9"});
+		super("DepthFirstErrorTrace", "", new String[] {"-dfid", "9"}, ExitStatus.VIOLATION_SAFETY);
 	}
 	
 	@Test
@@ -59,5 +62,6 @@ public class DepthFirstErrorTraceTest extends ModelCheckerTestCase {
 		expectedTrace.add("x = 6");
 		expectedTrace.add("x = 7");
 		assertTraceWith(recorder.getRecords(EC.TLC_STATE_PRINT1), expectedTrace);
+		assertZeroUncovered();
 	}
 }

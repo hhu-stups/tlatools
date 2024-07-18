@@ -4,14 +4,15 @@ package tla2sany.semantic;
 
 import java.util.Hashtable;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
 import tla2sany.explorer.ExploreNode;
+import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.st.TreeNode;
 import tla2sany.utilities.Strings;
 import tla2sany.xml.SymbolContext;
 import util.UniqueString;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
 
 /***************************************************************************
 * This class represents a USE or HIDE statement.  It is of kind            *
@@ -115,17 +116,19 @@ public class UseOrHideNode extends LevelNode {
    }
 
   @Override
-  public void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable) {
-    Integer uid = new Integer(myUID);
+  public void walkGraph(Hashtable<Integer, ExploreNode> semNodesTable, ExplorerVisitor visitor) {
+    Integer uid = Integer.valueOf(myUID);
     if (semNodesTable.get(uid) != null) return;
     semNodesTable.put(uid, this);
+    visitor.preVisit(this);
     for (int  i = 0; i < facts.length; i++) {
-      facts[i].walkGraph(semNodesTable);
+      facts[i].walkGraph(semNodesTable, visitor);
       } ;
     /***********************************************************************
     * Note: there's no need to walk the defs array because all the nodes   *
     * on it are walked from the nodes under which they appear.             *
     ***********************************************************************/
+      visitor.postVisit(this);
    }
 
   /*

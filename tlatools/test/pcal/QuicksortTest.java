@@ -46,6 +46,8 @@ public class QuicksortTest extends PCalModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "1017", "933", "0"));
 		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "16"));
+
+		assertZeroUncovered();
 	}
 }
 /*

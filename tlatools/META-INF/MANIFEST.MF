@@ -21,12 +21,14 @@ Export-Package: pcal,
  tlc2.output,
  tlc2.pprint,
  tlc2.tool,
+ tlc2.tool.coverage,
  tlc2.tool.distributed,
  tlc2.tool.distributed.fp,
  tlc2.tool.distributed.management,
  tlc2.tool.distributed.selector,
  tlc2.tool.fp,
  tlc2.tool.fp.management,
+ tlc2.tool.impl,
  tlc2.tool.liveness,
  tlc2.tool.management,
  tlc2.tool.other,
@@ -40,6 +42,6 @@ Eclipse-BundleShape: dir
 Require-Bundle: org.aspectj.runtime;bundle-version="1.6.0";resolution:=optional;x-installation:=greedy,
  org.junit;bundle-version="4.12.0";resolution:=optional;x-installation:=greedy,
  javax.mail;bundle-version="1.4.0";resolution:=optional,
- javax.activation;bundle-version="1.1.0";resolution:=optional,
  org.easymock;bundle-version="2.4.0";resolution:=optional
 Bundle-ClassPath: .
+Automatic-Module-Name: org.lamport.tlatools

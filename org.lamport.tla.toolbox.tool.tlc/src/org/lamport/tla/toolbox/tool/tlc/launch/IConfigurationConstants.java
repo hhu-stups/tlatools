@@ -22,6 +22,10 @@ public interface IConfigurationConstants
      */
     public static final String MODEL_NAME = "configurationName";
     /**
+     * Which profile to use for TLC configuration
+     */
+    public static final String TLC_RESOURCES_PROFILE = "tlcResourcesProfile";
+    /**
      * Number of workers to use during TLC launch
      */
     public static final String LAUNCH_NUMBER_OF_WORKERS = "numberOfWorkers";
@@ -89,6 +93,10 @@ public interface IConfigurationConstants
      * the fp seed index "-fp" 
      */
     public static final String LAUNCH_FP_INDEX = "fpIndex";
+    /**
+     * Choose FP index randomly
+     */
+    public static final String LAUNCH_FP_INDEX_RANDOM = "fpIndexRandom";
 
     /**
 	 * Defers verification of liveness properties upon the final stage of model
@@ -99,6 +107,10 @@ public interface IConfigurationConstants
 	 * Visualize state graph after model checking with GraphViz.
 	 */
     public static final String LAUNCH_VISUALIZE_STATEGRAPH = "visualizeStateGraph";
+    /**
+	 * Collect coverage statistics
+	 */
+    public static final String LAUNCH_COVERAGE = "collectCoverage";
     /**
      * Run from the checkpoint
      */

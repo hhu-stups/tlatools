@@ -30,6 +30,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
+
 import tlc2.output.EC;
 
 public class NoSymmetryTableauModelCheckerTest extends ModelCheckerTestCase {
@@ -53,5 +54,7 @@ public class NoSymmetryTableauModelCheckerTest extends ModelCheckerTestCase {
 		assertFalse(recorder.recorded(EC.TLC_TEMPORAL_PROPERTY_VIOLATED));
 		assertFalse(recorder.recorded(EC.TLC_COUNTER_EXAMPLE));
 		assertFalse(recorder.recorded(EC.TLC_STATE_PRINT2));
+
+	assertZeroUncovered();
 	}
 }

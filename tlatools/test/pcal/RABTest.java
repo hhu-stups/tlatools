@@ -25,6 +25,7 @@
  ******************************************************************************/
 package pcal;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -38,7 +39,7 @@ import tlc2.output.EC;
 public class RABTest extends PCalModelCheckerTestCase {
 
 	public RABTest() {
-		super("RAB", "pcal");
+		super("RAB", "pcal", EC.ExitStatus.VIOLATION_SAFETY);
 	}
 
 	@Test
@@ -47,7 +48,7 @@ public class RABTest extends PCalModelCheckerTestCase {
 		assertTrue(recorder.recorded(EC.TLC_FINISHED));
 		assertFalse(recorder.recorded(EC.GENERAL));
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_STATS, "551", "350", "130"));
-		assertTrue(recorder.recordedWithStringValue(EC.TLC_SEARCH_DEPTH, "7"));
+		assertEquals(7, recorder.getRecordAsInt(EC.TLC_SEARCH_DEPTH));
 
 		assertTrue(recorder.recorded(EC.TLC_STATE_PRINT2));
 		final List<String> expectedTrace = new ArrayList<String>();
@@ -129,6 +130,8 @@ public class RABTest extends PCalModelCheckerTestCase {
 				"/\\ flags = [ A |-> [valid |-> TRUE, value |-> FALSE],\n" + 
 				"  B |-> [valid |-> FALSE, value |-> FALSE] ]");
 		assertTraceWith(recorder.getRecords(EC.TLC_STATE_PRINT2), expectedTrace);
+
+		assertZeroUncovered();
 	}
 }
 /*

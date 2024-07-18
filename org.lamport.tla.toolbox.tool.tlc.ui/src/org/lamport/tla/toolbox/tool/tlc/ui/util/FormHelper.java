@@ -1,6 +1,6 @@
 package org.lamport.tla.toolbox.tool.tlc.ui.util;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Vector;
@@ -17,13 +17,15 @@ import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Label;
+import org.eclipse.swt.widgets.TableItem;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.ui.PlatformUI;
+import org.eclipse.ui.forms.events.ExpansionAdapter;
+import org.eclipse.ui.forms.events.ExpansionEvent;
 import org.eclipse.ui.forms.events.IExpansionListener;
 import org.eclipse.ui.forms.widgets.FormToolkit;
 import org.eclipse.ui.forms.widgets.Hyperlink;
 import org.eclipse.ui.forms.widgets.Section;
-import org.eclipse.ui.forms.widgets.TableWrapData;
 import org.eclipse.ui.forms.widgets.TableWrapLayout;
 import org.lamport.tla.toolbox.tool.tlc.model.Assignment;
 import org.lamport.tla.toolbox.tool.tlc.model.Formula;
@@ -43,6 +45,9 @@ public class FormHelper
     public static final int FORM_BODY_MARGIN_RIGHT = 6;
     public static final int FORM_BODY_HORIZONTAL_SPACING = 20;
     public static final int FORM_BODY_VERTICAL_SPACING = 17;
+    
+    /** Sections created by this class will have this data key if they should not be altered on collapse expand for resizing. **/
+    public static final String SECTION_IS_NOT_SPACE_GRABBING = "_no_space_grab";
 
     /**
      * Create TableWrapLayout for the whole page 
@@ -109,11 +114,9 @@ public class FormHelper
     public static Section createSectionComposite(Composite parent, String title, String description,
             FormToolkit toolkit, int sectionFlags, IExpansionListener expansionListener)
     {
-        Section section = toolkit.createSection(parent, sectionFlags);
+        final Section section = toolkit.createSection(parent, sectionFlags);
 
-        TableWrapData td = new TableWrapData(TableWrapData.FILL_GRAB);
-        td.grabHorizontal = true;
-        section.setLayoutData(td);
+        section.setData(SECTION_IS_NOT_SPACE_GRABBING, new Object());
         section.setText(title);
         section.setDescription(description);
 
@@ -131,6 +134,56 @@ public class FormHelper
 
         // draw flat borders
         toolkit.paintBordersFor(sectionClient);
+        return section;
+    }
+    
+    /**
+     * This creates a section composite which does its best to result in neighboring sections grabbing available
+     * 		space when the section collapses.
+     * 
+     * @param parent
+     * @param title
+     * @param description
+     * @param toolkit
+     * @param sectionFlags
+     * @param expansionListener
+     * @return
+     */
+    public static Section createSpaceGrabbingSectionComposite(final Composite parent, final String title, final String description,
+			final FormToolkit toolkit, final int sectionFlags, final IExpansionListener expansionListener) {
+        final Section section = toolkit.createSection(parent, sectionFlags);
+
+        section.setText(title);
+        section.setDescription(description);
+        
+        section.addExpansionListener(new ExpansionAdapter() {
+            public void expansionStateChanged(final ExpansionEvent e) {
+            	final GridData gd = (GridData)section.getLayoutData();
+            	
+            	gd.grabExcessVerticalSpace = e.getState();
+
+            	section.setLayoutData(gd);
+            	
+            	if (e.getState()) {
+            		((Composite)section.getClient()).layout(true, true);
+            	}
+            }
+        });
+
+		if (expansionListener != null) {
+			section.addExpansionListener(expansionListener);
+        }
+
+        // create section client
+        final Composite sectionClient = toolkit.createComposite(section);
+        final TableWrapLayout layout = new TableWrapLayout();
+        layout.numColumns = 1;
+        sectionClient.setLayout(layout);
+        section.setClient(sectionClient);
+
+        // draw flat borders
+        toolkit.paintBordersFor(sectionClient);
+        
         return section;
     }
 
@@ -159,7 +212,7 @@ public class FormHelper
         SourceViewer sourceViewer = createSourceViewer(parent, flags, config);
         sourceViewer.setData(FormToolkit.KEY_DRAW_BORDER, FormToolkit.TREE_BORDER);
 
-        sourceViewer.getTextWidget().setData(FormToolkit.KEY_DRAW_BORDER, FormToolkit.TREE_BORDER);
+        sourceViewer.getTextWidget().setData(FormToolkit.KEY_DRAW_BORDER, FormToolkit.TEXT_BORDER);
         toolkit.adapt(sourceViewer.getTextWidget(), true, true);
 
         return sourceViewer;
@@ -177,7 +230,7 @@ public class FormHelper
         SourceViewer sourceViewer = createOutputViewer(parent, flags);
         sourceViewer.setData(FormToolkit.KEY_DRAW_BORDER, FormToolkit.TREE_BORDER);
 
-        sourceViewer.getTextWidget().setData(FormToolkit.KEY_DRAW_BORDER, FormToolkit.TREE_BORDER);
+        sourceViewer.getTextWidget().setData(FormToolkit.KEY_DRAW_BORDER, FormToolkit.TEXT_BORDER);
         toolkit.adapt(sourceViewer.getTextWidget(), true, true);
 
         return sourceViewer;
@@ -230,49 +283,28 @@ public class FormHelper
      * @param source - viewer containing the formulas/assignments
      * @return
      */
-    public static List<String> getSerializedInput(TableViewer table)
-    {
-        if (table instanceof CheckboxTableViewer)
-        {
-            CheckboxTableViewer source = (CheckboxTableViewer) table;
-            @SuppressWarnings("unchecked")
-			List<Formula> formulas = (List<Formula>) source.getInput();
-            Object[] checkedArray = source.getCheckedElements();
-
-            if (formulas == null)
-            {
-                return null;
-            }
-
-            Vector<String> result = new Vector<String>(formulas.size());
-            List<Object> checked = Arrays.asList(checkedArray);
-
-            Iterator<Formula> formulaIterator = formulas.iterator();
-
-            Formula formula;
-            String entry;
-            while (formulaIterator.hasNext())
-            {
-                formula = formulaIterator.next();
-                entry = ((checked.contains(formula)) ? "1" : "0") + formula.toString();
-                result.add(entry);
-            }
+	public static List<String> getSerializedInput(final TableViewer tableViewer) {
+		if (tableViewer instanceof CheckboxTableViewer) {
+			final ArrayList<String> result = new ArrayList<>();
+			final TableItem[] tableItems = tableViewer.getTable().getItems();
+			final int itemCount = tableItems.length;
+			for (int i = 0; i < itemCount; i++) {
+				final TableItem item = tableItems[i];
+				final String serialized = (item.getChecked() ? "1" : "0") + item.getText();
+				
+				result.add(serialized);
+			}
 
             return result;
-
-        } else
-        {
+		} else {
             @SuppressWarnings("unchecked")
-			List<Assignment> assignments = (List<Assignment>) table.getInput();
-            if (assignments == null)
-            {
-                return null;
-            }
+			List<Assignment> assignments = (List<Assignment>) tableViewer.getInput();
+			if (assignments == null) {
+				return null;
+			}
 
             return ModelHelper.serializeAssignmentList(assignments);
-
         }
-
     }
 
     /**
@@ -369,16 +401,14 @@ public class FormHelper
      */
     public static Hyperlink createHyperlinkLeft(String title, Composite parent, FormToolkit toolkit)
     {
-        Label createLabel = toolkit.createLabel(parent, title);
+        final Label createLabel = toolkit.createLabel(parent, title);
         GridData gd = new GridData();
+        gd.verticalAlignment = SWT.TOP;
         createLabel.setLayoutData(gd);
-        gd.verticalAlignment = SWT.TOP;
 
-        Hyperlink hyperlink = toolkit.createHyperlink(parent, "", SWT.RIGHT);
-        gd = new GridData(SWT.FILL, SWT.LEFT, true, false);
+        final Hyperlink hyperlink = toolkit.createHyperlink(parent, "", SWT.RIGHT);
+        gd = new GridData(SWT.FILL, SWT.TOP, true, false);
         gd.horizontalIndent = 30;
-        gd.verticalAlignment = SWT.TOP;
-        gd.horizontalAlignment = SWT.RIGHT;
         gd.minimumWidth = 300;
         hyperlink.setLayoutData(gd);
         
@@ -394,16 +424,14 @@ public class FormHelper
      */
     public static Text createTextLeft(String title, Composite parent, FormToolkit toolkit)
     {
-        Label createLabel = toolkit.createLabel(parent, title);
+        final Label createLabel = toolkit.createLabel(parent, title);
         GridData gd = new GridData();
+        gd.verticalAlignment = SWT.TOP;
         createLabel.setLayoutData(gd);
-        gd.verticalAlignment = SWT.TOP;
         
-        Text text = toolkit.createText(parent, "");
-        gd = new GridData(SWT.FILL, SWT.LEFT, true, false);
+        final Text text = toolkit.createText(parent, "");
+        gd = new GridData(SWT.FILL, SWT.TOP, true, false);
         gd.horizontalIndent = 30;
-        gd.verticalAlignment = SWT.TOP;
-        gd.horizontalAlignment = SWT.RIGHT;
         gd.minimumWidth = 400;
         text.setLayoutData(gd);
 

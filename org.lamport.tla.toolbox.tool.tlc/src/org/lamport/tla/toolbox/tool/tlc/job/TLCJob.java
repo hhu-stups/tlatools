@@ -3,6 +3,7 @@ package org.lamport.tla.toolbox.tool.tlc.job;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Random;
 import java.util.Vector;
 
 import org.eclipse.core.resources.IFile;
@@ -30,6 +31,7 @@ import org.lamport.tla.toolbox.util.ResourceHelper;
 import org.lamport.tla.toolbox.util.ToolboxJob;
 
 import tlc2.TLCGlobals;
+import tlc2.util.FP64;
 
 /**
  * Abstract TLC job
@@ -48,13 +50,6 @@ public abstract class TLCJob extends AbstractJob implements IModelConfigurationC
      * Number of minutes between printing of coverage data.
      */
     private static final int COVERAGE_INTERVAL = 3;
-    
-    /*
-     * Number of minutes between checkpoints.  It was changed from 20 or 30 to 3,
-     * apparently by Simon Z.  Changed to 15 by LL for 10 Apr 2012 release
-     * 
-     */
-    private static final int CHECKPOINT_INTERVAL = 15 ;  
     
     protected long timeout = 1000L;
     protected IFile rootModule;
@@ -126,9 +121,9 @@ public abstract class TLCJob extends AbstractJob implements IModelConfigurationC
         }
 
         // adjust checkpointing
-        if (checkPoint()) {
+        if (!checkPoint()) {
         	arguments.add("-checkpoint");
-        	arguments.add(String.valueOf(CHECKPOINT_INTERVAL));
+        	arguments.add(String.valueOf(0));
         }
 
         final boolean hasSpec = hasSpec(config);
@@ -190,8 +185,7 @@ public abstract class TLCJob extends AbstractJob implements IModelConfigurationC
         }
         
         // Defer liveness checking
-        final boolean deferLiveness = launch.getLaunchConfiguration().getAttribute(LAUNCH_DEFER_LIVENESS, false);
-        if (deferLiveness) {
+        if (deferLiveness()) {
         	arguments.add("-lncheck");
         	arguments.add("final");
         }
@@ -204,9 +198,15 @@ public abstract class TLCJob extends AbstractJob implements IModelConfigurationC
         }
         
         // fp seed offset (decrease by one to map from [1, 64] interval to [0, 63] array address
-        final int fpSeedOffset = launch.getLaunchConfiguration().getAttribute(LAUNCH_FP_INDEX, LAUNCH_FP_INDEX_DEFAULT);
-        arguments.add("-fp");
-        arguments.add(String.valueOf(fpSeedOffset - 1));
+		if (launch.getLaunchConfiguration().getAttribute(LAUNCH_FP_INDEX_RANDOM, LAUNCH_FP_INDEX_RANDOM_DEFAULT)) {
+			final int fpIndex = new Random().nextInt(FP64.Polys.length);
+			arguments.add("-fp");
+			arguments.add(String.valueOf(fpIndex));
+		} else {
+			final int fpSeedOffset = launch.getLaunchConfiguration().getAttribute(LAUNCH_FP_INDEX, LAUNCH_FP_INDEX_DEFAULT);
+			arguments.add("-fp");
+			arguments.add(String.valueOf(fpSeedOffset));
+		}
         
         // add maxSetSize argument if not equal to the default
         // code added by LL on 9 Mar 2012
@@ -232,7 +232,7 @@ public abstract class TLCJob extends AbstractJob implements IModelConfigurationC
 
         // Should not add a coverage option only if TLC is being run
         // without a spec. This change added 10 Sep 2009 by LL & DR
-        if (config.getAttribute(MODEL_BEHAVIOR_SPEC_TYPE, MODEL_BEHAVIOR_TYPE_DEFAULT) != MODEL_BEHAVIOR_TYPE_NO_SPEC)
+        if (collectCoverage())
         {
         	// coverage 0.1 hour
         	arguments.add("-coverage");
@@ -267,8 +267,23 @@ public abstract class TLCJob extends AbstractJob implements IModelConfigurationC
         return (String[]) arguments.toArray(new String[arguments.size()]);
     }
     
-	// Allow subclasses to veto command line parameters if needed.
 
+	// Allow subclasses to veto command line parameters if needed.
+    
+    protected boolean deferLiveness() throws CoreException {
+        return launch.getLaunchConfiguration().getAttribute(LAUNCH_DEFER_LIVENESS, false);
+    }
+
+    protected boolean collectCoverage() throws CoreException {
+		final ILaunchConfiguration launchConfiguration = launch.getLaunchConfiguration();
+		if (launchConfiguration.getAttribute(LAUNCH_COVERAGE, LAUNCH_COVERAGE_DEFAULT) != Model.Coverage.OFF.ordinal()) {
+			return launchConfiguration.getAttribute(MODEL_BEHAVIOR_SPEC_TYPE,
+					MODEL_BEHAVIOR_TYPE_DEFAULT) != MODEL_BEHAVIOR_TYPE_NO_SPEC;
+		} else {
+			return false;
+		}
+    }
+    
 	protected boolean recover() throws CoreException {
 		return launch.getLaunchConfiguration().getAttribute(IModelConfigurationConstants.LAUNCH_RECOVER,
 				IModelConfigurationDefaults.LAUNCH_RECOVER_DEFAULT);

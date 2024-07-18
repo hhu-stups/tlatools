@@ -31,12 +31,13 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 import tlc2.output.EC;
+import tlc2.output.EC.ExitStatus;
 import tlc2.tool.liveness.ModelCheckerTestCase;
 
 public class FingerprintExceptionNextTest extends ModelCheckerTestCase {
 
 	public FingerprintExceptionNextTest() {
-		super("FingerprintExceptionNext");
+		super("FingerprintExceptionNext", ExitStatus.FAILURE_SPEC_EVAL);
 	}
 
 	@Test
@@ -51,6 +52,7 @@ public class FingerprintExceptionNextTest extends ModelCheckerTestCase {
 		String arg2 = "Overflow when computing the number of elements in:\n"
 			+ "SUBSET 1..32";
 		assertTrue(recorder.recordedWithStringValues(EC.TLC_FINGERPRINT_EXCEPTION, arg1, arg2));
+		
+		assertUncovered("line 8, col 71 to line 8, col 76 of module FingerprintExceptionNext: 0\n");
 	}
-
 }

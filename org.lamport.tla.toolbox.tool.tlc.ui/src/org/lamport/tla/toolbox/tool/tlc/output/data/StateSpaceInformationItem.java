@@ -1,8 +1,5 @@
 package org.lamport.tla.toolbox.tool.tlc.output.data;
 
-import java.text.NumberFormat;
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -12,7 +9,6 @@ import org.lamport.tla.toolbox.tool.tlc.ui.TLCUIActivator;
 /**
  * Representation of the state space progress item 
  * @author Simon Zambrovski
- * @version $Id$
  */
 public class StateSpaceInformationItem
 {
@@ -53,6 +49,16 @@ public class StateSpaceInformationItem
 		this.leftStates = leftStates;
 		this.spm = spm;
 		this.distinctSPM = distinctSPM;
+	}
+	
+	private StateSpaceInformationItem(Date time, long foundStates, long distinctStates) {
+		// Set leftStates to distinctStates: If we found 10 initial states, those 10
+		// states go into the queue.
+		this(time, 0, foundStates, distinctStates, distinctStates, 0, 0);
+	}
+
+	private StateSpaceInformationItem(Date time, long distinctStates) {
+		this(time, distinctStates, distinctStates);
 	}
 	
 	private StateSpaceInformationItem(long foundStates, long distinctStates) {
@@ -131,6 +137,16 @@ public class StateSpaceInformationItem
 		return distinctSPM;
 	}
 
+	private static long localizedNum2Long(final String number) {
+		// Strip all locale-specific delimiters from input. This assumes number is
+		// rounded to zero decimal places which should be the case for
+		// StateSpaceInfomrationItems. So far we haven't seen fractions of TLA+ state.
+		// States appear to be atomic. Per-minutes states are also reported without
+		// decimal places.
+		final String justDigits = number.replaceAll("[^0-9]", "");
+		return Long.parseLong(justDigits);
+	}
+	
 	/**
 	 * @param outputMessage
 	 * @return
@@ -156,6 +172,10 @@ public class StateSpaceInformationItem
 
 		for (int j = 0; j < i.length; j++) {
 			if (i[j] == -1) {
+				// Old does not only mean previously written MC.out files.  Current TLC still emits old format through:
+				// tlc2.tool.distributed.TLCServer.modelCheck()
+				// tlc2.tool.distributed.TLCServer.printSummary(int, long, long, long, boolean)
+				// tlc2.tool.ModelChecker.modelCheck() <- Liveness checking
 				return parseOld(outputMessage);
 			}
 		}
@@ -163,32 +183,28 @@ public class StateSpaceInformationItem
 		// assuming the previous check suffices, it should now be possible to
 		// parse the string back to its real types
 		try {
-			final Date time = SDF.parse(outputMessage.substring(
+			final Date time = TLCModelLaunchDataProvider.parseDate(outputMessage.substring(
 					i[1] + AT.length(), i[2]));
 
-			final NumberFormat nf = NumberFormat.getNumberInstance();
-			
-			final long diameter = Long.parseLong(outputMessage.substring(i[0]
-					+ OB.length(), i[1]));
-			final long foundStates = Long.parseLong(outputMessage.substring(
-					i[2] + COLON.length(), i[3]));
-			final long statesPerMinute = nf.parse(outputMessage
-					.substring(i[3] + GENERATED.length(), i[4]).replace(",", "")).longValue();
+			final long diameter = localizedNum2Long(
+				outputMessage.substring(i[0] + OB.length(), i[1]));
+			final long foundStates = localizedNum2Long(
+				outputMessage.substring(i[2] + COLON.length(), i[3]));
+			final long statesPerMinute = localizedNum2Long(
+				outputMessage.substring(i[3] + GENERATED.length(), i[4]));
 
-			final long distinctStates = Long.parseLong(outputMessage.substring(
-					i[4] + SPM.length(), i[5]));
-			final long distinctStatesPerMinute = nf.parse(outputMessage
-					.substring(i[5] + DISTINCT.length(), i[6]).replace(",", "")).longValue();
+			final long distinctStates = localizedNum2Long(
+				outputMessage.substring(i[4] + SPM.length(), i[5]));
+			final long distinctStatesPerMinute = localizedNum2Long(
+				outputMessage.substring(i[5] + DISTINCT.length(), i[6]));
 
-			final long leftStates = Long.parseLong(outputMessage.substring(i[6]
-					+ DISTINCT_SPM.length(), i[7]));
+			final long leftStates = localizedNum2Long(
+				outputMessage.substring(i[6] + DISTINCT_SPM.length(), i[7]));
 
 			return new StateSpaceInformationItem(time, diameter, foundStates,
 					distinctStates, leftStates, statesPerMinute,
 					distinctStatesPerMinute);
 		} catch (NumberFormatException e) {
-			TLCUIActivator.getDefault().logError("Error reading progress information", e);
-		} catch (ParseException e) {
 			TLCUIActivator.getDefault().logError("Error reading progress information", e);
 		}
 		return null;
@@ -200,6 +216,7 @@ public class StateSpaceInformationItem
         //   b.append("Finished computing initial states: %1% distinct state%2% generated.");
         //   b.append("Finished computing initial states: %1% state%2% generated, with %3% of them distinct.");
 
+		// Legacy pattern without date.
 		Pattern pattern = Pattern.compile("^Finished computing initial states: ([0-9]+) distinct state[s]* generated.$");
 		Matcher matcher = pattern.matcher(outputMessage);
 		if (matcher.find()) {
@@ -215,11 +232,29 @@ public class StateSpaceInformationItem
 			final long distinctStates = Long.parseLong(matcher.group(2));
 			return new StateSpaceInformationItem(foundStates, distinctStates);
 		}
+		
+		// New patterns with date.
+		pattern = Pattern.compile("^Finished computing initial states: ([0-9]+) distinct state[s]* generated at (.*).$");
+		matcher = pattern.matcher(outputMessage);
+		if (matcher.find()) {
+			final long distinctStates = Long.parseLong(matcher.group(1));
+			final Date date = TLCModelLaunchDataProvider.parseDate(matcher.group(2));
+			return new StateSpaceInformationItem(date, distinctStates);
+		}
+
+		pattern = Pattern.compile(
+				"^Finished computing initial states: ([0-9]+) states generated, with ([0-9]+) of them distinct at (.*).$");
+		matcher = pattern.matcher(outputMessage);
+		if (matcher.find()) {
+			final long foundStates = Long.parseLong(matcher.group(1));
+			final long distinctStates = Long.parseLong(matcher.group(2));
+			final Date date = TLCModelLaunchDataProvider.parseDate(matcher.group(3));
+			return new StateSpaceInformationItem(date, foundStates, distinctStates);
+		}
 		return null;
 	}
-	
-	
-    /**
+
+	/**
      * @param outputMessage
      * @return
      */
@@ -247,25 +282,17 @@ public class StateSpaceInformationItem
 		}
 
 		try {
-			return new StateSpaceInformationItem(SDF.parse(outputMessage
-					.substring(i[1] + AT.length(), i[2])),
-					Long.parseLong(outputMessage.substring(i[0] + OB.length(),
-							i[1])), Long.parseLong(outputMessage.substring(i[2]
-							+ COLON.length(), i[3])),
-					Long.parseLong(outputMessage.substring(
-							i[3] + GENERATED.length(), i[4])),
-					Long.parseLong(outputMessage.substring(
-							i[4] + DISTINCT.length(), i[5])), 0, 0);
+			return new StateSpaceInformationItem(
+					TLCModelLaunchDataProvider.parseDate(outputMessage.substring(i[1] + AT.length(), i[2])),
+					localizedNum2Long(outputMessage.substring(i[0] + OB.length(), i[1])),
+					localizedNum2Long(outputMessage.substring(i[2] + COLON.length(), i[3])),
+					localizedNum2Long(outputMessage.substring(i[3] + GENERATED.length(), i[4])),
+					localizedNum2Long(outputMessage.substring(i[4] + DISTINCT.length(), i[5])), 0, 0);
 		} catch (NumberFormatException e) {
-			TLCUIActivator.getDefault().logError("Error reading progress information", e);
-		} catch (ParseException e) {
 			TLCUIActivator.getDefault().logError("Error reading progress information", e);
 		}
 		return null;
 	}
-
-	public final static SimpleDateFormat SDF = new SimpleDateFormat(
-			"yyyy-MM-dd HH:mm:ss");
 
 	/* (non-Javadoc)
 	 * @see java.lang.Object#hashCode()
