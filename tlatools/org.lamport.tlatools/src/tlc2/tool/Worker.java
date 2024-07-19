@@ -10,6 +10,7 @@ import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
 
+import tla2sany.semantic.ExprNode;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
@@ -82,9 +83,13 @@ public final class Worker extends IdThread implements IWorker, INextStateFunctor
 				curState = this.squeue.sDequeue();
 				if (curState == null) {
 					synchronized (this.tlc) {
-						this.tlc.setDone();
+						if(!this.tlc.setDone()) {
+							doPostConditionCheck();
+						}
 						this.tlc.notify();
 					}
+					//TODO: finishAll not inside the synchronized block above, while
+					//inside in a similar construct below (Throwable catch)?!
 					this.squeue.finishAll();
 					return;
 				}
@@ -98,7 +103,7 @@ public final class Worker extends IdThread implements IWorker, INextStateFunctor
 				final long preNext = this.statesGenerated;
 				try {
 					this.tool.getNextStates(this, curState);
-				} catch (TLCRuntimeException e) {
+				} catch (TLCRuntimeException | EvalException e) {
 					// The next-state relation couldn't be evaluated.
 					this.tlc.doNextFailed(curState, null, e);
 				}
@@ -460,5 +465,29 @@ public final class Worker extends IdThread implements IWorker, INextStateFunctor
 					this.tool.getImpliedActNames()[k], e);
 		}
         return false;
+	}
+
+	// User request: http://discuss.tlapl.us/msg03658.html
+	private final void doPostConditionCheck() {
+		final ExprNode sn = (ExprNode) this.tool.getPostConditionSpec();
+		try {
+			if (sn != null && !this.tool.isValid(sn)) {
+				// It's not an assumption because the expression doesn't appear inside
+				// an ASSUME, but good enough for this prototype.
+				MP.printError(EC.TLC_ASSUMPTION_FALSE, sn.toString());
+				// Terminate with a non-zero exit value.
+				this.tlc.setError(false, EC.TLC_ASSUMPTION_FALSE);
+			}
+		} catch (Exception e) {
+			// tool.isValid(sn) failed to evaluate...
+			MP.printError(EC.TLC_ASSUMPTION_EVALUATION_ERROR, new String[] { sn.toString(), e.getMessage() });
+			this.tlc.setError(true, EC.TLC_ASSUMPTION_EVALUATION_ERROR);
+		}
+		// The PostCheckAssumption/PostCondition cannot be stated as an ordinary invariant
+		// with the help of TLCSet/Get because the invariant will only be evaluated for
+		// distinct states, but we want it to be evaluated after state-space exploration
+		// finished.  Hacking away with TLCGet("queue") = 0 doesn't work because the queue
+		// can be empty during the evaluation of the next-state relation when a worker dequeues
+		// the last state S, that has more successor states.
 	}
 }

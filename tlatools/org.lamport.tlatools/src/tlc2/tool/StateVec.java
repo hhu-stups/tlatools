@@ -5,8 +5,12 @@
 
 package tlc2.tool;
 
+import java.util.LinkedList;
+
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
+import tlc2.value.impl.RecordValue;
+import tlc2.value.impl.Value;
 import util.Assert;
 
 /*
@@ -37,6 +41,14 @@ public final class StateVec implements IStateFunctor, INextStateFunctor {
     }
   }
 
+  public StateVec(final StateVec other) {
+	this(other.size);
+	this.size = other.size;
+	for (int i = 0; i < v.length; i++) {
+		this.v[i] = other.elementAt(i);
+	}
+  }
+  
   private StateVec(TLCState v[]) {
     this.v = v;
     this.size = v.length;
@@ -177,5 +189,30 @@ public final class StateVec implements IStateFunctor, INextStateFunctor {
 		}
 	}
 	return false;
+  }
+  
+  public final Value[] toRecords(final TLCState append) {
+	final Value[] values = new Value[size + 1];
+	for (int i = 0; i < values.length; i++) {
+		values[i] = new RecordValue(v[i]);
+	}
+	values[values.length] = new RecordValue(append);
+    return values;
+  }
+  
+  public final Value[] toRecords(final TLCState from, final TLCState append) {
+    final LinkedList<RecordValue> res = new LinkedList<>();
+    res.add(new RecordValue(append));
+	for (int i = size - 1; i >= 0; i--) {
+		res.push(new RecordValue(v[i]));
+		if (from.fingerPrint() == v[i].fingerPrint()) {
+			break;			
+		}
+	}
+    return res.toArray(new Value[res.size()]);
+  }
+  
+  public final boolean hasStates() {
+	  return !isEmpty();
   }
 }

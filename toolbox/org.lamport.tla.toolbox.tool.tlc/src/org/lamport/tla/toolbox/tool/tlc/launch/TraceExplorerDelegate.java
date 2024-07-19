@@ -70,6 +70,7 @@ import org.lamport.tla.toolbox.util.ResourceHelper;
 import org.lamport.tla.toolbox.util.TLAMarkerInformationHolder;
 import org.lamport.tla.toolbox.util.UIHelper;
 
+import tla2sany.modanalyzer.SpecObj;
 import tla2sany.semantic.OpDefNode;
 import tlc2.model.Assignment;
 import tlc2.model.Formula;
@@ -438,7 +439,7 @@ public class TraceExplorerDelegate extends TLCModelLaunchDelegate implements ILa
 		writer.addPrimer(ModelHelper.TE_MODEL_NAME, ResourceHelper.getModuleName(model.getSpec().getRootFilename()),
 				model.getTraceExplorerExtends());
 
-        writeModelInfo(config, writer);
+        writeModelInfo(model.getSpec().getValidRootModule(), config, writer);
         
         writer.addTraceFunction(trace);
 
@@ -466,7 +467,7 @@ public class TraceExplorerDelegate extends TLCModelLaunchDelegate implements ILa
         // add the initial state predicate and next state action without
         // the trace exploration expressions in order to determine if they parse
         // initNext[0] is the identifier for init, initNext[1] is the identifier for next
-        final String[] initNextActionConstraint = writer.addInitNext(trace, null);
+        final String[] initNextActionConstraint = writer.addInitNext(trace);
 		if (initNextActionConstraint != null) {
 			initId = initNextActionConstraint[0];
 			nextId = initNextActionConstraint[1];
@@ -646,33 +647,17 @@ public class TraceExplorerDelegate extends TLCModelLaunchDelegate implements ILa
 				model.getTraceExplorerExtends());
 
         // write constants, model values, new definitions, definition overrides
-        writeModelInfo(configuration, writer);
+        writeModelInfo(model.getSpec().getValidRootModule(), configuration, writer);
         
         writer.addTraceFunction(trace);
 
         // variables declarations for trace explorer expressions
-        writer.addVariablesAndDefinitions(traceExpressionData, TLAConstants.TraceExplore.TRACE_EXPLORE_EXPRESSIONS, false);
+        writer.addVariablesAndDefinitions(traceExpressionData, TLAConstants.TraceExplore.TRACE_EXPLORE_EXPRESSIONS, true);
 
         // add init and next
         writer.addInitNext(trace, traceExpressionData, initId, nextId, actionConstraintId);
 
-        MCState finalState = trace.get(trace.size() - 1);
-        boolean isBackToState = finalState.isBackToState();
-        boolean isStuttering = finalState.isStuttering();
-
-        // add temporal property or invariant depending on type of trace
-        // read the method comments to see the form of the invariant or property
-        if (isStuttering)
-        {
-            writer.addStutteringProperty(trace.get(trace.size() - 2));
-        } else if (isBackToState)
-        {
-            writer.addBackToStateProperty(trace.get(trace.size() - 2), trace.get(finalState.getStateNumber() - 1));
-        } else
-        {
-            // checking deadlock eliminates the need for the following
-            // writer.addInvariantForTraceExplorer(finalState);
-        }
+        writer.addProperties(trace);
 
         writer.writeFiles(tlaFile, cfgFile, monitor);
 
@@ -729,7 +714,7 @@ public class TraceExplorerDelegate extends TLCModelLaunchDelegate implements ILa
      * @param writer
      * @throws CoreException
      */
-    private void writeModelInfo(final ILaunchConfiguration config, final AbstractSpecWriter writer) throws CoreException
+    private void writeModelInfo(final SpecObj specObj, final ILaunchConfiguration config, final AbstractSpecWriter writer) throws CoreException
     {
         // constants list
     	final List<Assignment> constants = ModelHelper.deserializeAssignmentList(config.getAttribute(MODEL_PARAMETER_CONSTANTS,
@@ -751,7 +736,7 @@ public class TraceExplorerDelegate extends TLCModelLaunchDelegate implements ILa
         List<Assignment> overrides = ModelHelper.deserializeAssignmentList(config.getAttribute(MODEL_PARAMETER_DEFINITIONS,
                 new ArrayList<String>()));
         writer.addFormulaList(SpecWriterUtilities.createOverridesContent(overrides, TLAConstants.Schemes.DEFOV_SCHEME,
-        		ToolboxHandle.getCurrentSpec().getValidRootModule()), TLAConstants.KeyWords.CONSTANT,
+        		specObj), TLAConstants.KeyWords.CONSTANT,
         		MODEL_PARAMETER_DEFINITIONS);
     }
 }

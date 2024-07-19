@@ -36,6 +36,7 @@ import tlc2.tool.BuiltInOPs;
 import tlc2.tool.Defns;
 import tlc2.tool.TLCState;
 import tlc2.tool.ToolGlobals;
+import tlc2.tool.impl.Tool.Mode;
 import tlc2.util.Context;
 import tlc2.util.ObjLongTable;
 import tlc2.util.Vect;
@@ -44,7 +45,7 @@ import tlc2.value.impl.LazyValue;
 import tlc2.value.impl.ModelValue;
 import util.Assert;
 import util.FilenameToStream;
-import util.TLAConstants;
+import util.MonolithSpecExtractor;
 import util.UniqueString;
 
 // Note that we use all of the {@code default} defined functionality in our
@@ -79,7 +80,8 @@ abstract class Spec
     private final SpecProcessor specProcessor;
 
     // SZ Feb 20, 2009: added support to name resolver, to be able to run outside of the tool
-	public Spec(final String specDir, final String specFile, final String configFile, final FilenameToStream resolver) {
+	public Spec(final String specDir, final String specFile, final String configFile, final FilenameToStream resolver,
+			Mode mode) {
         this.specDir = specDir;
         this.rootFile = specFile;
         this.defns = new Defns();
@@ -90,11 +92,11 @@ abstract class Spec
         // SZ Mar 9, 2009: added initialization of the modelValue class
         ModelValue.init();
         this.configFile = configFile;
-        this.config = new ModelConfig(configFile + TLAConstants.Files.CONFIG_EXTENSION, resolver);
+        this.config = new ModelConfig(MonolithSpecExtractor.getConfig(configFile), resolver);
         this.config.parse();
         ModelValue.setValues(); // called after seeing all model values
 
-        specProcessor = new SpecProcessor(getRootName(), resolver, toolId, defns, config, this, this, tlaClass);
+        specProcessor = new SpecProcessor(getRootName(), resolver, toolId, defns, config, this, this, tlaClass, mode);
         
         this.unprocessedDefns = specProcessor.getUnprocessedDefns();
     }
@@ -202,36 +204,38 @@ abstract class Spec
         return def.getBody();
     }
 
-    /* Get the type declaration for the state variables. */
-    public final SemanticNode getTypeSpec()
+    /* Get the alias declaration for the state variables. */
+    public final SemanticNode getAliasSpec()
     {
-        String name = this.config.getType();
+        String name = this.config.getAlias();
         if (name.length() == 0)
         {
             Assert.fail(EC.TLC_CONFIG_NO_STATE_TYPE);
         }
 
+        // A true constant-level alias such as such as [ x |-> "foo" ] will be evaluated
+        // eagerly and type be an instance of RecordValue.  It would be good to return a
+        // proper warning.
         Object type = this.defns.get(name);
         if (type == null)
         {
-            Assert.fail(EC.TLC_CONFIG_SPECIFIED_NOT_DEFINED, new String[] { "type", name });
+            Assert.fail(EC.TLC_CONFIG_SPECIFIED_NOT_DEFINED, new String[] { "alias", name });
         }
         if (!(type instanceof OpDefNode))
         {
-            Assert.fail(EC.TLC_CONFIG_ID_MUST_NOT_BE_CONSTANT, new String[] { "type", name });
+            Assert.fail(EC.TLC_CONFIG_ID_MUST_NOT_BE_CONSTANT, new String[] { "alias", name });
         }
         OpDefNode def = (OpDefNode) type;
         if (def.getArity() != 0)
         {
-            Assert.fail(EC.TLC_CONFIG_ID_REQUIRES_NO_ARG, new String[] { "type", name });
+            Assert.fail(EC.TLC_CONFIG_ID_REQUIRES_NO_ARG, new String[] { "alias", name });
         }
         return def.getBody();
     }
 
-    /* Get the type declaration for the state variables. */
-    public final SemanticNode getTypeConstraintSpec()
+    public final SemanticNode getPostConditionSpec()
     {
-        String name = this.config.getTypeConstraint();
+        String name = this.config.getPostCondition();
         if (name.length() == 0)
         {
             return null;
@@ -240,16 +244,16 @@ abstract class Spec
         Object type = this.defns.get(name);
         if (type == null)
         {
-            Assert.fail(EC.TLC_CONFIG_SPECIFIED_NOT_DEFINED, new String[] { "type constraint", name });
+            Assert.fail(EC.TLC_CONFIG_SPECIFIED_NOT_DEFINED, new String[] { "post assumption", name });
         }
         if (!(type instanceof OpDefNode))
         {
-            Assert.fail(EC.TLC_CONFIG_ID_MUST_NOT_BE_CONSTANT, new String[] { "type constraint", name });
+            Assert.fail(EC.TLC_CONFIG_ID_MUST_NOT_BE_CONSTANT, new String[] { "post assumption", name });
         }
         OpDefNode def = (OpDefNode) type;
         if (def.getArity() != 0)
         {
-            Assert.fail(EC.TLC_CONFIG_ID_REQUIRES_NO_ARG, new String[] { "type constraint", name });
+            Assert.fail(EC.TLC_CONFIG_ID_REQUIRES_NO_ARG, new String[] { "post assumption", name });
 
         }
         return def.getBody();

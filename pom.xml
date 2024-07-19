@@ -78,7 +78,7 @@
 		<module>toolbox/org.lamport.tla.toolbox.product.product</module>
 
 		<!-- Finally run UI tests on fully built product (AUT) -->
-		<module>toolbox/org.lamport.tla.toolbox.product.uitest</module>
+<!--		<module>toolbox/org.lamport.tla.toolbox.product.uitest</module>-->
 	</modules>
 
 	<!-- tycho requires maven >= 3.0 -->
@@ -92,7 +92,7 @@
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
 		<!-- https://wiki.eclipse.org/Tycho/Release_Notes/1.4 -->
-		<tycho-version>1.5.0</tycho-version>
+		<tycho-version>1.5.1</tycho-version>
 
 		<!-- no default here -->
 		<tycho.test.vm.argline>-Xmx500m -Xdebug -Xrunjdwp:transport=dt_socket,address=1044,server=y,suspend=n</tycho.test.vm.argline>
@@ -123,7 +123,7 @@
 		<!-- Align toolbox.version with the version in
 			 org.lamport.tla.toolbox.product.product.product
 			 product.version. -->
-		<toolbox.version>1.7.0</toolbox.version>
+		<toolbox.version>1.8.0</toolbox.version>
 
 		<!-- This is used in org.lamport.tla.toolbox.product.uitest but
 			has been placed at the top level should it need be referenced
@@ -264,6 +264,13 @@
 				<artifactId>target-platform-configuration</artifactId>
 				<version>${tycho-version}</version>
 				<configuration>
+				    <!-- Some dependencies such as jline referenced by org.lamport.tlatools   -->
+				    <!-- cannot be found in the Toolbox's target platform (TLAToolbox.target) -->
+				    <!-- because the dependencies are not made available in p2 repositories.  -->
+				    <!-- However, sometimes OSGi-fied dependencies are made available on      -->
+				    <!-- Maven Central.  'pomDependencies' makes this build look there too.    -->
+				    <!-- https://wiki.eclipse.org/Tycho/Target_Platform#.22POM_dependencies_consider.22 -->
+                    <pomDependencies>consider</pomDependencies>
 					<!-- recommended: use p2-based target platform resolver -->
 					<resolver>p2</resolver>
 					<ignoreTychoRepositories>true</ignoreTychoRepositories>

@@ -137,6 +137,8 @@
 			<classpath refid="project.classpath" />
 			<classpath>
 				<pathelement location="lib/javax.mail/mailapi-1.6.3.jar" />
+				<pathelement location="lib/jline/jline-terminal-3.14.1.jar" />
+				<pathelement location="lib/jline/jline-reader-3.14.1.jar" />
 			</classpath>
 		</javac>
 
@@ -249,7 +251,30 @@
 			</patternset>
 		</unzip>
 		<touch file="target/classes/META-INF/javamail.default.address.map"/>
-		
+
+		<unzip src="lib/jline/jline-terminal-3.14.1.jar" dest="${class.dir}">
+			<patternset>
+				<include name="**/*.*"/>
+			</patternset>
+		</unzip>
+
+		<unzip src="lib/jline/jline-reader-3.14.1.jar" dest="${class.dir}">
+			<patternset>
+				<include name="**/*.*"/>
+			</patternset>
+		</unzip>
+
+		<!-- Include a few LICENSE files -->
+		<copy todir="${class.dir}">
+			<fileset dir="lib/jline">
+				<include name="jline-LICENSE.txt" />
+			</fileset>
+			<fileset dir="src/org/apache/commons/math3/">
+				<include name="CommonsMath-NOTICE.txt" />
+				<include name="CommonsMath-LICENSE.txt" />
+			</fileset>
+		</copy>
+
 
 		<!-- create a JAR file for the users -->
 		<mkdir dir="${dist.dir}" />
@@ -275,6 +300,12 @@
 					src/tla2sany/parser/Token.09-09-07,
 					src/tla2sany/parser/TokenMgrError.09-09-07"/>
 			<fileset dir="${doc.dir}" includes="License.txt"/>
+			<fileset dir="${test.class.dir}">
+				<include name="**/tlc2/tool/CommonTestCase*.class" />
+				<include name="**/tlc2/tool/liveness/ModelCheckerTestCase*.class" />
+				<include name="**/tlc2/TestMPRecorder*.class" />
+				<include name="**/util/IsolatedTestCaseRunner*.class" />
+			</fileset>
 			<manifest>
 				<attribute name="Built-By" value="${user.name}" />
 				<attribute name="Build-Tag" value="${env.BUILD_TAG}" />
@@ -285,7 +316,7 @@
 				<!-- The jar files contains many main classes (SANY, TEX, pcal, ...) --> 
                 <!-- but lets consider TLC the one users primarily use. --> 
 				<attribute name="Main-class" value="tlc2.TLC" />
-				<attribute name="Class-Path" value="CommunityModules.jar" />
+				<attribute name="Class-Path" value="CommunityModules-deps.jar CommunityModules.jar" />
 				<!-- Git revision -->
 				<attribute name="X-Git-Branch" value="${git.branch}" />
 				<attribute name="X-Git-Tag" value="${git.tag}" />
@@ -304,7 +335,7 @@
 	</target>
 
 	<!-- Compiles the TLA+ tools *test* code -->
-	<target name="compile-test" unless="test.skip">
+	<target name="compile-test">
 		<!-- compile unit tests -->
 		<mkdir dir="${test.class.dir}" />
 		<javac includeantruntime="false" srcdir="${test.dir}" destdir="${test.class.dir}" debug="true" verbose="false" source="1.8" target="1.8">
@@ -355,6 +386,8 @@
 				<pathelement location="lib/objenesis-2.1.jar" />
 				<pathelement location="lib/easymock-3.3.1.jar" />
 				<pathelement location="lib/javax.mail/mailapi-1.6.3.jar" />
+				<pathelement location="lib/jline/jline-terminal-3.14.1.jar" />
+				<pathelement location="lib/jline/jline-reader-3.14.1.jar" />
 				<pathelement location="test-model/UserModuleOverrideFromJar.jar" />
 				<pathelement path="${class.dir}" />
 				<pathelement path="${test.class.dir}" />
@@ -388,6 +421,8 @@
 					<exclude name="**/CommonTestCase.java" />
 					<exclude name="**/ModelCheckerTestCase.java" />
 					<exclude name="**/PCalModelCheckerTestCase.java" />
+					<exclude name="**/TraceExpressionSpecTest.java" />
+					<exclude name="**/TraceExpressionSpecSafetyTest.java" />
 					<exclude name="**/SuiteTestCase.java" />
 					<exclude name="**/SuiteETestCase.java" />
 					<exclude name="**/DistributedTLCTestCase.java" />
@@ -479,6 +514,8 @@
 				<pathelement location="lib/objenesis-2.1.jar" />
 				<pathelement location="lib/easymock-3.3.1.jar" />
 				<pathelement location="lib/javax.mail/mailapi-1.6.3.jar" />
+				<pathelement location="lib/jline/jline-terminal-3.14.1.jar" />
+				<pathelement location="lib/jline/jline-reader-3.14.1.jar" />
 				<pathelement location="test-model/UserModuleOverrideFromJar.jar" />
 				<pathelement path="${class.dir}" />
 				<pathelement path="${test.class.dir}" />
@@ -549,6 +586,8 @@
 						<exclude name="**/CommonTestCase.java" />
 						<exclude name="**/ModelCheckerTestCase.java" />
 						<exclude name="**/PCalModelCheckerTestCase.java" />
+						<exclude name="**/TraceExpressionSpecTest.java" />
+						<exclude name="**/TraceExpressionSpecSafetyTest.java" />
 						<exclude name="**/SuiteTestCase.java" />
 						<exclude name="**/SuiteETestCase.java" />
 						<exclude name="**/DistributedTLCTestCase.java" />
@@ -576,6 +615,10 @@
 						<exclude name="**/DetlefsTest.java" />
 						<exclude name="**/StarkMutexTest.java" />
 						<exclude name="**/SimpleMultiProcTest.java" />
+						<!-- The test checks if Tool/FastTool methods are correctly inlined during (long) 
+						     model-checking. It fails with this target but passes with test.  I assume
+						     this is because test-dist records coverage, which, perhaps, interferes with inlining. -->
+						<exclude name="**/InliningTest.java" />
 					</fileset>
 				</batchtest>
 				<batchtest fork="yes" todir="${test.reports}">

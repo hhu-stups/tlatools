@@ -7,6 +7,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import tla2sany.semantic.InstanceNode;
 import tla2sany.semantic.ModuleNode;
@@ -20,6 +21,7 @@ import tlc2.tool.impl.ModelConfig;
 import tlc2.tool.impl.SpecProcessor;
 import tlc2.tool.impl.SymbolNodeValueLookupProvider;
 import tlc2.tool.impl.TLAClass;
+import tlc2.tool.impl.Tool;
 import util.FilenameToStream;
 import util.SimpleFilenameToStream;
 import util.TLAConstants;
@@ -71,7 +73,7 @@ public class MCParser {
 		}
 		initNextLocationsToDelete.sort(new LocationComparator());
 
-		final ArrayList<String> extendees = new ArrayList<>();
+		final HashSet<String> extendees = new HashSet<>();
 		root.getExtendedModuleSet(false).stream().forEach(moduleNode -> extendees.add(moduleNode.getName().toString()));
 
 		final HashSet<String> allExtendees = new HashSet<>();
@@ -201,7 +203,7 @@ public class MCParser {
 			if ((encounteredMessages == null) || (encounteredMessages.size() > 0)) {
 				final SymbolNodeValueLookupProvider defaultLookup = new SymbolNodeValueLookupProvider() {};
 				final SpecProcessor specProcessor = new SpecProcessor(specBaseName, resolver, TOOL_ID, defns,
-																	  configParser, defaultLookup, null, tlaClass);
+						configParser, defaultLookup, null, tlaClass, Tool.Mode.MC);
 				parserResults = generateResultsFromProcessorAndConfig(specProcessor, configParser);
 				
 				if (outputParser != null) {
@@ -211,7 +213,7 @@ public class MCParser {
 			} else {
 				// we'll have a zero size if the output generated came from a TLC run that did not have the '-tool' flag
 				parserResults = new MCParserResults(null, ((outputParser != null) ? outputParser.getError() : null),
-													encounteredMessages, new ArrayList<>(), new HashSet<>(),
+													encounteredMessages, new HashSet<>(), new HashSet<>(),
 													new HashSet<>(), new ArrayList<>(), true, null, configParser);
 			}
 			
@@ -236,7 +238,7 @@ public class MCParser {
 			System.out.println(error.toSequenceOfRecords(true));
 		}
 		
-		final List<String> extendedModules = results.getOriginalExtendedModules();
+		final Set<String> extendedModules = results.getOriginalExtendedModules();
 		System.out.println("Found " + extendedModules.size() + " module(s) being extended explicitly by the root spec:");
 		for (final String module : extendedModules) {
 			System.out.println("\t" + module);

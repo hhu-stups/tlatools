@@ -111,11 +111,11 @@ public class TLCErrorView extends ViewPart
 
     private static final String NO_VALUE_VIEWER_TEXT
 			= "\u2022 Select a line in Error Trace to show its value here.\n"
-				+ "\u2022 Double-click on a line to go to corresponding action in spec \u2014 "
+				+ "\u2022 Double+Click on a line to go to corresponding action in spec \u2014 "
 				+ "or while holding down " + (Platform.getOS().equals(Platform.OS_MACOSX) ? "\u2318" : "CTRL")
 				+ " to go to the original PlusCal code, if present.\n"
 				+ "\u2022 Click on a variable while holding down ALT to hide the variable from view.\n"
-				+ "\u2022 Right-click on a location row for a context menu.";
+				+ "\u2022 Right+Click on a location row for a context menu.";
 
     /**
      * This is the pattern of an error message resulting from evaluating the constant
@@ -147,7 +147,6 @@ public class TLCErrorView extends ViewPart
     private SourceViewer errorViewer;
     private ErrorTraceTreeViewer errorTraceTreeViewer;
     private RecordToSourceCoupler stackTraceActionListener;
-    private SyncStackTraversal syncStackTraversalAction;
     private Button valueReflectsFiltering;
     private SourceViewer valueViewer;
     private ModelEditor modelEditor;
@@ -155,7 +154,6 @@ public class TLCErrorView extends ViewPart
     
     private TLCError unfilteredInput;
     private final HashMap<TLCState, Integer> filteredStateIndexMap;
-    private FilterErrorTrace filterErrorTraceAction;
     private Set<TLCVariable> currentErrorTraceFilterSet;
     
     @SuppressWarnings("unused")  // held onto for a nicer object graph
@@ -248,12 +246,23 @@ public class TLCErrorView extends ViewPart
              * seconds, so it is important to not reset the trace if it is not necessary.
              */
             final TLCError oldTrace = errorTraceTreeViewer.getCurrentTrace();
-            final boolean isNewTrace = (trace != null) && (oldTrace != null) && !(trace == oldTrace);
-            // update the trace information
-            if (isNewTrace)
-            {
-                this.setTraceInput(trace, true);
-            }
+            if (Boolean.getBoolean(TLCErrorView.class.getName() + ".noRestore")) {
+    			if (oldTrace.hasTrace() && !trace.hasTrace()) {
+    				// The trace evaluation failed. Don't replace the old trace but instead disable
+    				// the error trace.
+    				final Tree tree = errorTraceTreeViewer.getTreeViewer().getTree();
+    				tree.setBackground(tree.getDisplay().getSystemColor(SWT.COLOR_WIDGET_LIGHT_SHADOW));
+    			} else if (trace != oldTrace) {
+    				this.setTraceInput(trace, true);
+    			}
+    		} else {
+                final boolean isNewTrace = (trace != null) && (oldTrace != null) && !(trace == oldTrace);
+                // update the trace information
+                if (isNewTrace)
+                {
+                    this.setTraceInput(trace, true);
+                }
+    		}
             if (model.isSnapshot()) {
             	final String date = sdf.format(model.getSnapshotTimeStamp());
             	this.form.setText(model.getSnapshotFor().getName() + " (" + date + ")");
@@ -460,10 +469,13 @@ public class TLCErrorView extends ViewPart
 				RecordToSourceCoupler.FocusRetentionPolicy.ARROW_KEY_TRAVERSAL);
 		tree.addMouseListener(stackTraceActionListener);
 		tree.addKeyListener(stackTraceActionListener);
-		tree.addDisposeListener((event) -> {
-			final IDialogSettings ids = Activator.getDefault().getDialogSettings();
-			ids.put(SYNCED_TRAVERSAL_KEY, syncStackTraversalAction.isChecked());
-        });
+        
+        // Make it possible to expand and collapse the error trace with the push of a button.
+		final ToolBarManager toolBarManager = new ToolBarManager(SWT.FLAT);
+		final ToolBar toolbar = toolBarManager.createControl(errorTraceSection);
+		toolBarManager.add(new ExportErrorTrace2Clipboard(display));
+		
+		final FilterErrorTrace filterErrorTraceAction = new FilterErrorTrace();
 		tree.addMouseListener(new MouseAdapter() {
         	@Override
         	public void mouseUp(final MouseEvent event) {
@@ -488,10 +500,8 @@ public class TLCErrorView extends ViewPart
         		}
         	}
         });
-        
-        // Make it possible to expand and collapse the error trace with the push of a button.
-		final ToolBarManager toolBarManager = new ToolBarManager(SWT.FLAT);
-		final ToolBar toolbar = toolBarManager.createControl(errorTraceSection);
+		toolBarManager.add(filterErrorTraceAction);
+		
 		final ShiftClickAction action = new ShiftClickAction(
 				"Toggle between expand and collapse all (Shift+Click to restore the default two-level expansion)",
 				TLCUIActivator.getImageDescriptor("icons/elcl16/toggle_expand_state.png"), display) {
@@ -513,12 +523,14 @@ public class TLCErrorView extends ViewPart
 				}
 			}
 		};
-		toolBarManager.add(new ExportErrorTrace2Clipboard(display));
-		filterErrorTraceAction = new FilterErrorTrace();
-		toolBarManager.add(filterErrorTraceAction);
 		toolBarManager.add(action);
-		syncStackTraversalAction = new SyncStackTraversal();
+		
+		final SyncStackTraversal syncStackTraversalAction = new SyncStackTraversal();
 		toolBarManager.add(syncStackTraversalAction);
+		tree.addDisposeListener((event) -> {
+			final IDialogSettings ids = Activator.getDefault().getDialogSettings();
+			ids.put(SYNCED_TRAVERSAL_KEY, syncStackTraversalAction.isChecked());
+        });
 		toolBarManager.update(true);
 		errorTraceSection.setTextClient(toolbar);
 
@@ -1012,7 +1024,7 @@ public class TLCErrorView extends ViewPart
 	private class FilterErrorTrace extends Action {
 		private static final String DEFAULT_TOOL_TIP_TEXT
 					= "Click to select variables and expressions to omit from the trace display; "
-									+ "ALT-click on an individual item below to omit it immediately.";
+									+ "ALT+Click on an individual item below to omit it immediately.";
 		private static final String SELECTED_TOOL_TIP_TEXT = "Click to display all variables and expressions.";
 		
 		FilterErrorTrace() {
@@ -1125,7 +1137,7 @@ public class TLCErrorView extends ViewPart
 	private class ExportErrorTrace2Clipboard extends ShiftClickAction implements ISelectionChangedListener {
 		private static final String DEFAULT_TOOL_TIP_TEXT
 			= "Click to export error-trace to clipboard as\nsequence of records. "
-					+ "Shift-click to \nomit the action's position ("
+					+ "Shift+Click to \nomit the action's position ("
 					+ TLAConstants.TraceExplore.POSITION + "), \nname, and location.";
 		
 		

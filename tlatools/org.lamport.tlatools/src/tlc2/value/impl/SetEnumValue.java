@@ -294,6 +294,15 @@ public static final SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
   public final Value toSetEnum() {
 	  return this;
   }
+  
+  // Unclear if overriding Value#toTuple would cause regressions (test suite
+  // doesn't reveal one, but let's be safe.
+  public final Value toTupleValue() {
+	  // Remove duplicates.
+	  this.normalize();
+	  // Order of elements left undefined (implementation detail).
+	  return new TupleValue(this.elems.toArray());
+  }
 
   @Override
   public final boolean isDefined() {
@@ -443,7 +452,7 @@ public static final SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
     int index = 0;
 
     public Enumerator() {
-      normalize();
+    	normalize();
     }
 
     @Override
@@ -470,6 +479,14 @@ public static final SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
     		vec.addElement(v);
     	}
     	return new SetEnumValue(vec, false, cm);
+	}
+
+	@Override
+	public ValueEnumeration elements(Ordering ordering) {
+		if (ordering == Ordering.RANDOMIZED) {
+			return elements(size());
+		}
+		return super.elements(ordering);
 	}
 
 	@Override

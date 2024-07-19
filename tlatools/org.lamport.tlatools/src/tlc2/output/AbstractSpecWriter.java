@@ -4,7 +4,7 @@ import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.CopyOption;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
@@ -29,11 +29,15 @@ public abstract class AbstractSpecWriter {
      */
 	public static String addArrowAssignmentToBuffers(final StringBuilder tlaBuffer, final StringBuilder cfgBuffer,
 			final Assignment constant, final String schema) {
+		return addArrowAssignmentIdToBuffers(tlaBuffer, cfgBuffer, constant, SpecWriterUtilities.getValidIdentifier(schema));
+	}
+
+	public static String addArrowAssignmentIdToBuffers(final StringBuilder tlaBuffer, final StringBuilder cfgBuffer,
+			final Assignment constant, final String id) {
 		// constant instantiation
 		// to .cfg : foo <- <id>
 		// to _MC.tla : <id>(a, b, c)==
 		// <expression>
-		final String id = SpecWriterUtilities.getValidIdentifier(schema);
 		tlaBuffer.append(constant.getParametrizedLabel(id)).append(TLAConstants.DEFINES).append(TLAConstants.CR);
 		tlaBuffer.append(constant.getRight()).append(TLAConstants.CR);
 		
@@ -41,10 +45,8 @@ public abstract class AbstractSpecWriter {
 			cfgBuffer.append(TLAConstants.KeyWords.CONSTANT).append(TLAConstants.CR);
 			cfgBuffer.append(constant.getLabel()).append(TLAConstants.ARROW).append(id).append(TLAConstants.CR);
 		}
-		
 		return id;
 	}
-
 	
 	/**
 	 * Subclasses may implement this interface in order to invoke {@link #writeFiles(ContentWriter)} for cases
@@ -96,6 +98,29 @@ public abstract class AbstractSpecWriter {
     	if (cfg != null) {
     		cfgBuffer.append(cfg);
     	}
+    }
+    
+    /**
+     * Writes the buffers to streams.
+     * @param tlaStream TLA stream; if null, nothing is written.
+     * @param cfgStream CFG stream; if null, nothing is written.
+     * @throws IOException If there is an error writing to stream.
+     */
+    public void writeStreams(final OutputStream tlaStream, final OutputStream cfgStream) throws IOException {
+    	final ContentWriter cw = (inputStream, forTlaFile) -> {
+    		final OutputStream outputStream = forTlaFile ? tlaStream : cfgStream;
+    		if (null != outputStream) {
+    			// If we upgrade to Java 9 we can use InputStream.transferTo()
+    			// For Java 8 compatibility we will copy the bytes manually
+    			final byte[] buffer = new byte[8192];
+    			int length;
+    			while ((length = inputStream.read(buffer)) > 0) {
+    				outputStream.write(buffer, 0, length);
+    			}
+    		}
+    	};
+    	
+    	writeFiles(cw);
     }
     
     /**
@@ -195,6 +220,13 @@ public abstract class AbstractSpecWriter {
 		tlaBuffer.append(TLAConstants.COMMENT).append(TLAConstants.KeyWords.NEXT).append(" definition ");
 		tlaBuffer.append(TLAConstants.ATTRIBUTE).append(nextAttributeName).append(TLAConstants.CR);
 		tlaBuffer.append(nextDefinition[1]).append(TLAConstants.CR);
+	}
+
+	public void addConstants(List<String> rawConstants) {
+		for (String constant : rawConstants) {
+			cfgBuffer.append(constant);	
+			cfgBuffer.append("\n");	
+		}
 	}
 
     /**
@@ -450,6 +482,45 @@ public abstract class AbstractSpecWriter {
 			tlaBuffer.append(attributeName).append(TLAConstants.CR);
 			tlaBuffer.append(id).append(TLAConstants.DEFINES).append(TLAConstants.CR).append(viewString);
 			tlaBuffer.append(CLOSING_SEP).append(TLAConstants.CR);
+		}
+	}
+	
+	public void addPostCondition(final String postConditionString, final String attributeName) {
+		if (postConditionString.trim().length() != 0) {
+			final String id = SpecWriterUtilities.getValidIdentifier(TLAConstants.Schemes.POST_CONDITION_SCHEME);
+			
+			if (cfgBuffer != null) {
+				cfgBuffer.append(TLAConstants.COMMENT).append("POSTCONDITION definition").append(TLAConstants.CR);
+				cfgBuffer.append("POSTCONDITION").append(TLAConstants.CR).append(id).append(TLAConstants.CR);
+			}
+
+			tlaBuffer.append(TLAConstants.COMMENT).append("POSTCONDITION definition ").append(TLAConstants.ATTRIBUTE);
+			tlaBuffer.append(attributeName).append(TLAConstants.CR);
+			tlaBuffer.append(id).append(TLAConstants.DEFINES).append(TLAConstants.CR).append(postConditionString);
+			tlaBuffer.append(CLOSING_SEP).append(TLAConstants.CR);
+		}
+	}
+	
+	public void addAlias(final String aliasString, final String attributeName) {
+		if (aliasString.trim().length() != 0) {
+			final String id = SpecWriterUtilities.getValidIdentifier(TLAConstants.Schemes.ALIAS_SCHEME);
+			this.addAliasToCfg(id);
+
+			tlaBuffer.append(TLAConstants.COMMENT).append("ALIAS definition ").append(TLAConstants.ATTRIBUTE);
+			tlaBuffer.append(attributeName).append(TLAConstants.CR);
+			tlaBuffer.append(id).append(TLAConstants.DEFINES).append(TLAConstants.CR).append(aliasString);
+			tlaBuffer.append(CLOSING_SEP).append(TLAConstants.CR);
+		}
+	}
+	
+	/**
+	 * Specifies an alias in the config file.
+	 * @param aliasName Name of the alias to specify.
+	 */
+	public void addAliasToCfg(final String aliasName) {
+		if (this.cfgBuffer != null) {
+			this.cfgBuffer.append(TLAConstants.COMMENT).append("ALIAS definition").append(TLAConstants.CR);
+			this.cfgBuffer.append("ALIAS").append(TLAConstants.CR).append(aliasName).append(TLAConstants.CR);
 		}
 	}
 	

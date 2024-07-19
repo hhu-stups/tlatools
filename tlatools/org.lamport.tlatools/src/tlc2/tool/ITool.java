@@ -37,6 +37,7 @@ import tla2sany.semantic.SemanticNode;
 import tla2sany.semantic.SymbolNode;
 import tlc2.tool.coverage.CostModel;
 import tlc2.tool.impl.ModelConfig;
+import tlc2.tool.impl.SpecProcessor;
 import tlc2.util.Context;
 import tlc2.util.ObjLongTable;
 import tlc2.util.Vect;
@@ -162,6 +163,8 @@ public interface ITool extends TraceApp {
 
 	boolean[] getAssumptionIsAxiom();
 
+	int checkAssumptions();
+
 	String[] getInvNames();
 
 	String[] getImpliedActNames();
@@ -237,10 +240,20 @@ public interface ITool extends TraceApp {
 
 	SemanticNode getViewSpec();
 
+	SemanticNode getPostConditionSpec();
+
 	int getId();
 
 	List<File> getModuleFiles(FilenameToStream resolver);
 
 	ModelConfig getModelConfig();
+
+	SpecProcessor getSpecProcessor();
+
+	ExprNode[] getActionConstraints();
+
+	ExprNode[] getModelConstraints();
+
+	TLCState evalAlias(TLCState curState, TLCState sucState);
 
 }

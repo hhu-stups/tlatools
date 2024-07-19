@@ -30,6 +30,7 @@ import tla2sany.semantic.SymbolNode;
 import tla2sany.semantic.ThmOrAssumpDefNode;
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.output.OutputCollector;
 import tlc2.tool.Action;
 import tlc2.tool.BuiltInOPs;
 import tlc2.tool.EvalControl;
@@ -40,10 +41,12 @@ import tlc2.tool.INextStateFunctor;
 import tlc2.tool.IStateFunctor;
 import tlc2.tool.ITool;
 import tlc2.tool.StateVec;
+import tlc2.tool.TLAPlusExecutorState;
 import tlc2.tool.TLCState;
 import tlc2.tool.TLCStateFun;
 import tlc2.tool.TLCStateInfo;
 import tlc2.tool.TLCStateMut;
+import tlc2.tool.TLCStateMutSimulation;
 import tlc2.tool.ToolGlobals;
 import tlc2.tool.coverage.CostModel;
 import tlc2.util.Context;
@@ -58,6 +61,7 @@ import tlc2.value.Values;
 import tlc2.value.impl.Applicable;
 import tlc2.value.impl.BoolValue;
 import tlc2.value.impl.Enumerable;
+import tlc2.value.impl.Enumerable.Ordering;
 import tlc2.value.impl.EvaluatingValue;
 import tlc2.value.impl.FcnLambdaValue;
 import tlc2.value.impl.FcnParams;
@@ -88,6 +92,7 @@ import tlc2.value.impl.ValueEnumeration;
 import tlc2.value.impl.ValueExcept;
 import tlc2.value.impl.ValueVec;
 import util.Assert;
+import util.Assert.TLCRuntimeException;
 import util.FilenameToStream;
 import util.TLAConstants;
 import util.UniqueString;
@@ -104,6 +109,29 @@ public abstract class Tool
     extends Spec
     implements ValueConstants, ToolGlobals, ITool
 {
+
+  	/*
+	 * Prototype, do *not* activate when checking safety or liveness!!!:
+	 * For simulation that is not meant as a substitute of exhaustive checking for too
+	 * large models, it can be useful to generate behaviors as quickly as possible,
+	 * i.e. without checking all successor states along the states of the behavior.
+	 * This flag activates the code path that efficiently generate only a single 
+	 * successor state during simulation.  It does not let the user parameterize
+	 * the code with a particular distribution, but instead draws from the uniform
+	 * distribution.  
+	 * 
+	 * In its current form, it only handles non-determinism expressed with opcode
+	 * OPCODE_be (bounded exist), i.e. (which simply happened to be the primary
+	 * expression that we encountered in the SWIM spec during this work):
+	 * 
+	 * VARIABLE x
+	 * \E n \in S: x' = n
+	 */
+  private static final boolean PROBABLISTIC = Boolean.getBoolean(Tool.class.getName() + ".probabilistic");
+
+  public enum Mode {
+	  Simulation, MC, Executor;
+  }
 	
   public static final Value[] EmptyArgs = new Value[0];
 
@@ -121,17 +149,38 @@ public abstract class Tool
 	  this(new File(specFile), specFile, configFile, resolver);
   }
 
+  public Tool(String specFile, String configFile, FilenameToStream resolver, Mode mode) {
+	  this(new File(specFile), specFile, configFile, resolver, mode);
+  }
+  
   private Tool(File specDir, String specFile, String configFile, FilenameToStream resolver)
   {
 	  this(specDir.isAbsolute() ? specDir.getParent() : "", specFile, configFile, resolver);
   }
   
+  private Tool(File specDir, String specFile, String configFile, FilenameToStream resolver, Mode mode)
+  {
+	  this(specDir.isAbsolute() ? specDir.getParent() : "", specFile, configFile, resolver, mode);
+  }
+  
   public Tool(String specDir, String specFile, String configFile, FilenameToStream resolver)
   {
-      super(specDir, specFile, configFile, resolver);
+	  this(specDir, specFile, configFile, resolver, Mode.MC);
+  }
+  
+  public Tool(String specDir, String specFile, String configFile, FilenameToStream resolver, Mode mode)
+  {
+      super(specDir, specFile, configFile, resolver, mode);
 
-      // Initialize state.
-      TLCStateMut.setTool(this);
+		// set variables to the static filed in the state
+		if (mode == Mode.Simulation) {
+			TLCStateMutSimulation.setTool(this);
+		} else if (mode == Mode.Executor) {
+			TLAPlusExecutorState.setTool(this);
+		} else {
+			// Initialize state.
+			TLCStateMut.setTool(this);
+		}
       
 		Action next = this.getNextStateSpec();
 		if (next == null) {
@@ -761,6 +810,7 @@ public abstract class Tool
     StateVec nss = new StateVec(0);
     this.getNextStates(action, action.pred, acts, ctx, state, s1, nss, action.cm);
     if (coverage) { action.cm.incInvocations(nss.size()); }
+    if (PROBABLISTIC && nss.size() > 1) {System.err.println("Simulator generated more than one next state");}
     return nss;
   }
   
@@ -1038,19 +1088,48 @@ public abstract class Tool
 	case OPCODE_dl:     // DisjList
 	case OPCODE_lor:
 	  {
-	    for (int i = 0; i < alen; i++) {
-	      resState = this.getNextStates(action, args[i], acts, c, s0, resState, nss, cm);
-	    }
+		if (PROBABLISTIC) {
+			// probabilistic (return after a state has been generated, ordered is randomized)
+			final tlc2.tool.SimulationWorker simWorker = (tlc2.tool.SimulationWorker) Thread.currentThread();
+			int index = (int) Math.floor(simWorker.getRNG().nextDouble() * alen);
+			final int p = simWorker.getRNG().nextPrime();
+		    for (int i = 0; i < alen; i++) {
+			      resState = this.getNextStates(action, args[index], acts, c, s0, resState, nss, cm);
+				  if (nss.hasStates()) {
+						return resState;
+				  }
+				  index = (index + p) % alen;
+			}
+		} else {
+		    for (int i = 0; i < alen; i++) {
+		      resState = this.getNextStates(action, args[i], acts, c, s0, resState, nss, cm);
+		    }
+		}
 	    return resState;
 	  }
 	case OPCODE_be:     // BoundedExists
 	  {
 	    SemanticNode body = args[0];
-	    ContextEnumerator Enum = this.contexts(pred, c, s0, s1, EvalControl.Clear, cm);
-	    Context c1;
-	    while ((c1 = Enum.nextElement()) != null) {
-	      resState = this.getNextStates(action, body, acts, c1, s0, resState, nss, cm);
+	    
+	    if (PROBABLISTIC) {
+		    // probabilistic (return after a state has been generated, ordered is randomized)
+			final ContextEnumerator Enum = this.contexts(Ordering.RANDOMIZED, pred, c, s0, s1, EvalControl.Clear, cm);
+			Context c1;
+		    while ((c1 = Enum.nextElement()) != null) {
+				resState = this.getNextStates(action, body, acts, c1, s0, resState, nss, cm);
+				if (nss.hasStates()) {
+					return resState;
+				}
+		    }
+	    } else {
+	    	// non-deterministically generate successor states (potentially many)
+	    	ContextEnumerator Enum = this.contexts(pred, c, s0, s1, EvalControl.Clear, cm);
+	    	Context c1;
+	    	while ((c1 = Enum.nextElement()) != null) {
+	    		resState = this.getNextStates(action, body, acts, c1, s0, resState, nss, cm);
+	    	}
 	    }
+
 	    return resState;
 	  }
 	case OPCODE_bf:     // BoundedForall
@@ -1132,6 +1211,11 @@ public abstract class Tool
 	case OPCODE_case:   // Case
 	  {
 	    SemanticNode other = null;
+		if (PROBABLISTIC) {
+			// See Bounded exists above!
+			throw new UnsupportedOperationException(
+							"Probabilistic evaluation of next-state relation not implemented for CASE yet.");
+		}
 	    for (int i = 0; i < alen; i++) {
 	      OpApplNode pair = (OpApplNode)args[i];
 	      ExprOrOpArgNode[] pairArgs = pair.getArgs();
@@ -1201,6 +1285,13 @@ public abstract class Tool
 	          Assert.fail("In computing next states, the right side of \\IN" +
 	                      " is not enumerable.\n" + pred);
 	        }
+	        
+			if (PROBABLISTIC) {
+				// See Bounded exists above!
+				throw new UnsupportedOperationException(
+								"Probabilistic evaluation of next-state relation not implemented for \\in yet.");
+			}
+
 	        ValueEnumeration Enum = ((Enumerable)rval).elements();
 	        Value elem;
 	        while ((elem = Enum.nextElement()) != null) {
@@ -1381,7 +1472,67 @@ public abstract class Tool
   }
     
   /* eval */
+  public TLCState evalAlias(TLCState current, TLCState successor) {
+		if ("".equals(this.config.getAlias())) {
+			return current;
+		}
+		// see getState(..)
+		IdThread.setCurrentState(current);
 
+		try {
+			final TLCState alias = eval(getAliasSpec(), Context.Empty, current, successor, EvalControl.Clear).toState();
+			if (alias != null) {
+				return alias;
+			}
+		} catch (EvalException | TLCRuntimeException e) {
+			// Fall back to original state if eval fails.
+			return current;
+		}
+		
+		return current;
+  }
+
+  public TLCStateInfo evalAlias(TLCStateInfo current, TLCState successor) {
+		if ("".equals(this.config.getAlias())) {
+			return current;
+		}
+		
+		// see getState(..)
+		IdThread.setCurrentState(current.state);
+
+		try {
+			final TLCState alias = eval(getAliasSpec(), Context.Empty, current.state, successor, EvalControl.Clear).toState();
+			if (alias != null) {
+				return new AliasTLCStateInfo(alias, current);
+			}
+		} catch (EvalException | TLCRuntimeException e) {
+			// Fall back to original state if eval fails.
+			return current;
+			// TODO We have to somehow communicate this exception back to the user.
+			// Unfortunately, the alias cannot be validated by SpecProcess (unless pure
+			// constant expression who are too simple to be used in trace expressions).
+			// Throwing the exception would be possible, but pretty annoying if TLC fails
+			// to print an error trace because of a bogus alias after hours of model
+			// checking (this is the very reason why the code falls back to return the 
+			// original/current state).  Printing the exception to stdout/stderr here
+			// would mess with the Toolbox's parsing that reads stdout back in.  It would
+			// also look bad because we would print the error on every evaluation of the
+			// alias and it's conceivable that -in most cases- evaluation would fail for
+			// all evaluations.  This suggests that we have to defer reporting of evaluation
+			// and runtime exception until after the error-trace has been printed. If
+			// evaluation only failed for some invocations of evalAlias, the user will
+			// be able to figure out the ones that failed by looking at the trace.  This
+			// state should not be kept in Tool, because it doesn't know how to group
+			// sequences of evalAlias invocations.
+			// We could avoid keeping state entirely, if the exception was attached as an
+			// "auxiliary" variable to the TLCStateInfo and printed as part of the error
+			// trace.  The error trace would look strange, but it appears to be the best
+			// compromise, especially if only some of the evaluations fail.
+		}
+		
+		return current;
+  }
+  
   /* Special version of eval for state expressions. */
   @Override
   public final IValue eval(SemanticNode expr, Context c, TLCState s0, CostModel cm) {
@@ -2421,11 +2572,21 @@ public abstract class Tool
   public final boolean isInModel(TLCState state) throws EvalException {
     ExprNode[] constrs = this.getModelConstraints();
     for (int i = 0; i < constrs.length; i++) {
-      IValue bval = this.eval(constrs[i], Context.Empty, state, CostModel.DO_NOT_RECORD);
+      final CostModel cm = coverage ? ((Action) constrs[i].getToolObject(toolId)).cm : CostModel.DO_NOT_RECORD;
+      IValue bval = this.eval(constrs[i], Context.Empty, state, cm);
       if (!(bval instanceof BoolValue)) {
         Assert.fail(EC.TLC_EXPECTED_VALUE, new String[]{"boolean", constrs[i].toString()});
       }
-      if (!((BoolValue)bval).val) return false;
+      if (!((BoolValue)bval).val) {
+  		  if (coverage) {
+  			  cm.incInvocations();
+		  }
+    	  return false;
+      } else {
+  		  if (coverage) {
+  			  cm.incSecondary();
+		  }
+      }
     }
     return true;
   }
@@ -2435,11 +2596,21 @@ public abstract class Tool
   public final boolean isInActions(TLCState s1, TLCState s2) throws EvalException {
     ExprNode[] constrs = this.getActionConstraints();
     for (int i = 0; i < constrs.length; i++) {
-      Value bval = this.eval(constrs[i], Context.Empty, s1, s2, EvalControl.Clear, CostModel.DO_NOT_RECORD);
+      final CostModel cm = coverage ? ((Action) constrs[i].getToolObject(toolId)).cm : CostModel.DO_NOT_RECORD;
+      Value bval = this.eval(constrs[i], Context.Empty, s1, s2, EvalControl.Clear, cm);
       if (!(bval instanceof BoolValue)) {
         Assert.fail(EC.TLC_EXPECTED_VALUE, new String[]{"boolean", constrs[i].toString()});
       }
-      if (!((BoolValue)bval).val) return false;
+      if (!((BoolValue)bval).val) {
+  		  if (coverage) {
+			  cm.incInvocations();
+		  }
+    	  return false;
+      } else {
+  		  if (coverage) {
+  			  cm.incSecondary();
+		  }
+      }
     }
     return true;
   }
@@ -3097,6 +3268,31 @@ public abstract class Tool
     return ((BoolValue)val).val;
   }
 
+  @Override
+  public final int checkAssumptions() {
+      final ExprNode[] assumps = getAssumptions();
+      final boolean[] isAxiom = getAssumptionIsAxiom();
+      int assumptionsError = EC.NO_ERROR;
+      for (int i = 0; i < assumps.length; i++)
+      {
+          try
+          {
+              if ((!isAxiom[i]) && !isValid(assumps[i]))
+              {
+                  OutputCollector.addViolatedAssumption(assumps[i]);
+                  assumptionsError = MP.printError(EC.TLC_ASSUMPTION_FALSE, assumps[i].toString());
+              }
+          } catch (final Exception e)
+          {
+              // Assert.printStack(e);
+              OutputCollector.addViolatedAssumption(assumps[i]);
+              assumptionsError = MP.printError(EC.TLC_ASSUMPTION_EVALUATION_ERROR,
+                      new String[] { assumps[i].toString(), e.getMessage() });
+          }
+      }
+      return assumptionsError;
+  }
+  
     /* Reconstruct the initial state whose fingerprint is fp. */
 	@Override
 	public final TLCStateInfo getState(final long fp) {
@@ -3444,42 +3640,47 @@ public abstract class Tool
           TLCState s1, final int control) {
 	  return contexts(appl, c, s0, s1, control, CostModel.DO_NOT_RECORD);
   }
-  
+
   /* A context enumerator for an operator application. */
   public final ContextEnumerator contexts(OpApplNode appl, Context c, TLCState s0,
                                           TLCState s1, final int control, CostModel cm) {
-    FormalParamNode[][] formals = appl.getBdedQuantSymbolLists();
-    boolean[] isTuples = appl.isBdedQuantATuple();
-    ExprNode[] domains = appl.getBdedQuantBounds();
-
-    int flen = formals.length;
-    int alen = 0;
-    for (int i = 0; i < flen; i++) {
-      alen += (isTuples[i]) ? 1 : formals[i].length;
-    }
-    Object[] vars = new Object[alen];
-    ValueEnumeration[] enums = new ValueEnumeration[alen];
-    int idx = 0;
-    for (int i = 0; i < flen; i++) {
-      Value boundSet = this.eval(domains[i], c, s0, s1, control, cm);
-      if (!(boundSet instanceof Enumerable)) {
-        Assert.fail("TLC encountered a non-enumerable quantifier bound\n" +
-                    Values.ppr(boundSet.toString()) + ".\n" + domains[i]);
-      }
-      FormalParamNode[] farg = formals[i];
-      if (isTuples[i]) {
-        vars[idx] = farg;
-        enums[idx++] = ((Enumerable)boundSet).elements();
-      }
-      else {
-        for (int j = 0; j < farg.length; j++) {
-          vars[idx] = farg[j];
-          enums[idx++] = ((Enumerable)boundSet).elements();
-        }
-      }
-    }
-    return new ContextEnumerator(vars, enums, c);
+    return contexts(Ordering.NORMALIZED, appl, c, s0, s1, control, cm);
   }
+
+	private final ContextEnumerator contexts(Ordering ordering, OpApplNode appl, Context c, TLCState s0, TLCState s1, final int control,
+			CostModel cm) {
+		FormalParamNode[][] formals = appl.getBdedQuantSymbolLists();
+	    boolean[] isTuples = appl.isBdedQuantATuple();
+	    ExprNode[] domains = appl.getBdedQuantBounds();
+	
+	    int flen = formals.length;
+	    int alen = 0;
+	    for (int i = 0; i < flen; i++) {
+	      alen += (isTuples[i]) ? 1 : formals[i].length;
+	    }
+	    Object[] vars = new Object[alen];
+	    ValueEnumeration[] enums = new ValueEnumeration[alen];
+	    int idx = 0;
+	    for (int i = 0; i < flen; i++) {
+	      Value boundSet = this.eval(domains[i], c, s0, s1, control, cm);
+	      if (!(boundSet instanceof Enumerable)) {
+	        Assert.fail("TLC encountered a non-enumerable quantifier bound\n" +
+	                    Values.ppr(boundSet.toString()) + ".\n" + domains[i]);
+	      }
+	      FormalParamNode[] farg = formals[i];
+	      if (isTuples[i]) {
+	        vars[idx] = farg;
+	        enums[idx++] = ((Enumerable)boundSet).elements(ordering);
+	      }
+	      else {
+	        for (int j = 0; j < farg.length; j++) {
+	          vars[idx] = farg[j];
+	          enums[idx++] = ((Enumerable)boundSet).elements(ordering);
+	        }
+	      }
+	    }
+	    return new ContextEnumerator(vars, enums, c);
+	}
 
     // These three are expected by implementing the {@link ITool} interface; they used
     //		to mirror exactly methods that our parent class ({@link Spec}) implemented

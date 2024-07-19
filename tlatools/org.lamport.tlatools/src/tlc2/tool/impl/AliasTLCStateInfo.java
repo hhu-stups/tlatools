@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2015 Microsoft Research. All rights reserved. 
+ * Copyright (c) 2020 Microsoft Research. All rights reserved. 
  *
  * The MIT License (MIT)
  * 
@@ -23,12 +23,22 @@
  * Contributors:
  *   Markus Alexander Kuppe - initial API and implementation
  ******************************************************************************/
+package tlc2.tool.impl;
 
-package tlc2.output;
+import tlc2.tool.TLCState;
+import tlc2.tool.TLCStateInfo;
 
-public class MPRecorder {
+public class AliasTLCStateInfo extends TLCStateInfo {
 
-	public void record(int code, Object... objects) {
-		// No op, subclasses may overwrite
+	private final TLCState originalState;
+
+	public AliasTLCStateInfo(TLCState alias, TLCStateInfo current) {
+		super(alias, current);
+		originalState = current.state;
+	}
+
+	@Override
+	public TLCState getOriginalState() {
+		return originalState;
 	}
 }

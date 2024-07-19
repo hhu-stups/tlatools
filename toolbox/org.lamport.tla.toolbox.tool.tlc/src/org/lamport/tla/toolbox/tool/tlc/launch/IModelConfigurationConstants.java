@@ -84,6 +84,14 @@ public interface IModelConfigurationConstants extends IConfigurationConstants {
      */
     public static final String MODEL_PARAMETER_VIEW = "modelParameterView";
     /**
+     * post condition
+     */
+    public static final String MODEL_PARAMETER_POST_CONDITION = "modelParameterPostCondition";
+    /**
+     * alias
+     */
+    public static final String MODEL_PARAMETER_ALIAS  = "modelParameterAlias";
+    /**
      * constant expression to be evaluated
      */
     public static final String MODEL_EXPRESSION_EVAL = "modelExpressionEval";

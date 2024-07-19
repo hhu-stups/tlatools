@@ -14,7 +14,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
-import tla2sany.semantic.ExprNode;
 import tla2sany.semantic.OpDeclNode;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
@@ -283,6 +282,10 @@ public class ModelChecker extends AbstractChecker
                 } catch (FingerprintException e)
                 {
                     result = MP.printError(EC.TLC_FINGERPRINT_EXCEPTION, new String[]{e.getTrace(), e.getRootCause().getMessage()});
+                } catch (EvalException e) {
+                	// Do not replace the actual error code, such as assert violation, with TLC_NESTED_EXPRESSION.
+	                MP.printError(EC.TLC_NESTED_EXPRESSION, cTool.toString());
+	                result = e.getErrorCode();
                 } catch (Throwable e)
                 {
                     // Assert.printStack(e);
@@ -324,27 +327,7 @@ public class ModelChecker extends AbstractChecker
      */
     public int checkAssumptions()
     {
-        ExprNode[] assumps = this.tool.getAssumptions();
-        boolean[] isAxiom = this.tool.getAssumptionIsAxiom();
-        int assumptionsError = EC.NO_ERROR;
-        for (int i = 0; i < assumps.length; i++)
-        {
-            try
-            {
-                if ((!isAxiom[i]) && !this.tool.isValid(assumps[i]))
-                {
-                    OutputCollector.addViolatedAssumption(assumps[i]);
-                    assumptionsError = MP.printError(EC.TLC_ASSUMPTION_FALSE, assumps[i].toString());
-                }
-            } catch (Exception e)
-            {
-                // Assert.printStack(e);
-                OutputCollector.addViolatedAssumption(assumps[i]);
-                assumptionsError = MP.printError(EC.TLC_ASSUMPTION_EVALUATION_ERROR,
-                        new String[] { assumps[i].toString(), e.getMessage() });
-            }
-        }
-        return assumptionsError;
+    	return this.tool.checkAssumptions();
     }
 
     /**
@@ -639,6 +622,9 @@ public class ModelChecker extends AbstractChecker
 			} else if (e instanceof AssertionError)
 			{
 				ec = EC.TLC_BUG;
+			} else if (e instanceof EvalException)
+			{
+				ec = ((EvalException) e).getErrorCode();
 			} else
 			{
 				ec = EC.GENERAL;
@@ -648,7 +634,15 @@ public class ModelChecker extends AbstractChecker
 		    {
 				if (!(ec == EC.GENERAL && e.getMessage() == null))
 		        {
-					MP.printError(ec, e);
+					if (e instanceof EvalException && ((EvalException) e).hasParameters()) {
+						// An EvalException pretty-prints itself in its constructor, i.e. converts the
+						// parameters into the human readable string. However, MP.print* will
+						// pretty-print it a second time, which is why we pass the original parameters
+						// instead of the EvalException itself.  Exception handling in TLC is a mess!
+						MP.printError(ec, ((EvalException) e).getParameters(), e);
+					} else {
+						MP.printError(ec, e);
+					}
 		        }
 				this.trace.printTrace(curState, succState);
 				this.theStateQueue.finishAll();
@@ -831,6 +825,10 @@ public class ModelChecker extends AbstractChecker
     		FileUtil.deleteDir(this.metadir, success);
     	}
 	}
+    
+    public final void printSummary(boolean success) throws IOException {
+    	printSummary(success, startTime);
+    }
 
     public final void printSummary(boolean success, final long startTime) throws IOException
     {
@@ -848,9 +846,11 @@ public class ModelChecker extends AbstractChecker
 
         MP.printMessage(EC.TLC_STATS, new String[] { String.valueOf(getStatesGenerated()),
                 String.valueOf(this.theFPSet.size()), String.valueOf(this.theStateQueue.size()) });
+        // The depth used to only be reported on success, but this seems bogus since TLC reports
+        // the number states above.
+        MP.printMessage(EC.TLC_SEARCH_DEPTH, String.valueOf(this.trace.getLevelForReporting()));
         if (success)
         {
-            MP.printMessage(EC.TLC_SEARCH_DEPTH, String.valueOf(this.trace.getLevelForReporting()));
 			
         	// Aggregate outdegree from statistics maintained by individual workers. 
         	final BucketStatistics aggOutDegree = new BucketStatistics("State Graph OutDegree");
@@ -995,6 +995,10 @@ public class ModelChecker extends AbstractChecker
 		return useByteArrayQueue() ? "DiskByteArrayQueue" : "DiskStateQueue";
 	}
 
+	/* (non-Javadoc)
+	 * @see tlc2.tool.AbstractChecker#getStatesGenerated()
+	 */
+	@Override
     public long getStatesGenerated() {
     	long sum = numberOfInitialStates;
     	for (final IWorker worker : workers) {

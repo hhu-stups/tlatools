@@ -3,8 +3,11 @@ package tlc2.tool;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.MathContext;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.stream.Collectors;
 
 import tlc2.TLC;
 import tlc2.TLCGlobals;
@@ -12,7 +15,6 @@ import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.output.OutputCollector;
 import tlc2.tool.coverage.CostModelCreator;
-import tlc2.tool.impl.FastTool;
 import tlc2.tool.liveness.AddAndCheckLiveCheck;
 import tlc2.tool.liveness.ILiveCheck;
 import tlc2.tool.liveness.LiveCheck;
@@ -133,16 +135,18 @@ public abstract class AbstractChecker
 		});
     }
 
-    public final void setDone()
+    public final boolean setDone()
     {
+    	boolean old = this.done;
         this.done = true;
+        return old;
     }
 
     /**
      * Set the error state. 
      * <strong>Note:</note> this method must be protected by lock 
      */
-    public boolean setErrState(TLCState curState, TLCState succState, boolean keep, int errorCode)
+    public boolean setErrState(TLCState curState, TLCState succState, boolean keepCallStack, int errorCode)
     {
        assert Thread.holdsLock(this) : "Caller thread has to hold monitor!";
        if (!TLCGlobals.continuation && this.done)
@@ -152,9 +156,17 @@ public abstract class AbstractChecker
         this.errState = (succState == null) ? curState : succState;
         this.errorCode = errorCode;
         this.done = true;
-        this.keepCallStack = keep;
+        this.keepCallStack = keepCallStack;
         return true;
     }
+
+	public void setError(boolean keepCallStack, int errorCode) {
+		assert Thread.holdsLock(this) : "Caller thread has to hold monitor!";
+		IdThread.resetCurrentState();
+		this.errorCode = errorCode;
+		this.done = true;
+		this.keepCallStack = keepCallStack;
+	}
 
     /**
      * Responsible for printing the coverage information
@@ -462,13 +474,24 @@ public abstract class AbstractChecker
         {
             workers[i].join();
         }
-        return EC.NO_ERROR;
+		if (!this.keepCallStack) {
+			// A worker explicitly set an errorCode (without interrupting
+			// state-space exploration) and doesn't request to keep the call-stack.
+			// (If a call-stack is requested, this has to return NO_ERROR to not
+			// intercept the outer logic)
+			return this.errorCode != EC.NO_ERROR ? this.errorCode : EC.NO_ERROR;
+		}
+		return EC.NO_ERROR;
     }
     
 	public final void setAllValues(int idx, IValue val) {
 		for (int i = 0; i < this.workers.length; i++) {
 			workers[i].setLocalValue(idx, val);
 		}
+	}
+
+	public final List<IValue> getAllValues(final int idx) {
+		return Arrays.asList(workers).stream().map(w -> w.getLocalValue(idx)).collect(Collectors.toList());
 	}
 
 	public final IValue getValue(int i, int idx) {
@@ -561,6 +584,10 @@ public abstract class AbstractChecker
 	}
 
 	public long getDistinctStatesGenerated() {
+		return -1;
+	}
+
+	public long getStatesGenerated() {
 		return -1;
 	}
 }

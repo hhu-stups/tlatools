@@ -70,6 +70,14 @@ public interface IConfigurationConstants
      */
     public static final String LAUNCH_VIEW = "view";
     /**
+     * the ALIAS to map from variables to values
+     */
+    public static final String LAUNCH_ALIAS = "alias";
+    /**
+     * the POSTCONDITION to map from variables to values
+     */
+    public static final String LAUNCH_POST_CONDITION = "postCondition";
+    /**
      * MC depth first 
      */
     public static final String LAUNCH_DFID_MODE = "dfidMode";
@@ -77,6 +85,10 @@ public interface IConfigurationConstants
      * the depth of DFID run 
      */
     public static final String LAUNCH_DFID_DEPTH = "dfidDepth";
+    /**
+     * the number of traces to generate by simulation.
+     */
+    public static final String LAUNCH_SIMU_NUM_TRACES = "simuNumTraces";
     /**
      * the depth of simulation run 
      */

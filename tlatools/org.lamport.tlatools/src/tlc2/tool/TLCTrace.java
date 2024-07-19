@@ -22,15 +22,20 @@ import tlc2.output.StatePrinter;
 import tlc2.util.BufferedRandomAccessFile;
 import tlc2.util.LongVec;
 import tlc2.value.RandomEnumerableValues;
+import tlc2.value.ValueOutputStream;
+import tlc2.value.impl.RecordValue;
+import tlc2.value.impl.TupleValue;
+import tlc2.value.impl.Value;
+import util.Assert;
 import util.FileUtil;
 
 public class TLCTrace {
 
 	static final String EXT = ".st";
-	private static String filename;
+	protected static String filename;
 	private final BufferedRandomAccessFile raf;
 	private long lastPtr;
-	private TraceApp tool;
+	protected TraceApp tool;
 
 	public TLCTrace(String metadir, String specFile, TraceApp tool) throws IOException {
 		filename = metadir + FileUtil.separator + specFile + EXT;
@@ -302,7 +307,7 @@ public class TLCTrace {
 		if (len > 0) {
 			if (sinfo == null) {
 				// Recreate initial state from its fingerprint.
-				final long fp = fps.elementAt(fps.size() - 1);
+				final long fp = fps.elementAt(len - 1);
 				sinfo = this.tool.getState(fp);
 			}
 			// Recover successor states from its predecessor and its fingerprint.
@@ -350,13 +355,21 @@ public class TLCTrace {
 			// initial states is huge such as during inductive invariant checking. Instead
 			// use the two states s1 and s2 directly.
 			MP.printError(EC.TLC_BEHAVIOR_UP_TO_THIS_POINT);
-			TLCStateInfo s1Info = new TLCStateInfo(s1);
-			StatePrinter.printState(s1Info);
-			trace.add(s1Info);
-			if (s2 != null) {
+			if (s2 == null) {
+				TLCStateInfo s1Info = new TLCStateInfo(s1);
+			    StatePrinter.printInvariantViolationStateTraceState(new TLCStateInfo(s1));
+				trace.add(s1Info);
+			} else {
+				// Print initial state
+				TLCStateInfo s1Info = this.tool.evalAlias(new TLCStateInfo(s1), s2);
+				StatePrinter.printInvariantViolationStateTraceState(s1Info, s1, 1);
+				
 				// Create TLCStateInfo instance to include corresponding action in output.
-				TLCStateInfo s2Info = this.tool.getState(s2, s1);
-				StatePrinter.printState(s2Info, s1, 2);
+				TLCStateInfo state = this.tool.getState(s2, s1);
+				
+				// Print successor state.
+				TLCStateInfo s2Info = this.tool.evalAlias(state, s2);
+				StatePrinter.printInvariantViolationStateTraceState(s2Info, s1, 2);
 				trace.add(s2Info);
 			}
 			OutputCollector.setTrace(trace);
@@ -364,11 +377,12 @@ public class TLCTrace {
 		}
 
 		MP.printError(EC.TLC_BEHAVIOR_UP_TO_THIS_POINT);
+		
 		// Print the prefix leading to s1:
 		TLCState lastState = null;
 		int idx = 0;
-		while (idx < prefix.length) {
-			StatePrinter.printState(prefix[idx], lastState, idx + 1);
+		while (idx < prefix.length - 1) {
+			StatePrinter.printInvariantViolationStateTraceState(this.tool.evalAlias(prefix[idx], prefix[idx + 1].state), lastState, idx + 1);
 			lastState = prefix[idx].state;
 			trace.add(prefix[idx]);
 			idx++;
@@ -387,19 +401,22 @@ public class TLCTrace {
 				System.exit(1);
 			}
 		} else {
-			TLCState s0 = prefix[prefix.length - 1].state;
-			sinfo = this.tool.getState(s1.fingerPrint(), s0);
+			TLCStateInfo s0 = prefix[prefix.length - 1];
+			StatePrinter.printInvariantViolationStateTraceState(this.tool.evalAlias(s0, s1), lastState, ++idx);
+			
+			sinfo = this.tool.getState(s1.fingerPrint(), s0.state);
 			if (sinfo == null) {
 				MP.printError(EC.TLC_FAILED_TO_RECOVER_INIT);
 				MP.printError(EC.TLC_BUG, "4");
-				StatePrinter.printState(s1);
+				StatePrinter.printStandaloneErrorState(s1);
 				System.exit(1);
 			}
 		}
 		if (s2 == null) {
 			lastState = null;
 		}
-		StatePrinter.printState(sinfo, lastState, ++idx);
+		sinfo = this.tool.evalAlias(sinfo, s2 == null ? sinfo.state : s2);
+		StatePrinter.printInvariantViolationStateTraceState(sinfo, lastState, ++idx);
 		lastState = sinfo.state;
 		trace.add(sinfo);
 
@@ -410,10 +427,11 @@ public class TLCTrace {
 			if (sinfo == null) {
 				MP.printError(EC.TLC_FAILED_TO_RECOVER_INIT);
 				MP.printError(EC.TLC_BUG, "5");
-				StatePrinter.printState(s2);
+				StatePrinter.printStandaloneErrorState(s2);
 				System.exit(1);
 			}
-			StatePrinter.printState(sinfo, null, ++idx);
+			sinfo = this.tool.evalAlias(sinfo, s2);
+			StatePrinter.printInvariantViolationStateTraceState(sinfo, null, ++idx);
 			trace.add(sinfo);
 		}
 		OutputCollector.setTrace(trace);
@@ -438,7 +456,7 @@ public class TLCTrace {
 		TLCStateInfo[] prefix = this.getTrace(this.lastPtr, false);
 		int idx = 0;
 		while (idx < prefix.length) {
-			StatePrinter.printState(prefix[idx], lastState, idx + 1);
+			StatePrinter.printInvariantViolationStateTraceState(prefix[idx], lastState, idx + 1);
 			lastState = prefix[idx].state;
 			idx++;
 		}
@@ -528,4 +546,24 @@ public class TLCTrace {
 		}
 	}
 
+	// Add *dead* TLCTrace#writeBehavior to serialize (long) behaviors to disk from
+	// which they can be read efficiently with IOUtils!IODeserialize.
+	// See https://github.com/tlaplus/tlaplus/issues/481 for context.
+	public static void writeBehavior(final File file, final TLCState state, final StateVec stateTrace) {
+		try {
+			final ValueOutputStream vos = new ValueOutputStream(file, true);
+
+			final Value[] v = new Value[stateTrace.size()];
+			for (int i = 0; i < stateTrace.size(); i++) {
+				v[i] = new RecordValue(stateTrace.elementAt(i));
+			}
+			
+			// Do not normalize TupleValue because normalization depends on the actual
+			// UniqueString#internTable.
+			new TupleValue(v).write(vos);
+			vos.close();
+		} catch (IOException e) {
+			Assert.fail(EC.SYSTEM_DISK_IO_ERROR_FOR_FILE, file.getName());
+		}
+	}
 }

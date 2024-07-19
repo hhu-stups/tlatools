@@ -197,7 +197,7 @@ public class ToolboxIntroPart extends IntroPart implements IIntroPart {
 
 		/* Examples */
 
-		final StyledText styledExamples = new StyledText(outerContainer, SWT.WRAP | SWT.CENTER);
+		final StyledText styledExamples = new StyledText(outerContainer, SWT.WRAP | SWT.LEFT);
 		styledExamples.setLayoutData(new GridData(SWT.CENTER, SWT.CENTER, true, false, 2, 1));
 		styledExamples.setBackground(backgroundColor);
 		String exampleText = "Clicking on one of the buttons below imports an introductory example into the "
@@ -431,7 +431,7 @@ public class ToolboxIntroPart extends IntroPart implements IIntroPart {
 
 		final Label lblVersion = new Label(outerContainer, SWT.WRAP);
 		lblVersion.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, false, false, 2, 1));
-		lblVersion.setText("Version 1.7.0 of 20 April 2020");
+		lblVersion.setText("Version 1.8.0 of Day Month Year");
 		lblVersion.setBackground(backgroundColor);
 	}
 

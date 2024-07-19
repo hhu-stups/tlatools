@@ -8,7 +8,7 @@ package tlc2.tool;
 public class TLCStateInfo {
   public TLCStateInfo predecessorState;
   public long stateNumber;
-  public TLCState state;
+  public final TLCState state;
   public Object info;
   public Long fp;
 
@@ -23,11 +23,23 @@ public class TLCStateInfo {
     this.state = s;
     this.info = info;
   }
+  
+  public TLCStateInfo(TLCState state, int stateOrdinal) {
+	  this.state = state;
+	  this.stateNumber = stateOrdinal;
+	  this.info = "";
+  }
 
   public TLCStateInfo(TLCState s, String info, int stateNum, long fp) {
 	  this(s, info);
 	  stateNumber = stateNum;
 	  this.fp = fp;
+  }
+  
+  public TLCStateInfo(TLCState s, TLCStateInfo info) {
+	  this(s, info.info);
+	  this.stateNumber = info.stateNumber;
+	  this.fp = info.fp;
   }
 
   public final long fingerPrint() {
@@ -54,5 +66,9 @@ public class TLCStateInfo {
 
   public int hashCode() {
 	  return this.state.hashCode();
+  }
+
+  public TLCState getOriginalState() {
+	return state;
   }
 }

@@ -146,6 +146,12 @@ public abstract class TLCJob extends AbstractJob implements IModelConfigurationC
             {
                 arguments.add("-simulate");
 
+                final String simuNumTraces = config.getAttribute(IModelConfigurationConstants.LAUNCH_SIMU_NUM_TRACES,
+                        Long.toString(IModelConfigurationDefaults.LAUNCH_SIMU_NUM_TRACES_DEFAULT));
+                if (!"".equals(simuNumTraces) && Long.valueOf(simuNumTraces) != Long.MAX_VALUE) {
+                	arguments.add(String.format("num=%s", Long.valueOf(simuNumTraces)));
+                }
+
                 // look for advanced simulation parameters
                 int traceDepth = config.getAttribute(IModelConfigurationConstants.LAUNCH_SIMU_DEPTH,
                         IModelConfigurationDefaults.LAUNCH_SIMU_DEPTH_DEFAULT);
@@ -247,6 +253,10 @@ public abstract class TLCJob extends AbstractJob implements IModelConfigurationC
         
         // debugging only
         //arguments.put("-debug", null); 
+        
+		// Keep TLC from generating a trace spec. For historic reasons, the Toolbox uses
+		// its own mechanism to generate a trace spec.
+        arguments.add("-noGenerateSpecTE");
         
         // run in tool mode
         arguments.add("-tool");
