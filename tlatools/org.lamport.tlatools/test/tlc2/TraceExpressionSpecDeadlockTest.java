@@ -26,7 +26,6 @@
 package tlc2;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -42,7 +41,6 @@ import tlc2.util.Vect;
 import tlc2.value.IValue;
 import tlc2.value.impl.BoolValue;
 import tlc2.value.impl.IntValue;
-import tlc2.value.impl.RecordValue;
 import util.TLAConstants;
 import util.UniqueString;
 
@@ -51,7 +49,7 @@ public class TraceExpressionSpecDeadlockTest extends TraceExpressionSpecTest {
 	private static final String TE_SPEC_TEST = "TESpecDeadlockTest";
 
 	public TraceExpressionSpecDeadlockTest() {
-		super(TE_SPEC_TEST, "TESpecDeadlockTest.cfg", "-modelcheck", EC.ExitStatus.VIOLATION_DEADLOCK);
+		super(TE_SPEC_TEST, "TESpecDeadlockTest", "-modelcheck", EC.ExitStatus.VIOLATION_DEADLOCK);
 	}
 
 	@Override
@@ -124,7 +122,6 @@ public class TraceExpressionSpecDeadlockTest extends TraceExpressionSpecTest {
 		assertNotNull(moduleTbl.getModuleNode(UniqueString.of(TE_SPEC_TEST)));
 		assertNotNull(moduleTbl.getModuleNode(
 				UniqueString.of(TE_SPEC_TEST + "_" + TLAConstants.TraceExplore.EXPLORATION_MODULE_NAME)));
-		assertNotNull(moduleTbl.getModuleNode(UniqueString.of(TLAConstants.TraceExplore.TRACE_EXPRESSION_MODULE_NAME
-				+ TLAConstants.TraceExplore.ERROR_STATES_MODULE_NAME)));
+		assertNotNull(moduleTbl.getModuleNode(UniqueString.of(TE_SPEC_TEST + "_" + TLAConstants.TraceExplore.SPEC_TETRACE_NAME)));
 	}
 }

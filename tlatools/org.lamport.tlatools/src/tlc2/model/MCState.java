@@ -5,8 +5,11 @@ import java.util.List;
 import java.util.Map;
 
 import tla2sany.st.Location;
+import tlc2.tool.TLCState;
 import tlc2.tool.TLCStateInfo;
 import tlc2.value.IValue;
+import tlc2.value.impl.RecordValue;
+import tlc2.value.impl.Value;
 import util.TLAConstants;
 import util.UniqueString;
 
@@ -54,6 +57,8 @@ public class MCState {
 	 * The depth of this state in the behavior, counting from 1.
 	 */
 	private final int stateNumber;
+
+	private RecordValue record;
 
 	/**
 	 * Parses a state from the standard TLC command line output format, for example:
@@ -170,11 +175,12 @@ public class MCState {
 			IValue value = variableMap.get(key);
 			// value is null if the successor state is not completely specified by the
 			// next-state relation. See e.g. IncompleteNextTest.java
-			MCVariable variable = new MCVariable(key.toString(), value != null ? value.toString() : "");
+			MCVariable variable = new MCVariable(key.toString(), value);
 			variableList.add(variable);
 		}
 		
 		this.variables = variableList.toArray(new MCVariable[variableList.size()]);
+		this.record = new RecordValue(tlcState.getOriginalState());
 	}
 
 	public MCVariable[] getVariables() {
@@ -408,5 +414,9 @@ public class MCState {
 		}
 
 		return (MCVariable[]) vars.toArray(new MCVariable[vars.size()]);
+	}
+
+	public Value getRecord() {
+		return record;
 	}
 }

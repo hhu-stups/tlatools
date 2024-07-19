@@ -32,6 +32,7 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Random;
 
 import org.junit.After;
 import org.junit.Before;
@@ -50,7 +51,7 @@ import util.SimpleFilenameToStream;
 import util.ToolIO;
 
 public abstract class ModelCheckerTestCase extends CommonTestCase {
-	
+
 	protected String path = "";
 	protected String spec;
 	protected String[] extraArguments = new String[0];
@@ -103,7 +104,7 @@ public abstract class ModelCheckerTestCase extends CommonTestCase {
 	 */
 	@Before
 	public void setUp() {
-		beforeSetUp();
+		beforeSetUp();		
 		
 		// some tests might want to access the liveness graph after model
 		// checking completed. Thus, prevent the liveness graph from being
@@ -140,14 +141,27 @@ public abstract class ModelCheckerTestCase extends CommonTestCase {
 				args.add("-deadlock");
 			}
 			
+			if (getNumberOfThreads() == 1 && runWithDebugger()) {
+				args.add("-debugger");
+				args.add(String.format("nosuspend,port=%s,nohalt", 1025 + new Random().nextInt(64540)));
+			}
+			
 			if (noGenerateSpec()) {
 				args.add("-noGenerateSpecTE");
+			} else {
+				// Make sure the generated spec ends up in a designated location.
+				args.add("-generateSpecTE");
+				args.add("-teSpecOutDir");
+				args.add(TTraceModelCheckerTestCase.getPath(getClass()));
 			}
-			args.add("-fp");
-			args.add("0");
-			// Deterministic simulation (order in which actions are explored).
-			args.add("-seed");
-			args.add("1");
+			
+			if (noRandomFPandSeed()) {
+				args.add("-fp");
+				args.add("0");
+				// Deterministic simulation (order in which actions are explored).
+				args.add("-seed");
+				args.add("1");
+			}
 			
 			if (doCoverage()) {
 				args.add("-coverage");
@@ -183,6 +197,14 @@ public abstract class ModelCheckerTestCase extends CommonTestCase {
 		}
 	}
 
+	protected boolean noRandomFPandSeed() {
+		return true;
+	}
+
+	protected boolean runWithDebugger() {
+		return true;
+	}
+
 	protected double getLivenessThreshold() {
 		return Double.MAX_VALUE;
 	}
@@ -192,13 +214,13 @@ public abstract class ModelCheckerTestCase extends CommonTestCase {
 	}
 
 	protected boolean noGenerateSpec() {
-		return true;
-	}
+		return false;
+	}	
 
 	protected void beforeTearDown() {
 		// No-op
 	}
-	
+
 	@After
 	public void tearDown() {
 		beforeTearDown();

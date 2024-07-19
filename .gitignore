@@ -36,3 +36,5 @@ junit[0-9]*.properties
 junitvmwatcher[0-9]*.properties
 test.jfr
 *.jfr
+tlatools/org.lamport.tlatools/test-model/test.out
+.tlacache/

@@ -246,7 +246,11 @@ public class MP
      */
     public synchronized static String getMessage(int messageClass, int messageCode, String[] parameters)
     {
+    	return getMessage(messageClass, messageCode, parameters, true);
+    }
 
+    public synchronized static String getMessage(int messageClass, int messageCode, String[] parameters, final boolean tool)
+        {
         if (parameters == null)
         {
             parameters = EMPTY_PARAMS;
@@ -263,7 +267,7 @@ public class MP
 
         StringBuffer b = new StringBuffer();
 
-        if (TLCGlobals.tool)
+        if (TLCGlobals.tool && tool)
         {
             // for the tool we always print the message class
             // and message code
@@ -293,7 +297,7 @@ public class MP
         
         b.append(getMessage0(messageClass, messageCode, parameters));
 
-        if (TLCGlobals.tool)
+        if (TLCGlobals.tool && tool)
         {
             // for the tool we always print the message code
             b.append(CR).append(DELIM).append(ENDMSG).append(messageCode).append(SPACE).append(DELIM);
@@ -415,10 +419,10 @@ public class MP
             break;
         /* ----------------------------------------------------------------- */
         case EC.WRONG_COMMANDLINE_PARAMS_TLC:
-            b.append("%1%\nUsage: java tlc2.TLC [-option] inputfile");
+            b.append("%1%\nUsage: java tlc2.TLC [-help] [-option] inputfile");
             break;
         case EC.WRONG_COMMANDLINE_PARAMS_SIMULATOR:
-            b.append("%1%\nUsage: java tlc2.Simulator [-option] inputfile");
+            b.append("%1%\nUsage: java tlc2.Simulator [-help] [-option] inputfile");
             break;
         /* ----------------------------------------------------------------- */
         case EC.TLC_VERSION:
@@ -473,7 +477,10 @@ public class MP
         case EC.TLC_PROPERTY_VIOLATED_INITIAL:
             b.append("Property %1% is violated by the initial state:\n%2%");
             break;
-
+        case EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_LIVE:
+			b.append(
+					"The action formula A appearing in a WF_v(A) or SF_v(A) operator does not specify the primed value of the variable %1% occurring in the state formula v.\n");
+        	break;
         case EC.TLC_STATE_NOT_COMPLETELY_SPECIFIED_NEXT:
 			if (parameters.length == 3) {
 				b.append(
@@ -1671,6 +1678,9 @@ public class MP
      */
     public static void printWarning(int errorCode, String... parameters)
     {
+    	if (Boolean.getBoolean(MP.class.getName() + ".warning2error")) {
+    		Assert.fail(errorCode, parameters);
+    	}
     	recorder.record(errorCode, (Object[]) parameters);
         DebugPrinter.print("entering printWarning(int, String[]) with errorCode " + errorCode); //$NON-NLS-1$
         // only print warnings if the global warning switch was enabled
@@ -1695,6 +1705,9 @@ public class MP
      */
     public static void printWarning(int errorCode, String parameters, Throwable e)
     {
+    	if (Boolean.getBoolean(MP.class.getName() + ".warning2error")) {
+    		Assert.fail(errorCode, e);
+    	}
     	recorder.record(errorCode, parameters, e);
         DebugPrinter.print("entering printWarning(int, String, Exception) with errorCode " + errorCode); //$NON-NLS-1$
         // only print warnings if the global warning switch was enabled

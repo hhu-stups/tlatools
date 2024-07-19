@@ -6,7 +6,6 @@
 <repository id="eclipse-ajdt" location="http://download.eclipse.org/tools/ajdt/410/dev/update/ajdt-e410-2.2.4.202007241909"/>
 </location>
 <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
-<unit id="org.apache.log4j" version="0.0.0"/>
 <unit id="org.hamcrest" version="0.0.0"/>
 <unit id="com.jcraft.jsch" version="0.0.0"/>
 <unit id="org.apache.commons.io" version="0.0.0"/>
@@ -17,6 +16,10 @@
 <repository id="eclipse-orbit" location="http://download.eclipse.org/tools/orbit/downloads/drops/R20180905201904/repository/"/>
 </location>
 <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
+<unit id="com.google.gson" version="0.0.0"/>
+<repository id="eclipse-orbit-newer" location="http://download.eclipse.org/tools/orbit/downloads/drops/R20210602031627/repository/"/>
+</location>
+<location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
 <unit id="org.eclipse.swtbot.ide.feature.group" version="0.0.0"/>
 <unit id="org.eclipse.swtbot.eclipse.test.junit.feature.group" version="0.0.0"/>
 <unit id="org.eclipse.swtbot.feature.group" version="0.0.0"/>
@@ -25,7 +28,7 @@
 </location>
 <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
 <unit id="org.apache.jclouds.feature.feature.group" version="0.0.0"/>
-<repository id="github-jclouds" location="http://lemmy.github.com/jclouds2p2/"/>
+<repository id="github-jclouds" location="http://lemmster.de/jclouds2p2/"/>
 </location>
 <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
 <unit id="org.eclipse.help.feature.group" version="0.0.0"/>
@@ -41,19 +44,19 @@
 <unit id="org.eclipse.core.runtime.feature.feature.group" version="0.0.0"/>
 <unit id="org.eclipse.jdt.feature.group" version="0.0.0"/>
 <unit id="org.eclipse.pde.source.feature.group" version="0.0.0"/>
-<repository id="eclipse" location="http://download.eclipse.org/eclipse/updates/4.16/R-4.16-202006040540/"/>
+<repository id="eclipse" location="http://download.eclipse.org/eclipse/updates/4.18/R-4.18-202012021800/"/>
 </location>
 <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
 <unit id="org.eclipse.egit.feature.group" version="0.0.0"/>
-<repository id="eclipse-egit" location="http://download.eclipse.org/egit/updates-5.5.1/"/>
+<repository id="eclipse-egit" location="http://archive.eclipse.org/egit/updates-5.9/"/>
 </location>
 <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
 <unit id="de.vonloesch.pdf4eclipse.feature.feature.group" version="0.0.0"/>
-<repository id="github-pdf4eclipse" location="http://lemmy.github.com/Pdf4Eclipse/"/>
+<repository id="github-pdf4eclipse" location="http://lemmster.de/Pdf4Eclipse/"/>
 </location>
 <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="false" type="InstallableUnit">
 <unit id="org.lamport.openjdk.feature.feature.group" version="0.0.0"/>
-<repository id="github-jdk" location="http://lemmy.github.com/eclipse-jdk-bundles/"/>
+<repository id="github-jdk" location="http://lemmster.de/eclipse-jdk-bundles/"/>
 </location>
 <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
 <unit id="com.abstratt.eclipsegraphviz.feature.feature.group" version="0.0.0"/>
@@ -61,7 +64,7 @@
 </location>
 <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
 <unit id="org.eclipse.recommenders.news.rcp.feature.feature.group" version="0.0.0"/>
-<repository id="eclipse-rcp" location="http://download.eclipse.org/releases/2018-09/201809191000"/>
+<repository id="eclipse-rcp" location="http://download.eclipse.org/releases/2018-09/201809191002"/>
 </location>
 <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
 <unit id="org.eclipse.mylyn.commons.feature.group" version="0.0.0"/>

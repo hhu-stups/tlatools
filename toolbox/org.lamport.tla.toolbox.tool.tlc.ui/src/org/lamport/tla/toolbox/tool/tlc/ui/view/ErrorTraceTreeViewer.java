@@ -48,6 +48,7 @@ import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationConstants;
 import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationDefaults;
 import org.lamport.tla.toolbox.tool.tlc.model.Model;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCError;
+import org.lamport.tla.toolbox.tool.tlc.output.data.TLCError.Order;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCFcnElementVariableValue;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCFunctionVariableValue;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCModelLaunchDataProvider;
@@ -107,6 +108,9 @@ class ErrorTraceTreeViewer {
 					// reverse the current trace
 					final TLCError error = (TLCError) treeViewer.getInput();
 					error.reverseTrace();
+					
+					treeViewer.getTree().setSortDirection(error.getOrder() == Order.OneToN ? SWT.UP : SWT.DOWN);
+					
 					// Reset the viewer's selection to the empty selection. With empty
 					// selection, the subsequent refresh call does *not* invalidate the
 					// StateContentProvider's lazy policy.
@@ -126,6 +130,15 @@ class ErrorTraceTreeViewer {
 				}
 			});
 		}
+		// We consider the "Value" column of the tree to be the one that shows a state's
+		// number. In order to reverse the direction in which the trace is shown, a user
+		// can click the "Value" or the "Name" column (the latter for convenience).
+		// The convention on Win, macOS, and Linux is to place an arrow on the column to
+		// indicate the current direction. We place this indicator on the "Value" column,
+		// not just because https://bugs.eclipse.org/133154 prevents us from placing an 
+		// indicator on both columns, but because the tree is sorted on the value, ie.
+		// the state number.
+		treeViewer.getTree().setSortColumn(treeViewer.getTree().getColumn(1));
 		
         parent.addControlListener(resizer);
 		
@@ -306,8 +319,14 @@ class ErrorTraceTreeViewer {
 				// TODO If ever comes up as a performance problem again, the
 				// nested TLCVariableValues could also be diffed lazily.
            		if (statesIndex > 0) {
-           			final TLCState predecessor = states.get(statesIndex - 1);
-           			predecessor.diff(child);
+           			if (error.isOrder(Order.OneToN)) {
+           				final TLCState predecessor = states.get(statesIndex - 1);
+           				predecessor.diff(child);
+           			} else {
+						// With Order NtoOne, the previous state is logically the child's successor.
+           				final TLCState successor = states.get(statesIndex - 1);
+           				child.diff(successor);
+           			}
            		}
 				treeViewer.replace(parent, viewerIndex, child);
 				// Always setHashChildren even if child has no children: This is

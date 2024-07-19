@@ -25,15 +25,25 @@
  ******************************************************************************/
 package tlc2.tool;
 
+import tlc2.util.SetOfStates;
+
 public interface INextStateFunctor extends IStateFunctor {
 
 	Object addElement(final TLCState s, final Action a, final TLCState t);
 	
-	public static class InvariantViolatedException extends RuntimeException {
+	public static class InvariantViolatedException extends StatefulRuntimeException {
 		
+	}
+
+	default Object addElement(TLCState state) {
+		throw new UnsupportedOperationException();
 	}
 
 	default boolean hasStates() {
 		throw new UnsupportedOperationException();
+	}
+	
+	default SetOfStates getStates() {
+		return new SetOfStates(0);
 	}
 }

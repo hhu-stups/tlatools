@@ -32,7 +32,6 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.Map;
 
-import tla2sany.semantic.ExternalModuleTable;
 import tlc2.output.EC;
 import tlc2.tool.Action;
 import tlc2.tool.StateVec;
@@ -42,7 +41,6 @@ import tlc2.util.Vect;
 import tlc2.value.IValue;
 import tlc2.value.impl.IntValue;
 import tlc2.value.impl.RecordValue;
-import util.TLAConstants;
 import util.UniqueString;
 
 public class TraceExpressionSpecRuntimeTest extends TraceExpressionSpecTest {
@@ -114,13 +112,5 @@ public class TraceExpressionSpecRuntimeTest extends TraceExpressionSpecTest {
 
 		assertNotNull(tool.getModelConfig().getAlias());
 		assertFalse(tool.getModelConfig().getCheckDeadlock());
-		
-		// Assert that all three sub-modules exist
-		final ExternalModuleTable moduleTbl = specProcessor.getModuleTbl();
-		assertNotNull(moduleTbl.getModuleNode(UniqueString.of(TE_SPEC_TEST)));
-		assertNotNull(moduleTbl.getModuleNode(
-				UniqueString.of(TE_SPEC_TEST + "_" + TLAConstants.TraceExplore.EXPLORATION_MODULE_NAME)));
-		assertNotNull(moduleTbl.getModuleNode(UniqueString.of(TLAConstants.TraceExplore.TRACE_EXPRESSION_MODULE_NAME
-				+ TLAConstants.TraceExplore.ERROR_STATES_MODULE_NAME)));
 	}
 }

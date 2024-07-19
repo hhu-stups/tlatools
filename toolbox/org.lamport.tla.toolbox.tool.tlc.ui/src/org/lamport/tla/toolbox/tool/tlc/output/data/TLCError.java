@@ -229,6 +229,14 @@ public class TLCError
 		stateSortDirection = stateSortDirection == Order.OneToN ? Order.NToOne : Order.OneToN;
 		Collections.reverse(states);
 	}
+	
+	public Order getOrder() {
+		return stateSortDirection;
+	}
+
+	public boolean isOrder(Order o) {
+		return stateSortDirection == o;
+	}
 
 	private void orderTrace(Order order) {
 		if (stateSortDirection != order) {
