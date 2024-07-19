@@ -30,31 +30,40 @@ import tlc2.value.impl.ValueVec;
 import util.FileUtil;
 import util.FilenameToStream;
 import util.SimpleFilenameToStream;
+import util.TLAConstants;
 
 /** 
  * Stores information from user's model configuration file.
+ * 
+ * TODO we should move from Hashtable to HashMap (we should probably also stop using our own collection implmentations
+ * 			like {@link Vect}.)
+ * TODO we're storing a heterogeneous mishmash in the values of configTbl - sometimes a Vect, sometimes a String, sometime
+ * 			that Vect has only String instances, sometimes is has a String instance and Value subclasses, ... it would
+ * 			be nice were the design cleaner.
+ * 
  * @author Yuan Yu, Leslie Lamport
  */
-public class ModelConfig implements ValueConstants, Serializable
-{
+public class ModelConfig implements ValueConstants, Serializable {
     // keywords of the configuration file
-    private static final String Constant = "CONSTANT";
-    private static final String Constants = "CONSTANTS";
+    private static final String Constant = TLAConstants.KeyWords.CONSTANT;
+    private static final String Constants = TLAConstants.KeyWords.CONSTANTS;
     private static final String Constraint = "CONSTRAINT";
     private static final String Constraints = "CONSTRAINTS";
-    private static final String ActionConstraint = "ACTION_CONSTRAINT";
-    private static final String ActionConstraints = "ACTION_CONSTRAINTS";
-    private static final String Invariant = "INVARIANT";
-    private static final String Invariants = "INVARIANTS";
-    private static final String Init = "INIT";
-    private static final String Next = "NEXT";
+    private static final String ActionConstraint = TLAConstants.KeyWords.ACTION_CONSTRAINT;
+    private static final String ActionConstraints = ActionConstraint + 'S';
+    private static final String Invariant = TLAConstants.KeyWords.INVARIANT;
+    private static final String Invariants = Invariant + 'S';
+    private static final String Init = TLAConstants.KeyWords.INIT;
+    private static final String Next = TLAConstants.KeyWords.NEXT;
     private static final String View = "VIEW";
-    private static final String Symmetry = "SYMMETRY";
-    private static final String Spec = "SPECIFICATION";
-    private static final String Prop = "PROPERTY";
+    private static final String Symmetry = TLAConstants.KeyWords.SYMMETRY;
+    private static final String Spec = TLAConstants.KeyWords.SPECIFICATION;
+    private static final String Prop = TLAConstants.KeyWords.PROPERTY;
     private static final String Props = "PROPERTIES";
     private static final String Type = "TYPE";
     private static final String TypeConstraint = "TYPE_CONSTRAINT";
+
+    private static final long serialVersionUID = 1L;
 
     /**
      * All keywords used in the configuration file
@@ -64,7 +73,8 @@ public class ModelConfig implements ValueConstants, Serializable
             TypeConstraint };
 
     private Hashtable configTbl;
-    private Hashtable overrides;
+    private Hashtable<String, String> overrides;
+    private Hashtable<String, String> overridesReverseMap;
     private Hashtable modConstants;
     private Hashtable modOverrides;
     private String configFileName;
@@ -118,6 +128,7 @@ public class ModelConfig implements ValueConstants, Serializable
         this.modConstants = new Hashtable<>();
         this.modOverrides = new Hashtable<>();
         this.overrides = new Hashtable<>();
+        this.overridesReverseMap = new Hashtable<>();
     }
 
     /**
@@ -308,7 +319,9 @@ public class ModelConfig implements ValueConstants, Serializable
                                     throw new ConfigFileException(EC.CFG_EXPECT_ID, new String[] {
                                             String.valueOf(scs.getBeginLine()), "<-" });
                                 }
-                                this.overrides.put(line.elementAt(0), tt.image);
+                                final String string = (String)line.elementAt(0);
+                                this.overrides.put(string, tt.image);
+                                this.overridesReverseMap.put(tt.image, string);
                             }
                         } else
                         {
@@ -490,9 +503,13 @@ public class ModelConfig implements ValueConstants, Serializable
         return this.modConstants;
     }
 
-    public synchronized final Hashtable getOverrides()
+    public synchronized final Hashtable<String, String> getOverrides()
     {
         return this.overrides;
+    }
+    
+    public synchronized final String getOverridenSpecNameForConfigName(final String configName) {
+    	return this.overridesReverseMap.get(configName);
     }
 
     public synchronized final Hashtable getModOverrides()
@@ -523,6 +540,12 @@ public class ModelConfig implements ValueConstants, Serializable
     public synchronized final String getView()
     {
         return (String) this.configTbl.get(View);
+    }
+    
+    public synchronized final boolean configDefinesSpecification() {
+    	final String spec = getSpec();
+    	
+    	return ((spec != null) && (spec.trim().length() > 0));
     }
 
     public synchronized final String getSymmetry()

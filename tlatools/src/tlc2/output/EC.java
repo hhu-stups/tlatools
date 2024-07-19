@@ -48,10 +48,12 @@ public interface EC
 	 */
 	public static final int TLC_FEATURE_UNSUPPORTED = 2156;
 	public static final int TLC_FEATURE_UNSUPPORTED_LIVENESS_SYMMETRY = 2279;
+	public static final int TLC_FEATURE_LIVENESS_CONSTRAINTS = 2284;
 
     public static final int GENERAL = 1000;
     public static final int SYSTEM_OUT_OF_MEMORY = 1001;
     public static final int SYSTEM_OUT_OF_MEMORY_TOO_MANY_INIT = 1002;
+    public static final int SYSTEM_OUT_OF_MEMORY_LIVENESS = 1003;
     public static final int SYSTEM_STACK_OVERFLOW = 1005;
 
     public static final int WRONG_COMMANDLINE_PARAMS_SIMULATOR = 1101;
@@ -117,6 +119,10 @@ public interface EC
 	public static final int TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE = 2154;
     public static final int TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE_LOADED = 2168;
     public static final int TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE_MISMATCH = 2400;
+    public static final int TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE_MODULE_MISMATCH = 2402;
+    public static final int TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE_IDENTIFIER_MISMATCH = 2403;
+    // User-provided module overrides print to stdout.
+    public static final int TLC_MODULE_OVERRIDE_STDOUT = 20000;
 
     public static final int TLC_FP_NOT_IN_SET = 2133;
     public static final int TLC_FP_VALUE_ALREADY_ON_DISK = 2166;
@@ -159,6 +165,9 @@ public interface EC
     /** The %1% argument of %2% must be in the domain of its first argument:<br>%3%<br>, but instead it is<br>%4% */
     public static final int TLC_MODULE_ARGUMENT_NOT_IN_DOMAIN = 2183;
     public static final int TLC_MODULE_APPLY_EMPTY_SEQ = 2184;
+    
+    public static final int TLC_SYMMETRY_SET_TOO_SMALL = 2300;
+    public static final int TLC_SPECIFICATION_FEATURES_TEMPORAL_QUANTIFIER = 2301;
     
     public static final int TLC_STARTING = 2185;
     public static final int TLC_FINISHED = 2186;
@@ -276,7 +285,6 @@ public interface EC
     public static final int TLC_ENABLED_WRONG_FORMULA = 2260;
     public static final int TLC_ENCOUNTERED_FORMULA_IN_PREDICATE = 2261;
     public static final int TLC_VERSION = 2262;
-    public static final int TLC_USAGE = 2263;
     public static final int TLC_COUNTER_EXAMPLE = 2264;
     
     public static final int TLC_INTEGER_TOO_BIG = 2265;

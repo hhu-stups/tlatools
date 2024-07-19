@@ -33,7 +33,10 @@ import tla2sany.st.ParseTree;
 import tla2sany.st.TreeNode;
 import tla2sany.utilities.Vector;
 import util.FileUtil;
+import util.FilenameToStream.TLAFile;
 import util.NamedInputStream;
+import util.TLAConstants;
+import util.TLAFlightRecorder;
 import util.ToolIO;
 
 /**
@@ -87,6 +90,13 @@ public class ParseUnit {
     return (nis != null &&  
 	    nis.sourceFile().exists() &&
 	    parseStamp > nis.sourceFile().lastModified());
+  }
+
+  public boolean isLibraryModule() {
+	  if (nis == null || !(nis.sourceFile() instanceof TLAFile)) {
+		  return false;
+	  }
+	  return ((TLAFile) nis.sourceFile()).isLibraryModule();
   }
 
   // Get-methods
@@ -250,15 +260,15 @@ public class ParseUnit {
         * argument to which such output gets written.  That argument should    *
         * have been passed down to this method.  (LL: 11 Mar 08)               *
         *                                                                      *
-        * The following statement modified by LL on 13 Mary 08 to produce      *
+        * The following statement modified by LL on 13 Mar 08 to produce       *
         * more useful output for the GUI.                                      *
         ***********************************************************************/
         if (ToolIO.getMode() == ToolIO.SYSTEM)
         {
-			ToolIO.out.println(String.format("Parsing file %s", absoluteResolvedPath));
+			ToolIO.out.println(TLAFlightRecorder.message(String.format("%s %s", TLAConstants.LoggingAtoms.PARSING_FILE, absoluteResolvedPath)));
         } else
         {
-            ToolIO.out.println(String.format("Parsing module %s in file %s", nis.getModuleName(), absoluteResolvedPath));
+            ToolIO.out.println(TLAFlightRecorder.message(String.format("Parsing module %s in file %s", nis.getModuleName(), absoluteResolvedPath)));
         }
 
         boolean parseSuccess; 

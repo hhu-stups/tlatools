@@ -13,10 +13,12 @@ import tlc2.tool.TLCStateInfo;
 import tlc2.tool.liveness.LiveWorker;
 import tlc2.util.statistics.IBucketStatistics;
 import util.Assert;
+import util.Assert.TLCRuntimeException;
 import util.DebugPrinter;
 import util.Set;
+import util.TLAConstants;
+import util.TLAFlightRecorder;
 import util.ToolIO;
-import util.Assert.TLCRuntimeException;
 
 /**
  * This class is used in the following way to support the replacements of the
@@ -78,6 +80,82 @@ import util.Assert.TLCRuntimeException;
  */
 public class MP
 {
+	// https://stackoverflow.com/a/45444716/6291195
+	public static class Colors {
+		// Reset
+		public static final String RESET = "\033[0m"; // Text Reset
+
+		// Regular Colors
+		public static final String BLACK = "\033[0;30m"; // BLACK
+		public static final String RED = "\033[0;31m"; // RED
+		public static final String GREEN = "\033[0;32m"; // GREEN
+		public static final String YELLOW = "\033[0;33m"; // YELLOW
+		public static final String BLUE = "\033[0;34m"; // BLUE
+		public static final String PURPLE = "\033[0;35m"; // PURPLE
+		public static final String CYAN = "\033[0;36m"; // CYAN
+		public static final String WHITE = "\033[0;37m"; // WHITE
+
+		// Bold
+		public static final String BLACK_BOLD = "\033[1;30m"; // BLACK
+		public static final String RED_BOLD = "\033[1;31m"; // RED
+		public static final String GREEN_BOLD = "\033[1;32m"; // GREEN
+		public static final String YELLOW_BOLD = "\033[1;33m"; // YELLOW
+		public static final String BLUE_BOLD = "\033[1;34m"; // BLUE
+		public static final String PURPLE_BOLD = "\033[1;35m"; // PURPLE
+		public static final String CYAN_BOLD = "\033[1;36m"; // CYAN
+		public static final String WHITE_BOLD = "\033[1;37m"; // WHITE
+
+		// Underline
+		public static final String BLACK_UNDERLINED = "\033[4;30m"; // BLACK
+		public static final String RED_UNDERLINED = "\033[4;31m"; // RED
+		public static final String GREEN_UNDERLINED = "\033[4;32m"; // GREEN
+		public static final String YELLOW_UNDERLINED = "\033[4;33m"; // YELLOW
+		public static final String BLUE_UNDERLINED = "\033[4;34m"; // BLUE
+		public static final String PURPLE_UNDERLINED = "\033[4;35m"; // PURPLE
+		public static final String CYAN_UNDERLINED = "\033[4;36m"; // CYAN
+		public static final String WHITE_UNDERLINED = "\033[4;37m"; // WHITE
+
+		// Background
+		public static final String BLACK_BACKGROUND = "\033[40m"; // BLACK
+		public static final String RED_BACKGROUND = "\033[41m"; // RED
+		public static final String GREEN_BACKGROUND = "\033[42m"; // GREEN
+		public static final String YELLOW_BACKGROUND = "\033[43m"; // YELLOW
+		public static final String BLUE_BACKGROUND = "\033[44m"; // BLUE
+		public static final String PURPLE_BACKGROUND = "\033[45m"; // PURPLE
+		public static final String CYAN_BACKGROUND = "\033[46m"; // CYAN
+		public static final String WHITE_BACKGROUND = "\033[47m"; // WHITE
+
+		// High Intensity
+		public static final String BLACK_BRIGHT = "\033[0;90m"; // BLACK
+		public static final String RED_BRIGHT = "\033[0;91m"; // RED
+		public static final String GREEN_BRIGHT = "\033[0;92m"; // GREEN
+		public static final String YELLOW_BRIGHT = "\033[0;93m"; // YELLOW
+		public static final String BLUE_BRIGHT = "\033[0;94m"; // BLUE
+		public static final String PURPLE_BRIGHT = "\033[0;95m"; // PURPLE
+		public static final String CYAN_BRIGHT = "\033[0;96m"; // CYAN
+		public static final String WHITE_BRIGHT = "\033[0;97m"; // WHITE
+
+		// Bold High Intensity
+		public static final String BLACK_BOLD_BRIGHT = "\033[1;90m"; // BLACK
+		public static final String RED_BOLD_BRIGHT = "\033[1;91m"; // RED
+		public static final String GREEN_BOLD_BRIGHT = "\033[1;92m"; // GREEN
+		public static final String YELLOW_BOLD_BRIGHT = "\033[1;93m";// YELLOW
+		public static final String BLUE_BOLD_BRIGHT = "\033[1;94m"; // BLUE
+		public static final String PURPLE_BOLD_BRIGHT = "\033[1;95m";// PURPLE
+		public static final String CYAN_BOLD_BRIGHT = "\033[1;96m"; // CYAN
+		public static final String WHITE_BOLD_BRIGHT = "\033[1;97m"; // WHITE
+
+		// High Intensity backgrounds
+		public static final String BLACK_BACKGROUND_BRIGHT = "\033[0;100m";// BLACK
+		public static final String RED_BACKGROUND_BRIGHT = "\033[0;101m";// RED
+		public static final String GREEN_BACKGROUND_BRIGHT = "\033[0;102m";// GREEN
+		public static final String YELLOW_BACKGROUND_BRIGHT = "\033[0;103m";// YELLOW
+		public static final String BLUE_BACKGROUND_BRIGHT = "\033[0;104m";// BLUE
+		public static final String PURPLE_BACKGROUND_BRIGHT = "\033[0;105m"; // PURPLE
+		public static final String CYAN_BACKGROUND_BRIGHT = "\033[0;106m"; // CYAN
+		public static final String WHITE_BACKGROUND_BRIGHT = "\033[0;107m"; // WHITE
+	}
+
     /**
      * 
      */
@@ -85,15 +163,15 @@ public class MP
     /**
      * 
      */
-    private static final String CR = "\n";
+    public static final String CR = TLAConstants.CR;
     /**
      * 
      */
-    private static final String SPACE = " ";
+    public static final String SPACE = TLAConstants.SPACE;
     /**
      * 
      */
-    public static final String COLON = ":";
+    public static final String COLON = TLAConstants.COLON;
     public static final String DELIM = "@!@!@"; //$NON-NLS-1$
     public static final String STARTMSG = "STARTMSG "; //$NON-NLS-1$
 
@@ -212,7 +290,42 @@ public class MP
                 break;
             }
         }
-        // fill with different message depending on the error code
+        
+        b.append(getMessage0(messageClass, messageCode, parameters));
+
+        if (TLCGlobals.tool)
+        {
+            // for the tool we always print the message code
+            b.append(CR).append(DELIM).append(ENDMSG).append(messageCode).append(SPACE).append(DELIM);
+        } else
+        {
+
+            // post processing
+            switch (messageClass) {
+            case WARNING:
+            	if (instance.warningHistory.isEmpty()) {
+            		b.append("\n(Use the -nowarning option to disable this warning.)");
+            	}
+                break;
+            case ERROR:
+                if (TLCGlobals.tool)
+                {
+                    b.append("\n--End Error.");
+                }
+                break;
+            case TLCBUG:
+            case NONE:
+            default:
+                break;
+            }
+        }
+        DebugPrinter.print("Leaving getMessage()"); //$NON-NLS-1$
+        return b.toString();
+    }
+
+	private static String getMessage0(int messageClass, int messageCode, String[] parameters) {
+        final StringBuffer b = new StringBuffer();
+		// fill with different message depending on the error code
         switch (messageCode) {
         case EC.UNIT_TEST:
             b.append("[%1%][%2%]");
@@ -227,6 +340,11 @@ public class MP
             b.append("Java ran out of memory.  Running Java with a larger memory allocation\n"
                     + "pool (heap) may fix this.  But it won't help if some state has an enormous\n"
                     + "number of successor states, or if TLC must compute the value of a huge set.");
+            break;
+        case EC.SYSTEM_OUT_OF_MEMORY_LIVENESS:
+            b.append("Java ran out of memory during liveness checking.  Running Java with a larger memory\n"
+                    + "allocation pool (heap) may fix this.  But it won't help if paths in the liveness graph\n"
+                    + "have an enormous number of states.");
             break;
         case EC.SYSTEM_OUT_OF_MEMORY_TOO_MANY_INIT:
             b.append("Out Of Memory. There are probably too many initial states.");
@@ -303,9 +421,6 @@ public class MP
             b.append("%1%\nUsage: java tlc2.Simulator [-option] inputfile");
             break;
         /* ----------------------------------------------------------------- */
-        case EC.TLC_USAGE:
-            b.append(Messages.getString("HelpMessage"));// $NON-NLS-1$
-            break;
         case EC.TLC_VERSION:
             b.append("TLC2 %1%");
             break;
@@ -453,17 +568,17 @@ public class MP
                 // format same as state printing for easier
                 // parsing by toolbox
                 if (parameters.length == 1) {
-                    b.append("%1%: Back to state\n");
+                    b.append("%1%: ").append(TLAConstants.BACK_TO_STATE).append("\n");
                 }
                 else if (parameters.length == 2) {
-                    b.append("%1%: Back to state: %2%\n");
+                    b.append("%1%: ").append(TLAConstants.BACK_TO_STATE).append(": %2%\n");
                 }
             } else {
                 if (parameters.length == 1) {
-                    b.append("Back to state %1%\n");
+                    b.append(TLAConstants.BACK_TO_STATE).append(" %1%\n");
                 }
                 else if (parameters.length == 2) {
-                    b.append("Back to state %1%: %2%\n");
+                    b.append(TLAConstants.BACK_TO_STATE).append(" %1%: %2%\n");
                 }
             }
             break;
@@ -608,6 +723,14 @@ public class MP
         case EC.TLC_EXCEPT_APPLIED_TO_UNKNOWN_FIELD:
             b.append("The EXCEPT was applied to non-existing fields of the value at\n%1%");
             break;
+            
+        case EC.TLC_SYMMETRY_SET_TOO_SMALL:
+        	b.append("The set%1% %2% %3% been defined to be a symmetry set but contain%4% less than two elements.");
+        	break;
+            
+        case EC.TLC_SPECIFICATION_FEATURES_TEMPORAL_QUANTIFIER:
+        	b.append("TLC does not support temporal existential, nor universal, quantification over state variables.");
+        	break;
         /* ************************************************************************ */
         case EC.TLC_MODULE_TLCGET_UNDEFINED:
             b.append("TLCGet(%1%) was undefined.");
@@ -683,6 +806,15 @@ public class MP
         case EC.TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE_MISMATCH:
             b.append("Failed to match %1% operator override from %2% with signature: %3%.");
             break;
+        case EC.TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE_IDENTIFIER_MISMATCH:
+            b.append("Failed to match %1% operator override from %2% with signature: %3% (no such operator).");
+            break;
+        case EC.TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE_MODULE_MISMATCH:
+            b.append("Failed to match %1% operator override from %2% with signature: %3% (no such module).");
+            break;
+        case EC.TLC_MODULE_OVERRIDE_STDOUT:
+            b.append("%1%");
+            break;
        case EC.TLC_FEATURE_UNSUPPORTED:
             b.append("%1%");
             break;
@@ -690,6 +822,14 @@ public class MP
             b.append("Declaring symmetry during liveness checking is dangerous. "
             		+ "It might cause TLC to miss violations of the stated liveness properties. "
             		+ "Please check liveness without symmetry defined.");
+            break;
+        case EC.TLC_FEATURE_LIVENESS_CONSTRAINTS:
+        	// Specifying Systems Section 14.3.5 page 247.
+        	// https://lamport.azurewebsites.net/tla/book.html
+			b.append("Declaring state or action constraints during liveness checking is dangerous: "
+					+ "Please read section 14.3.5 on page 247 of Specifying Systems "
+					+ "(https://lamport.azurewebsites.net/tla/book.html) and optionally the "
+					+ "discussion at https://discuss.tlapl.us/msg00994.html for more details.");
             break;
 
         /* Liveness errors */
@@ -1012,7 +1152,7 @@ public class MP
             b.append("In evaluation, the identifier %1% is either undefined or not an operator.\n%2%");
             break;
         case EC.TLC_CONFIG_SUBSTITUTION_NON_CONSTANT:
-            b.append("The configuration file substitutes constant %1% with non-constant %2%.");
+            b.append("The configuration file substitutes constant %1% with non-constant %2%%3%");
             break;
         case EC.TLC_CONFIG_WRONG_SUBSTITUTION_NUMBER_OF_ARGS:
             b.append("The configuration file substitutes for %1% with %2% of different number of arguments.");
@@ -1039,7 +1179,13 @@ public class MP
             break;
         case EC.TLC_CONFIG_MISSING_INIT:
             b.append("The configuration file did not specify the initial state predicate." +
-                     // Following part of error message added by LL on 15 Nov 2012
+                     // The below part of the error message was added by LL on 15 Nov 2012
+            		 //
+            		 //	ldq, 13 Feb 2020: I don't think this is semantically correct; I receive
+                     //			no errors when defining a specification that references
+            		 //			a formula which is a parameterized INSTANCE. I *do* receive
+                     //			such an error when that formula is being constrained via
+            		 //			the temporal existential qualifier.
                      "\nCan also be caused by trying to run TLC on a specification from" +
                      "\na module imported with a parameterized INSTANCE statement.");
             break;
@@ -1119,7 +1265,7 @@ public class MP
         	}
             break;
         case EC.TLC_STATE_PRINT3:
-            b.append("%1%: Stuttering");
+            b.append("%1%:").append(TLAConstants.STUTTERING);
             break;
 
         /* ************************************************************************ */
@@ -1169,36 +1315,8 @@ public class MP
         }
 
         replaceString(b, parameters);
-
-        if (TLCGlobals.tool)
-        {
-            // for the tool we always print the message code
-            b.append(CR).append(DELIM).append(ENDMSG).append(messageCode).append(SPACE).append(DELIM);
-        } else
-        {
-
-            // post processing
-            switch (messageClass) {
-            case WARNING:
-            	if (instance.warningHistory.isEmpty()) {
-            		b.append("\n(Use the -nowarning option to disable this warning.)");
-            	}
-                break;
-            case ERROR:
-                if (TLCGlobals.tool)
-                {
-                    b.append("\n--End Error.");
-                }
-                break;
-            case TLCBUG:
-            case NONE:
-            default:
-                break;
-            }
-        }
-        DebugPrinter.print("Leaving getMessage()"); //$NON-NLS-1$
         return b.toString();
-    }
+	}
 
     /**
      * Returns the error  
@@ -1469,7 +1587,9 @@ public class MP
     	recorder.record(errorCode, (Object[]) parameters);
         DebugPrinter.print("entering printMessage(int, String[]) with errorCode " + errorCode); //$NON-NLS-1$
         // write the output
-        ToolIO.out.println(getMessage(NONE, errorCode, parameters));
+		ToolIO.out.println(getMessage(NONE, errorCode, parameters));
+		// Don't log the start and end markers when in -tool mode.
+		TLAFlightRecorder.message(getMessage0(NONE, errorCode, parameters));
         DebugPrinter.print("leaving printError(int, String[]) with errorCode "); //$NON-NLS-1$
     }
 

@@ -26,6 +26,8 @@
 
 package org.lamport.tla.toolbox.tool.tlc.output.data;
 
+import java.util.Objects;
+
 public class TLCVariable
 {
     private String name;
@@ -107,5 +109,12 @@ public class TLCVariable
 	
 	public final boolean isChanged() {
 		return value.isAdded() || value.isDeleted() || value.isChanged();
+	}
+	
+	/**
+	 * This compares against name and the value of {@code isTraceExplorerVar}
+	 */
+	public boolean representsTheSameAs(final TLCVariable other) {
+		return (isTraceExplorerVar == other.isTraceExplorerVar) && Objects.equals(name, other.name);
 	}
 }

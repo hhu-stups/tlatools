@@ -7,7 +7,10 @@
 package tlc2.tool.impl;
 
 import java.io.File;
+import java.util.HashSet;
+import java.util.List;
 
+import tla2sany.parser.SyntaxTreeNode;
 import tla2sany.semantic.APSubstInNode;
 import tla2sany.semantic.ExprNode;
 import tla2sany.semantic.ExprOrOpArgNode;
@@ -19,6 +22,7 @@ import tla2sany.semantic.LevelNode;
 import tla2sany.semantic.OpApplNode;
 import tla2sany.semantic.OpArgNode;
 import tla2sany.semantic.OpDefNode;
+import tla2sany.semantic.OpDefOrDeclNode;
 import tla2sany.semantic.SemanticNode;
 import tla2sany.semantic.Subst;
 import tla2sany.semantic.SubstInNode;
@@ -28,11 +32,11 @@ import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.tool.Action;
 import tlc2.tool.BuiltInOPs;
-import tlc2.tool.CallStack;
 import tlc2.tool.EvalControl;
 import tlc2.tool.EvalException;
 import tlc2.tool.IActionItemList;
 import tlc2.tool.IContextEnumerator;
+import tlc2.tool.INextStateFunctor;
 import tlc2.tool.IStateFunctor;
 import tlc2.tool.ITool;
 import tlc2.tool.StateVec;
@@ -43,6 +47,7 @@ import tlc2.tool.TLCStateMut;
 import tlc2.tool.ToolGlobals;
 import tlc2.tool.coverage.CostModel;
 import tlc2.util.Context;
+import tlc2.util.ExpectInlined;
 import tlc2.util.IdThread;
 import tlc2.util.Vect;
 import tlc2.value.IFcnLambdaValue;
@@ -53,12 +58,15 @@ import tlc2.value.Values;
 import tlc2.value.impl.Applicable;
 import tlc2.value.impl.BoolValue;
 import tlc2.value.impl.Enumerable;
+import tlc2.value.impl.EvaluatingValue;
 import tlc2.value.impl.FcnLambdaValue;
 import tlc2.value.impl.FcnParams;
 import tlc2.value.impl.FcnRcdValue;
 import tlc2.value.impl.LazyValue;
+import tlc2.value.impl.MVPerm;
 import tlc2.value.impl.MVPerms;
 import tlc2.value.impl.MethodValue;
+import tlc2.value.impl.ModelValue;
 import tlc2.value.impl.OpLambdaValue;
 import tlc2.value.impl.OpValue;
 import tlc2.value.impl.RecordValue;
@@ -80,8 +88,8 @@ import tlc2.value.impl.ValueEnumeration;
 import tlc2.value.impl.ValueExcept;
 import tlc2.value.impl.ValueVec;
 import util.Assert;
-import util.Assert.TLCRuntimeException;
 import util.FilenameToStream;
+import util.TLAConstants;
 import util.UniqueString;
 
 /**
@@ -92,17 +100,14 @@ import util.UniqueString;
  * This is one of two places in TLC, where not all messages are retrieved from the message printer,
  * but constructed just here in the code.
  */
-public class Tool
+public abstract class Tool
     extends Spec
     implements ValueConstants, ToolGlobals, ITool
 {
 	
   public static final Value[] EmptyArgs = new Value[0];
 
-	
   protected final Action[] actions;     // the list of TLA actions.
-  private CallStack callStack;    // the call stack.
-
   private Vect<Action> actionVec = new Vect<>(10);
 
   /**
@@ -124,7 +129,6 @@ public class Tool
   public Tool(String specDir, String specFile, String configFile, FilenameToStream resolver)
   {
       super(specDir, specFile, configFile, resolver);
-      this.callStack = null;
 
       // Initialize state.
       TLCStateMut.setTool(this);
@@ -145,23 +149,10 @@ public class Tool
   Tool(Tool other) {
 	  super(other);
 	  this.actions = other.actions;
-	  this.callStack = other.callStack;
 	  this.actionVec = other.actionVec;
   }
 
-	@Override
-  public final void setCallStack()
-  {
-      this.callStack = new CallStack();
-  }
-
-  @Override
-  public final CallStack getCallStack()
-  {
-      return this.callStack;
-  }
-
-  /**
+	/**
    * This method returns the set of all possible actions of the
    * spec, and sets the actions field of this object. In fact, we
    * could simply treat the next predicate as one "giant" action.
@@ -337,7 +328,7 @@ public class Tool
       // doesn't get added to acts at all).
 	  for (int i = (init.size() - 1); i > 0; i--) {
 		  Action elem = (Action)init.elementAt(i);
-		  acts = (ActionItemList) acts.cons(elem.pred, elem.con, elem.cm, IActionItemList.PRED);
+		  acts = (ActionItemList) acts.cons(elem, IActionItemList.PRED);
 	  }
 	  if (init.size() != 0) {
 		  Action elem = (Action)init.elementAt(0);
@@ -363,10 +354,8 @@ public class Tool
     return state;
   }
 
-  private final void getInitStates(SemanticNode init, ActionItemList acts,
+  protected void getInitStates(SemanticNode init, ActionItemList acts,
                                    Context c, TLCState ps, IStateFunctor states, CostModel cm) {
-    if (this.callStack != null) this.callStack.push(init);
-    try {
         switch (init.getKind()) {
         case OpApplKind:
           {
@@ -387,7 +376,7 @@ public class Tool
             Context c1 = c;
             for (int i = 0; i < subs.length; i++) {
               Subst sub = subs[i];
-              c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, false, coverage ? sub.getCM() : cm));
+              c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, false, coverage ? sub.getCM() : cm, toolId));
             }
             this.getInitStates(init1.getBody(), acts, c1, ps, states, cm);
             return;
@@ -400,7 +389,7 @@ public class Tool
             Context c1 = c;
             for (int i = 0; i < subs.length; i++) {
               Subst sub = subs[i];
-              c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, false, cm));
+              c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, false, cm, toolId));
             }
             this.getInitStates(init1.getBody(), acts, c1, ps, states, cm);
             return;
@@ -417,17 +406,6 @@ public class Tool
             Assert.fail("The init state relation is not a boolean expression.\n" + init);
           }
         }
-    } catch (TLCRuntimeException | EvalException e) {
-	    if (this.callStack != null) {
-			// Freeze the callStack to ignore subsequent pop operations. This is
-			// necessary to ignore the callStack#pop calls in the finally blocks when the
-			// Java call stack gets unwounded.
-			this.callStack.freeze();
-	    }
-	    throw e;
-    } finally {
-    	if (this.callStack != null) { this.callStack.pop(); }
-    }
   }
 
   private final void getInitStates(ActionItemList acts, TLCState ps, IStateFunctor states, CostModel cm) {
@@ -474,11 +452,9 @@ public class Tool
 		this.getInitStates(acts.carPred(), acts1, acts.carContext(), ps, states, acts.cm);
 	  }
 
-  private final void getInitStatesAppl(OpApplNode init, ActionItemList acts,
+  protected void getInitStatesAppl(OpApplNode init, ActionItemList acts,
                                        Context c, TLCState ps, IStateFunctor states, CostModel cm) {
-    if (this.callStack != null) this.callStack.push(init);
     if (coverage) {cm = cm.get(init);}
-    try {
         ExprOrOpArgNode[] args = init.getArgs();
         int alen = args.length;
         SymbolNode opNode = init.getOperator();
@@ -495,7 +471,7 @@ public class Tool
             opcode = BuiltInOPs.getOpCode(opDef.getName());
             if (opcode == 0) {
               // Context c1 = this.getOpContext(opDef, args, c, false);
-              Context c1 = this.getOpContext(opDef, args, c, true, cm);
+              Context c1 = this.getOpContext(opDef, args, c, true, cm, toolId);
               this.getInitStates(opDef.getBody(), acts, c1, ps, states, cm);
               return;
             }
@@ -667,7 +643,7 @@ public class Tool
           }
         case OPCODE_eq:
           {
-            SymbolNode var = this.getVar(args[0], c, false);
+            SymbolNode var = this.getVar(args[0], c, false, toolId);
             if (var == null || var.getName().getVarLoc() < 0) {
               Value bval = this.eval(init, c, ps, TLCState.Empty, EvalControl.Init, cm);
               if (!((BoolValue)bval).val) {
@@ -695,7 +671,7 @@ public class Tool
           }
         case OPCODE_in:
           {
-            SymbolNode var = this.getVar(args[0], c, false);
+            SymbolNode var = this.getVar(args[0], c, false, toolId);
             if (var == null || var.getName().getVarLoc() < 0) {
               Value bval = this.eval(init, c, ps, TLCState.Empty, EvalControl.Init, cm);
               if (!((BoolValue)bval).val) {
@@ -765,80 +741,63 @@ public class Tool
             return;
           }
         }
-    } catch (TLCRuntimeException | EvalException e) {
-    	// see tlc2.tool.Tool.getInitStates(SemanticNode, ActionItemList, Context, TLCState, IStateFunctor)
-    	if (this.callStack != null) { this.callStack.freeze(); }
-	    throw e;
-    } finally {
-    	if (this.callStack != null) { this.callStack.pop(); }
-    }
   }
-
+  
   /**
    * This method returns the set of next states when taking the action
    * in the given state.
    */
   @Override
-public final StateVec getNextStates(Action action, TLCState state) {
+  public final StateVec getNextStates(Action action, TLCState state) {
     ActionItemList acts = ActionItemList.Empty;
     TLCState s1 = TLCState.Empty.createEmpty();
     StateVec nss = new StateVec(0);
-    this.getNextStates(action.pred, acts, action.con, state, s1, nss, action.cm);
+    this.getNextStates(action, action.pred, acts, action.con, state, s1, nss, action.cm);
     if (coverage) { action.cm.incInvocations(nss.size()); }
     return nss;
   }
+  
+  @Override
+  public final boolean getNextStates(final INextStateFunctor functor, final TLCState state) {
+	  for (int i = 0; i < actions.length; i++) {
+			final Action action = actions[i];
+			this.getNextStates(action, action.pred, ActionItemList.Empty, action.con, state, TLCState.Empty.createEmpty(),
+					functor, action.cm);
+		}
+		return false;
+  }
 
-  private final TLCState getNextStates(SemanticNode pred, ActionItemList acts, Context c,
-                                       TLCState s0, TLCState s1, StateVec nss, CostModel cm) {
-	    if (this.callStack != null) {
-	    	return getNextStatesWithCallStack(pred, acts, c, s0, s1, nss, cm);
-	    } else {
-	    	return getNextStatesImpl(pred, acts, c, s0, s1, nss, cm);
-	    }
-  }
+  protected abstract TLCState getNextStates(final Action action, SemanticNode pred, ActionItemList acts, Context c,
+                                       TLCState s0, TLCState s1, INextStateFunctor nss, CostModel cm);
   
-  private final TLCState getNextStatesWithCallStack(SemanticNode pred, ActionItemList acts, Context c,
-              TLCState s0, TLCState s1, StateVec nss, final CostModel cm) {
-	    this.callStack.push(pred);
-	    try {
-	    	return getNextStatesImpl(pred, acts, c, s0, s1, nss, cm);
-	    } catch (TLCRuntimeException | EvalException e) {
-	    	// see tlc2.tool.Tool.getInitStates(SemanticNode, ActionItemList, Context, TLCState, IStateFunctor)
-	    	this.callStack.freeze();
-		    throw e;
-	    } finally {
-	    	this.callStack.pop();
-	    }
-  }
-  
-  private final TLCState getNextStatesImpl(SemanticNode pred, ActionItemList acts, Context c,
-              TLCState s0, TLCState s1, StateVec nss, CostModel cm) {
+  protected final TLCState getNextStatesImpl(final Action action, SemanticNode pred, ActionItemList acts, Context c,
+              TLCState s0, TLCState s1, INextStateFunctor nss, CostModel cm) {
         switch (pred.getKind()) {
         case OpApplKind:
           {
             OpApplNode pred1 = (OpApplNode)pred;
             if (coverage) {cm = cm.get(pred);}
-            return this.getNextStatesAppl(pred1, acts, c, s0, s1, nss, cm);
+            return this.getNextStatesAppl(action, pred1, acts, c, s0, s1, nss, cm);
           }
         case LetInKind:
           {
             LetInNode pred1 = (LetInNode)pred;
-            return this.getNextStates(pred1.getBody(), acts, c, s0, s1, nss, cm);
+            return this.getNextStates(action, pred1.getBody(), acts, c, s0, s1, nss, cm);
           }
         case SubstInKind:
           {
-            return getNextStatesImplSubstInKind((SubstInNode) pred, acts, c, s0, s1, nss, cm);
+            return getNextStatesImplSubstInKind(action, (SubstInNode) pred, acts, c, s0, s1, nss, cm);
           }
         // Added by LL on 13 Nov 2009 to handle theorem and assumption names.
         case APSubstInKind:
           {
-            return getNextStatesImplApSubstInKind((APSubstInNode) pred, acts, c, s0, s1, nss, cm);
+            return getNextStatesImplApSubstInKind(action, (APSubstInNode) pred, acts, c, s0, s1, nss, cm);
           }
         // LabelKind class added by LL on 13 Jun 2007
         case LabelKind:
           {
             LabelNode pred1 = (LabelNode)pred;
-            return this.getNextStates(pred1.getBody(), acts, c, s0, s1, nss, cm);
+            return this.getNextStates(action, pred1.getBody(), acts, c, s0, s1, nss, cm);
           }
         default:
           {
@@ -848,44 +807,48 @@ public final StateVec getNextStates(Action action, TLCState state) {
     	return s1;
   }
 
-  private final TLCState getNextStatesImplSubstInKind(SubstInNode pred1, ActionItemList acts, Context c, TLCState s0, TLCState s1, StateVec nss, final CostModel cm) {
+  @ExpectInlined
+  private final TLCState getNextStatesImplSubstInKind(final Action action, SubstInNode pred1, ActionItemList acts, Context c, TLCState s0, TLCState s1, INextStateFunctor nss, final CostModel cm) {
   	Subst[] subs = pred1.getSubsts();
   	int slen = subs.length;
   	Context c1 = c;
   	for (int i = 0; i < slen; i++) {
   	  Subst sub = subs[i];
-  	  c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, false, coverage ? sub.getCM() : cm));
+  	  c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, false, coverage ? sub.getCM() : cm, toolId));
   	}
-  	return this.getNextStates(pred1.getBody(), acts, c1, s0, s1, nss, cm);
+  	return this.getNextStates(action, pred1.getBody(), acts, c1, s0, s1, nss, cm);
   }
   
-  private final TLCState getNextStatesImplApSubstInKind(APSubstInNode pred1, ActionItemList acts, Context c, TLCState s0, TLCState s1, StateVec nss, final CostModel cm) {
+  @ExpectInlined
+  private final TLCState getNextStatesImplApSubstInKind(final Action action, APSubstInNode pred1, ActionItemList acts, Context c, TLCState s0, TLCState s1, INextStateFunctor nss, final CostModel cm) {
   	Subst[] subs = pred1.getSubsts();
   	int slen = subs.length;
   	Context c1 = c;
   	for (int i = 0; i < slen; i++) {
   	  Subst sub = subs[i];
-  	  c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, false, cm));
+  	  c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, false, cm, toolId));
   	}
-  	return this.getNextStates(pred1.getBody(), acts, c1, s0, s1, nss, cm);
+  	return this.getNextStates(action, pred1.getBody(), acts, c1, s0, s1, nss, cm);
   }
   
-  private final TLCState getNextStates(ActionItemList acts, final TLCState s0, final TLCState s1,
-          final StateVec nss, CostModel cm) {
-	  final TLCState copy = getNextStates0(acts, s0, s1, nss, cm);
+  @ExpectInlined
+  private final TLCState getNextStates(final Action action, ActionItemList acts, final TLCState s0, final TLCState s1,
+          final INextStateFunctor nss, CostModel cm) {
+	  final TLCState copy = getNextStates0(action, acts, s0, s1, nss, cm);
 	  if (coverage && copy != s1) {
 		  cm.incInvocations();
 	  }
 	  return copy;
   }
 
-  private final TLCState getNextStates0(ActionItemList acts, final TLCState s0, final TLCState s1,
-                                       final StateVec nss, CostModel cm) {
+  @ExpectInlined
+  private final TLCState getNextStates0(final Action action, ActionItemList acts, final TLCState s0, final TLCState s1,
+                                       final INextStateFunctor nss, CostModel cm) {
     if (acts.isEmpty()) {
-      nss.addElement(s1);
+      nss.addElement(s0, action, s1);
       return s1.copy();
     } else if (s1.allAssigned()) {
-    	return getNextStatesAllAssigned(acts, s0, s1, nss, cm);
+    	return getNextStatesAllAssigned(action, acts, s0, s1, nss, cm);
     }
 
     final int kind = acts.carKind();
@@ -894,30 +857,30 @@ public final StateVec getNextStates(Action action, TLCState state) {
     ActionItemList acts1 = acts.cdr();
     cm = acts.cm;
     if (kind > 0) {
-      return this.getNextStates(pred, acts1, c, s0, s1, nss, cm);
+      return this.getNextStates(action, pred, acts1, c, s0, s1, nss, cm);
     }
     else if (kind == -1) {
-      return this.getNextStates(pred, acts1, c, s0, s1, nss, cm);
+      return this.getNextStates(action, pred, acts1, c, s0, s1, nss, cm);
     }
     else if (kind == -2) {
-      return this.processUnchanged(pred, acts1, c, s0, s1, nss, cm);
+      return this.processUnchanged(action, pred, acts1, c, s0, s1, nss, cm);
     }
     else {
       IValue v1 = this.eval(pred, c, s0, cm);
       IValue v2 = this.eval(pred, c, s1, cm);
       if (!v1.equals(v2)) {
     	  if (coverage) {
-    		  return this.getNextStates(acts1, s0, s1, nss, cm);
+    		  return this.getNextStates(action, acts1, s0, s1, nss, cm);
     	  } else {
-    		  return this.getNextStates0(acts1, s0, s1, nss, cm);
+    		  return this.getNextStates0(action, acts1, s0, s1, nss, cm);
     	  }
       }
     }
     return s1;
   }
   
-  private final TLCState getNextStatesAllAssigned(ActionItemList acts, final TLCState s0, final TLCState s1,
-		  								final StateVec nss, final CostModel cm) {
+  private final TLCState getNextStatesAllAssigned(final Action action, ActionItemList acts, final TLCState s0, final TLCState s1,
+		  								final INextStateFunctor nss, final CostModel cm) {
 	  int kind = acts.carKind();
 	  SemanticNode pred = acts.carPred();
 	  Context c = acts.carContext();
@@ -935,7 +898,7 @@ public final StateVec getNextStates(Action action, TLCState state) {
 			  }
 		  } else if (kind == -2) {
 			  // Identical to default handling below (line 876). Ignored during this optimization.
-			  return this.processUnchanged(pred, acts.cdr(), c, s0, s1, nss, cm2);
+			  return this.processUnchanged(action, pred, acts.cdr(), c, s0, s1, nss, cm2);
 		  } else {
 			  final IValue v1 = this.eval(pred, c, s0, cm2);
 			  final IValue v2 = this.eval(pred, c, s1, cm2);
@@ -950,40 +913,22 @@ public final StateVec getNextStates(Action action, TLCState state) {
 		  kind = acts.carKind();
           cm2 = acts.cm;
 	  }
-	  nss.addElement(s1);
+	  nss.addElement(s0, action, s1);
 	  return s1.copy();
   }
 
   /* getNextStatesAppl */
 
-  private final TLCState getNextStatesAppl(OpApplNode pred, ActionItemList acts, Context c,
-          TLCState s0, TLCState s1, StateVec nss, final CostModel cm) {
-	  if (this.callStack != null) {
-		  return getNextStatesApplWithCallStack(pred, acts, c, s0, s1, nss, cm);
-	  } else {
-	      return getNextStatesApplImpl(pred, acts, c, s0, s1, nss, cm);
-	  }
-  }
+  @ExpectInlined
+  protected abstract TLCState getNextStatesAppl(final Action action, OpApplNode pred, ActionItemList acts, Context c,
+          TLCState s0, TLCState s1, INextStateFunctor nss, final CostModel cm);
   
-  private final TLCState getNextStatesApplWithCallStack(OpApplNode pred, ActionItemList acts, Context c,
-          TLCState s0, TLCState s1, StateVec nss, final CostModel cm) {
-	    this.callStack.push(pred);
-	    try {
-	    	return getNextStatesApplImpl(pred, acts, c, s0, s1, nss, cm);
-	    } catch (TLCRuntimeException | EvalException e) {
-	    	// see tlc2.tool.Tool.getInitStates(SemanticNode, ActionItemList, Context, TLCState, IStateFunctor)
-	    	this.callStack.freeze();
-	    	throw e;
-	    } finally {
-	    	this.callStack.pop();
-	    }
-  }
+  protected final TLCState getNextStatesApplImpl(final Action action, final OpApplNode pred, final ActionItemList acts, final Context c,
+                                           final TLCState s0, final TLCState s1, final INextStateFunctor nss, final CostModel cm) {
+        final ExprOrOpArgNode[] args = pred.getArgs();
+        final int alen = args.length;
+        final SymbolNode opNode = pred.getOperator();
 
-  private final TLCState getNextStatesApplImpl(OpApplNode pred, ActionItemList acts, Context c,
-                                           TLCState s0, TLCState s1, StateVec nss, CostModel cm) {
-        ExprOrOpArgNode[] args = pred.getArgs();
-        int alen = args.length;
-        SymbolNode opNode = pred.getOperator();
         int opcode = BuiltInOPs.getOpCode(opNode.getName());
 
         if (opcode == 0) {
@@ -993,13 +938,11 @@ public final StateVec getNextStates(Action action, TLCState state) {
           Object val = this.lookup(opNode, c, s0, false);
 
           if (val instanceof OpDefNode) {
-            OpDefNode opDef = (OpDefNode)val;
-            opcode = BuiltInOPs.getOpCode(opDef.getName());
-            if (opcode == 0) {
-              // Context c1 = this.getOpContext(opDef, args, c, false);
-              Context c1 = this.getOpContext(opDef, args, c, true, cm);
-              return this.getNextStates(opDef.getBody(), acts, c1, s0, s1, nss, cm);
-            }
+				final OpDefNode opDef = (OpDefNode) val;
+				opcode = BuiltInOPs.getOpCode(opDef.getName());
+				if (opcode == 0) {
+					return this.getNextStates(action, opDef.getBody(), acts, this.getOpContext(opDef, args, c, true, cm, toolId), s0, s1, nss, cm);
+	            }
           }
 
           // Added by LL 13 Nov 2009 to fix Yuan's fix
@@ -1008,326 +951,331 @@ public final StateVec getNextStates(Action action, TLCState state) {
            * imported with parameterized instantiation.                         *
            *********************************************************************/
           if (val instanceof ThmOrAssumpDefNode) {
-            ThmOrAssumpDefNode opDef = (ThmOrAssumpDefNode)val;
-            Context c1 = this.getOpContext(opDef, args, c, true);
-            return this.getNextStates(opDef.getBody(), acts, c1, s0, s1, nss, cm);
+            final ThmOrAssumpDefNode opDef = (ThmOrAssumpDefNode)val;
+            return this.getNextStates(action, opDef.getBody(), acts, this.getOpContext(opDef, args, c, true), s0, s1, nss, cm);
           }
 
           if (val instanceof LazyValue) {
-            LazyValue lv = (LazyValue)val;
+            final LazyValue lv = (LazyValue)val;
             if (lv.getValue() == null || lv.isUncachable()) {
-              return this.getNextStates(lv.expr, acts, lv.con, s0, s1, nss, lv.cm);
+              return this.getNextStates(action, lv.expr, acts, lv.con, s0, s1, nss, lv.cm);
             }
             val = lv.getValue();
           }
 
-          Object bval = val;
-          if (alen == 0) {
-            if (val instanceof MethodValue) {
-              bval = ((MethodValue)val).apply(EmptyArgs, EvalControl.Clear);
-            }
-          }
-          else {
-            if (val instanceof OpValue) {
-           	  bval = ((OpValue) val).eval(this, args, c, s0, s1, EvalControl.Clear, cm);
-            }
-          }
+          //TODO If all eval/apply in getNextStatesApplEvalAppl would be side-effect free (ie. not mutate args, c, s0,...), 
+          // this call could be moved into the if(opcode==0) branch below. However, opcode!=0 will only be the case if
+          // OpDefNode above has been substed with a built-in operator. In other words, a user defines an operator Op1,
+          // and re-defines Op1 with a TLA+ built-in one in a TLC model (not assumed to be common). => No point in trying
+          // to move this call into if(opcode==0) because this will be the case most of the time anyway.
+          final Object bval = getNextStatesApplEvalAppl(alen, args, c, s0, s1, cm, val);
 
+	      // opcode == 0 is a user-defined operator.
           if (opcode == 0)
           {
-            if (!(bval instanceof BoolValue))
-            {
-              Assert.fail(EC.TLC_EXPECTED_EXPRESSION_IN_COMPUTING, new String[] { "next states", "boolean",
-                      bval.toString(), pred.toString() });
-            }
-            if (((BoolValue) bval).val)
-            {
-          	  if (coverage) {
-        		  return this.getNextStates(acts, s0, s1, nss, cm);
-          	  } else {
-          		  return this.getNextStates0(acts, s0, s1, nss, cm);
-          	  }
-            }
-            return s1;
+            return getNextStatesApplUsrDefOp(action, pred, acts, s0, s1, nss, cm, bval);
           }
         }
 
-        TLCState resState = s1;
-        switch (opcode) {
-        case OPCODE_cl:     // ConjList
-        case OPCODE_land:
-          {
-            ActionItemList acts1 = acts;
-            for (int i = alen - 1; i > 0; i--) {
-              acts1 = (ActionItemList) acts1.cons(args[i], c, cm, i);
-            }
-            return this.getNextStates(args[0], acts1, c, s0, s1, nss, cm);
-          }
-        case OPCODE_dl:     // DisjList
-        case OPCODE_lor:
-          {
-            for (int i = 0; i < alen; i++) {
-              resState = this.getNextStates(args[i], acts, c, s0, resState, nss, cm);
-            }
-            return resState;
-          }
-        case OPCODE_be:     // BoundedExists
-          {
-            SemanticNode body = args[0];
-            ContextEnumerator Enum = this.contexts(pred, c, s0, s1, EvalControl.Clear, cm);
-            Context c1;
-            while ((c1 = Enum.nextElement()) != null) {
-              resState = this.getNextStates(body, acts, c1, s0, resState, nss, cm);
-            }
-            return resState;
-          }
-        case OPCODE_bf:     // BoundedForall
-          {
-            SemanticNode body = args[0];
-            ContextEnumerator Enum = this.contexts(pred, c, s0, s1, EvalControl.Clear, cm);
-            Context c1 = Enum.nextElement();
-            if (c1 == null) {
-              resState = this.getNextStates(acts, s0, s1, nss, cm);
-            }
-            else {
-              ActionItemList acts1 = acts;
-              Context c2;
-              while ((c2 = Enum.nextElement()) != null) {
-                acts1 = (ActionItemList) acts1.cons(body, c2, cm, IActionItemList.PRED);
-              }
-              resState = this.getNextStates(body, acts1, c1, s0, s1, nss, cm);
-            }
-            return resState;
-          }
-        case OPCODE_fa:     // FcnApply
-          {
-            Value fval = this.eval(args[0], c, s0, s1, EvalControl.KeepLazy, cm);
-            if (fval instanceof FcnLambdaValue) {
-              FcnLambdaValue fcn = (FcnLambdaValue)fval;
-              if (fcn.fcnRcd == null) {
-                Context c1 = this.getFcnContext(fcn, args, c, s0, s1, EvalControl.Clear, cm);
-                return this.getNextStates(fcn.body, acts, c1, s0, s1, nss, cm);
-              }
-              fval = fcn.fcnRcd;
-            }
-            if (!(fval instanceof Applicable)) {
-              Assert.fail("In computing next states, a non-function (" +
-                          fval.getKindString() + ") was applied as a function.\n" + pred);
-            }
-            Applicable fcn = (Applicable)fval;
-            Value argVal = this.eval(args[1], c, s0, s1, EvalControl.Clear, cm);
-            Value bval = fcn.apply(argVal, EvalControl.Clear);
-            if (!(bval instanceof BoolValue)) {
-              Assert.fail(EC.TLC_EXPECTED_EXPRESSION_IN_COMPUTING2, new String[] { "next states", "boolean",
-                      pred.toString() });
-            }
-            if (((BoolValue)bval).val) {
-              return this.getNextStates(acts, s0, s1, nss, cm);
-            }
-            return resState;
-          }
-        case OPCODE_aa:     // AngleAct <A>_e
-          {
-            ActionItemList acts1 = (ActionItemList) acts.cons(args[1], c, cm, IActionItemList.CHANGED);
-            return this.getNextStates(args[0], acts1, c, s0, s1, nss, cm);
-          }
-        case OPCODE_sa:     // [A]_e
-          {
-            /* The following two lines of code did not work, and were changed by
-             * YuanYu to mimic the way \/ works.  Change made
-             *  11 Mar 2009, with LL sitting next to him.
-             */
-              //    this.getNextStates(args[0], acts, c, s0, s1, nss);
-              //    return this.processUnchanged(args[1], acts, c, s0, s1, nss);
-            resState = this.getNextStates(args[0], acts, c, s0, resState, nss, cm);
-            return this.processUnchanged(args[1], acts, c, s0, resState, nss, cm);
-          }
-        case OPCODE_ite:    // IfThenElse
-          {
-            Value guard = this.eval(args[0], c, s0, s1, EvalControl.Clear, cm);
-            if (!(guard instanceof BoolValue)) {
-              Assert.fail("In computing next states, a non-boolean expression (" +
-                          guard.getKindString() + ") was used as the condition of" +
-                          " an IF." + pred);
-            }
-            if (((BoolValue)guard).val) {
-              return this.getNextStates(args[1], acts, c, s0, s1, nss, cm);
-            }
-            else {
-              return this.getNextStates(args[2], acts, c, s0, s1, nss, cm);
-            }
-          }
-        case OPCODE_case:   // Case
-          {
-            SemanticNode other = null;
-            for (int i = 0; i < alen; i++) {
-              OpApplNode pair = (OpApplNode)args[i];
-              ExprOrOpArgNode[] pairArgs = pair.getArgs();
-              if (pairArgs[0] == null) {
-                other = pairArgs[1];
-              }
-              else {
-                Value bval = this.eval(pairArgs[0], c, s0, s1, EvalControl.Clear, coverage ? cm.get(args[i]) : cm);
-                if (!(bval instanceof BoolValue)) {
-                  Assert.fail("In computing next states, a non-boolean expression (" +
-                              bval.getKindString() + ") was used as a guard condition" +
-                              " of a CASE.\n" + pairArgs[1]);
-                }
-                if (((BoolValue)bval).val) {
-                  return this.getNextStates(pairArgs[1], acts, c, s0, s1, nss, coverage ? cm.get(args[i]) : cm);
-                }
-              }
-            }
-            if (other == null) {
-              Assert.fail("In computing next states, TLC encountered a CASE with no" +
-                          " conditions true.\n" + pred);
-            }
-            return this.getNextStates(other, acts, c, s0, s1, nss, coverage ? cm.get(args[alen - 1]) : cm);
-          }
-        case OPCODE_eq:
-          {
-            SymbolNode var = this.getPrimedVar(args[0], c, false);
-            // Assert.check(var.getName().getVarLoc() >= 0);
-            if (var == null) {
-              Value bval = this.eval(pred, c, s0, s1, EvalControl.Clear, cm);
-              if (!((BoolValue)bval).val) {
-                return resState;
-              }
-            }
-            else {
-              UniqueString varName = var.getName();
-              IValue lval = s1.lookup(varName);
-              Value rval = this.eval(args[1], c, s0, s1, EvalControl.Clear, cm);
-              if (lval == null) {
-                resState.bind(varName, rval);
-                resState = this.getNextStates(acts, s0, resState, nss, cm);
-                resState.unbind(varName);
-                return resState;
-              }
-              else if (!lval.equals(rval)) {
-                return resState;
-              }
-            }
-            return this.getNextStates(acts, s0, s1, nss, cm);
-          }
-        case OPCODE_in:
-          {
-            SymbolNode var = this.getPrimedVar(args[0], c, false);
-            // Assert.check(var.getName().getVarLoc() >= 0);
-            if (var == null) {
-              Value bval = this.eval(pred, c, s0, s1, EvalControl.Clear, cm);
-              if (!((BoolValue)bval).val) {
-                return resState;
-              }
-            }
-            else {
-              UniqueString varName = var.getName();
-              Value lval = (Value) s1.lookup(varName);
-              Value rval = this.eval(args[1], c, s0, s1, EvalControl.Clear, cm);
-              if (lval == null) {
-                if (!(rval instanceof Enumerable)) {
-                  Assert.fail("In computing next states, the right side of \\IN" +
-                              " is not enumerable.\n" + pred);
-                }
-                ValueEnumeration Enum = ((Enumerable)rval).elements();
-                Value elem;
-                while ((elem = Enum.nextElement()) != null) {
-                  resState.bind(varName, elem);
-                  resState = this.getNextStates(acts, s0, resState, nss, cm);
-                  resState.unbind(varName);
-                }
-                return resState;
-              }
-              else if (!rval.member(lval)) {
-                return resState;
-              }
-            }
-            return this.getNextStates(acts, s0, s1, nss, cm);
-          }
-        case OPCODE_implies:
-          {
-            Value bval = this.eval(args[0], c, s0, s1, EvalControl.Clear, cm);
-            if (!(bval instanceof BoolValue)) {
-              Assert.fail("In computing next states of a predicate of the form" +
-                          " P => Q, P was\n" + bval.getKindString() + ".\n" + pred);
-            }
-            if (((BoolValue)bval).val) {
-              return this.getNextStates(args[1], acts, c, s0, s1, nss, cm);
-            }
-            else {
-              return this.getNextStates(acts, s0, s1, nss, cm);
-            }
-          }
-        case OPCODE_unchanged:
-          {
-            return this.processUnchanged(args[0], acts, c, s0, s1, nss, cm);
-          }
-        case OPCODE_cdot:
-          {
-            Assert.fail("The current version of TLC does not support action composition.");
-            /***
-            TLCState s01 = TLCStateFun.Empty;
-            StateVec iss = new StateVec(0);
-            this.getNextStates(args[0], ActionItemList.Empty, c, s0, s01, iss);
-            int sz = iss.size();
-            for (int i = 0; i < sz; i++) {
-              s01 = iss.elementAt(i);
-              this.getNextStates(args[1], acts, c, s01, s1, nss);
-            }
-            ***/
-            return s1;
-          }
-        // The following case added by LL on 13 Nov 2009 to handle subexpression names.
-        case OPCODE_nop:
-        {
-            return this.getNextStates(args[0], acts, c, s0, s1, nss, cm);
+        return getNextStatesApplSwitch(action, pred, acts, c, s0, s1, nss, cm, args, alen, opcode);
+  }
+  
+  private final Object getNextStatesApplEvalAppl(final int alen, final ExprOrOpArgNode[] args, final Context c,
+			final TLCState s0, final TLCState s1, final CostModel cm, final Object val) {
+	      if (alen == 0) {
+        if (val instanceof MethodValue) {
+        	return ((MethodValue)val).apply(EmptyArgs, EvalControl.Clear);
+        } else if (val instanceof EvaluatingValue) {
+        	return ((EvaluatingValue)val).eval(this, args, c, s0, s1, EvalControl.Clear, cm);
+       }
+      }
+      else {
+        if (val instanceof OpValue) { // EvaluatingValue sub-class of OpValue!
+       	  return ((OpValue) val).eval(this, args, c, s0, s1, EvalControl.Clear, cm);
         }
-        default:
-          {
-            // We handle all the other builtin operators here.
-            Value bval = this.eval(pred, c, s0, s1, EvalControl.Clear, cm);
-            if (!(bval instanceof BoolValue)) {
-              Assert.fail(EC.TLC_EXPECTED_EXPRESSION_IN_COMPUTING, new String[] { "next states", "boolean",
-                      bval.toString(), pred.toString() });
-            }
-            if (((BoolValue)bval).val) {
-              resState = this.getNextStates(acts, s0, s1, nss, cm);
-            }
-            return resState;
-          }
-        }
+      }
+      return val;
+  }
+
+  private final TLCState getNextStatesApplUsrDefOp(final Action action, final OpApplNode pred, final ActionItemList acts, final TLCState s0,
+		final TLCState s1, final INextStateFunctor nss, final CostModel cm, final Object bval) {
+	if (!(bval instanceof BoolValue))
+	{
+	  Assert.fail(EC.TLC_EXPECTED_EXPRESSION_IN_COMPUTING, new String[] { "next states", "boolean",
+	          bval.toString(), pred.toString() });
+	}
+	if (((BoolValue) bval).val)
+	{
+	  if (coverage) {
+		  return this.getNextStates(action, acts, s0, s1, nss, cm);
+	  } else {
+		  return this.getNextStates0(action, acts, s0, s1, nss, cm);
+	  }
+	}
+	return s1;
+  }
+
+  private final TLCState getNextStatesApplSwitch(final Action action, final OpApplNode pred, final ActionItemList acts, final Context c, final TLCState s0,
+		final TLCState s1, final INextStateFunctor nss, final CostModel cm, final ExprOrOpArgNode[] args, final int alen, final int opcode) {
+	TLCState resState = s1;
+	switch (opcode) {
+	case OPCODE_cl:     // ConjList
+	case OPCODE_land:
+	  {
+	    ActionItemList acts1 = acts;
+	    for (int i = alen - 1; i > 0; i--) {
+	      acts1 = (ActionItemList) acts1.cons(args[i], c, cm, i);
+	    }
+	    return this.getNextStates(action, args[0], acts1, c, s0, s1, nss, cm);
+	  }
+	case OPCODE_dl:     // DisjList
+	case OPCODE_lor:
+	  {
+	    for (int i = 0; i < alen; i++) {
+	      resState = this.getNextStates(action, args[i], acts, c, s0, resState, nss, cm);
+	    }
+	    return resState;
+	  }
+	case OPCODE_be:     // BoundedExists
+	  {
+	    SemanticNode body = args[0];
+	    ContextEnumerator Enum = this.contexts(pred, c, s0, s1, EvalControl.Clear, cm);
+	    Context c1;
+	    while ((c1 = Enum.nextElement()) != null) {
+	      resState = this.getNextStates(action, body, acts, c1, s0, resState, nss, cm);
+	    }
+	    return resState;
+	  }
+	case OPCODE_bf:     // BoundedForall
+	  {
+	    SemanticNode body = args[0];
+	    ContextEnumerator Enum = this.contexts(pred, c, s0, s1, EvalControl.Clear, cm);
+	    Context c1 = Enum.nextElement();
+	    if (c1 == null) {
+	      resState = this.getNextStates(action, acts, s0, s1, nss, cm);
+	    }
+	    else {
+	      ActionItemList acts1 = acts;
+	      Context c2;
+	      while ((c2 = Enum.nextElement()) != null) {
+	        acts1 = (ActionItemList) acts1.cons(body, c2, cm, IActionItemList.PRED);
+	      }
+	      resState = this.getNextStates(action, body, acts1, c1, s0, s1, nss, cm);
+	    }
+	    return resState;
+	  }
+	case OPCODE_fa:     // FcnApply
+	  {
+	    Value fval = this.eval(args[0], c, s0, s1, EvalControl.KeepLazy, cm);
+	    if (fval instanceof FcnLambdaValue) {
+	      FcnLambdaValue fcn = (FcnLambdaValue)fval;
+	      if (fcn.fcnRcd == null) {
+	        Context c1 = this.getFcnContext(fcn, args, c, s0, s1, EvalControl.Clear, cm);
+	        return this.getNextStates(action, fcn.body, acts, c1, s0, s1, nss, fcn.cm);
+	      }
+	      fval = fcn.fcnRcd;
+	    }
+	    if (!(fval instanceof Applicable)) {
+	      Assert.fail("In computing next states, a non-function (" +
+	                  fval.getKindString() + ") was applied as a function.\n" + pred);
+	    }
+	    Applicable fcn = (Applicable)fval;
+	    Value argVal = this.eval(args[1], c, s0, s1, EvalControl.Clear, cm);
+	    Value bval = fcn.apply(argVal, EvalControl.Clear);
+	    if (!(bval instanceof BoolValue)) {
+	      Assert.fail(EC.TLC_EXPECTED_EXPRESSION_IN_COMPUTING2, new String[] { "next states", "boolean",
+	              pred.toString() });
+	    }
+	    if (((BoolValue)bval).val) {
+	      return this.getNextStates(action, acts, s0, s1, nss, cm);
+	    }
+	    return resState;
+	  }
+	case OPCODE_aa:     // AngleAct <A>_e
+	  {
+	    ActionItemList acts1 = (ActionItemList) acts.cons(args[1], c, cm, IActionItemList.CHANGED);
+	    return this.getNextStates(action, args[0], acts1, c, s0, s1, nss, cm);
+	  }
+	case OPCODE_sa:     // [A]_e
+	  {
+	    /* The following two lines of code did not work, and were changed by
+	     * YuanYu to mimic the way \/ works.  Change made
+	     *  11 Mar 2009, with LL sitting next to him.
+	     */
+	      //    this.getNextStates(action, args[0], acts, c, s0, s1, nss);
+	      //    return this.processUnchanged(args[1], acts, c, s0, s1, nss);
+	    resState = this.getNextStates(action, args[0], acts, c, s0, resState, nss, cm);
+	    return this.processUnchanged(action, args[1], acts, c, s0, resState, nss, cm);
+	  }
+	case OPCODE_ite:    // IfThenElse
+	  {
+	    Value guard = this.eval(args[0], c, s0, s1, EvalControl.Clear, cm);
+	    if (!(guard instanceof BoolValue)) {
+	      Assert.fail("In computing next states, a non-boolean expression (" +
+	                  guard.getKindString() + ") was used as the condition of" +
+	                  " an IF." + pred);
+	    }
+	    if (((BoolValue)guard).val) {
+	      return this.getNextStates(action, args[1], acts, c, s0, s1, nss, cm);
+	    }
+	    else {
+	      return this.getNextStates(action, args[2], acts, c, s0, s1, nss, cm);
+	    }
+	  }
+	case OPCODE_case:   // Case
+	  {
+	    SemanticNode other = null;
+	    for (int i = 0; i < alen; i++) {
+	      OpApplNode pair = (OpApplNode)args[i];
+	      ExprOrOpArgNode[] pairArgs = pair.getArgs();
+	      if (pairArgs[0] == null) {
+	        other = pairArgs[1];
+	      }
+	      else {
+	        Value bval = this.eval(pairArgs[0], c, s0, s1, EvalControl.Clear, coverage ? cm.get(args[i]) : cm);
+	        if (!(bval instanceof BoolValue)) {
+	          Assert.fail("In computing next states, a non-boolean expression (" +
+	                      bval.getKindString() + ") was used as a guard condition" +
+	                      " of a CASE.\n" + pairArgs[1]);
+	        }
+	        if (((BoolValue)bval).val) {
+	          return this.getNextStates(action, pairArgs[1], acts, c, s0, s1, nss, coverage ? cm.get(args[i]) : cm);
+	        }
+	      }
+	    }
+	    if (other == null) {
+	      Assert.fail("In computing next states, TLC encountered a CASE with no" +
+	                  " conditions true.\n" + pred);
+	    }
+	    return this.getNextStates(action, other, acts, c, s0, s1, nss, coverage ? cm.get(args[alen - 1]) : cm);
+	  }
+	case OPCODE_eq:
+	  {
+	    SymbolNode var = this.getPrimedVar(args[0], c, false);
+	    // Assert.check(var.getName().getVarLoc() >= 0);
+	    if (var == null) {
+	      Value bval = this.eval(pred, c, s0, s1, EvalControl.Clear, cm);
+	      if (!((BoolValue)bval).val) {
+	        return resState;
+	      }
+	    }
+	    else {
+	      UniqueString varName = var.getName();
+	      IValue lval = s1.lookup(varName);
+	      Value rval = this.eval(args[1], c, s0, s1, EvalControl.Clear, cm);
+	      if (lval == null) {
+	        resState.bind(varName, rval);
+	        resState = this.getNextStates(action, acts, s0, resState, nss, cm);
+	        resState.unbind(varName);
+	        return resState;
+	      }
+	      else if (!lval.equals(rval)) {
+	        return resState;
+	      }
+	    }
+	    return this.getNextStates(action, acts, s0, s1, nss, cm);
+	  }
+	case OPCODE_in:
+	  {
+	    SymbolNode var = this.getPrimedVar(args[0], c, false);
+	    // Assert.check(var.getName().getVarLoc() >= 0);
+	    if (var == null) {
+	      Value bval = this.eval(pred, c, s0, s1, EvalControl.Clear, cm);
+	      if (!((BoolValue)bval).val) {
+	        return resState;
+	      }
+	    }
+	    else {
+	      UniqueString varName = var.getName();
+	      Value lval = (Value) s1.lookup(varName);
+	      Value rval = this.eval(args[1], c, s0, s1, EvalControl.Clear, cm);
+	      if (lval == null) {
+	        if (!(rval instanceof Enumerable)) {
+	          Assert.fail("In computing next states, the right side of \\IN" +
+	                      " is not enumerable.\n" + pred);
+	        }
+	        ValueEnumeration Enum = ((Enumerable)rval).elements();
+	        Value elem;
+	        while ((elem = Enum.nextElement()) != null) {
+	          resState.bind(varName, elem);
+	          resState = this.getNextStates(action, acts, s0, resState, nss, cm);
+	          resState.unbind(varName);
+	        }
+	        return resState;
+	      }
+	      else if (!rval.member(lval)) {
+	        return resState;
+	      }
+	    }
+	    return this.getNextStates(action, acts, s0, s1, nss, cm);
+	  }
+	case OPCODE_implies:
+	  {
+	    Value bval = this.eval(args[0], c, s0, s1, EvalControl.Clear, cm);
+	    if (!(bval instanceof BoolValue)) {
+	      Assert.fail("In computing next states of a predicate of the form" +
+	                  " P => Q, P was\n" + bval.getKindString() + ".\n" + pred);
+	    }
+	    if (((BoolValue)bval).val) {
+	      return this.getNextStates(action, args[1], acts, c, s0, s1, nss, cm);
+	    }
+	    else {
+	      return this.getNextStates(action, acts, s0, s1, nss, cm);
+	    }
+	  }
+	case OPCODE_unchanged:
+	  {
+	    return this.processUnchanged(action, args[0], acts, c, s0, s1, nss, cm);
+	  }
+	case OPCODE_cdot:
+	  {
+	    Assert.fail("The current version of TLC does not support action composition.");
+	    /***
+	    TLCState s01 = TLCStateFun.Empty;
+	    StateVec iss = new StateVec(0);
+	    this.getNextStates(action, args[0], ActionItemList.Empty, c, s0, s01, iss);
+	    int sz = iss.size();
+	    for (int i = 0; i < sz; i++) {
+	      s01 = iss.elementAt(i);
+	      this.getNextStates(action, args[1], acts, c, s01, s1, nss);
+	    }
+	    ***/
+	    return s1;
+	  }
+	// The following case added by LL on 13 Nov 2009 to handle subexpression names.
+	case OPCODE_nop:
+	{
+	    return this.getNextStates(action, args[0], acts, c, s0, s1, nss, cm);
+	}
+	default:
+	  {
+	    // We handle all the other builtin operators here.
+	    Value bval = this.eval(pred, c, s0, s1, EvalControl.Clear, cm);
+	    if (!(bval instanceof BoolValue)) {
+	      Assert.fail(EC.TLC_EXPECTED_EXPRESSION_IN_COMPUTING, new String[] { "next states", "boolean",
+	              bval.toString(), pred.toString() });
+	    }
+	    if (((BoolValue)bval).val) {
+	      resState = this.getNextStates(action, acts, s0, s1, nss, cm);
+	    }
+	    return resState;
+	  }
+	}
   }
   
   /* processUnchanged */
 
-  private final TLCState processUnchanged(SemanticNode expr, ActionItemList acts, Context c,
-                                          TLCState s0, TLCState s1, StateVec nss, CostModel cm) {
-	  if (this.callStack != null) {
-		  return processUnchangedWithCallStack(expr, acts, c, s0, s1, nss, cm);
-	  } else {
-		   return processUnchangedImpl(expr, acts, c, s0, s1, nss, cm);
-	  }
-  }
-  private final TLCState processUnchangedWithCallStack(SemanticNode expr, ActionItemList acts, Context c,
-          TLCState s0, TLCState s1, StateVec nss, CostModel cm) {
-	   this.callStack.push(expr);
-	   try {
-		   return processUnchangedImpl(expr, acts, c, s0, s1, nss, cm);
-	    } catch (TLCRuntimeException | EvalException e) {
-	    	// see tlc2.tool.Tool.getInitStates(SemanticNode, ActionItemList, Context, TLCState, IStateFunctor)
-	    	this.callStack.freeze();
-	    	throw e;
-	    } finally {
-	    	this.callStack.pop();
-	    }
-  }
-  private final TLCState processUnchangedImpl(SemanticNode expr, ActionItemList acts, Context c,
-          TLCState s0, TLCState s1, StateVec nss, CostModel cm) {
+  @ExpectInlined
+  protected abstract TLCState processUnchanged(final Action action, SemanticNode expr, ActionItemList acts, Context c,
+                                          TLCState s0, TLCState s1, INextStateFunctor nss, CostModel cm);
+  
+  protected final TLCState processUnchangedImpl(final Action action, SemanticNode expr, ActionItemList acts, Context c,
+          TLCState s0, TLCState s1, INextStateFunctor nss, CostModel cm) {
     if (coverage){cm = cm.get(expr);}
-        SymbolNode var = this.getVar(expr, c, false);
+        SymbolNode var = this.getVar(expr, c, false, toolId);
         TLCState resState = s1;
         if (var != null) {
-            return processUnchangedImplVar(expr, acts, s0, s1, nss, var, cm);
+            return processUnchangedImplVar(action, expr, acts, s0, s1, nss, var, cm);
         }
 
         if (expr instanceof OpApplNode) {
@@ -1339,40 +1287,41 @@ public final StateVec getNextStates(Action action, TLCState state) {
           int opcode = BuiltInOPs.getOpCode(opName);
 
           if (opcode == OPCODE_tup) {
-            return processUnchangedImplTuple(acts, c, s0, s1, nss, args, alen, cm, coverage ? cm.get(expr1) : cm);
+            return processUnchangedImplTuple(action, acts, c, s0, s1, nss, args, alen, cm, coverage ? cm.get(expr1) : cm);
           }
 
           if (opcode == 0 && alen == 0) {
             // a 0-arity operator:
-            return processUnchangedImpl0Arity(expr, acts, c, s0, s1, nss, cm, opNode, opName);
+            return processUnchangedImpl0Arity(action, expr, acts, c, s0, s1, nss, cm, opNode, opName);
           }
         }
 
         IValue v0 = this.eval(expr, c, s0, cm);
         Value v1 = this.eval(expr, c, s1, null, EvalControl.Clear, cm);
         if (v0.equals(v1)) {
-          resState = this.getNextStates(acts, s0, s1, nss, cm);
+          resState = this.getNextStates(action, acts, s0, s1, nss, cm);
         }
         return resState;
   }
 
-  private final TLCState processUnchangedImpl0Arity(final SemanticNode expr, final ActionItemList acts,
-			final Context c, final TLCState s0, final TLCState s1, final StateVec nss, final CostModel cm,
+  @ExpectInlined
+  private final TLCState processUnchangedImpl0Arity(final Action action, final SemanticNode expr, final ActionItemList acts,
+			final Context c, final TLCState s0, final TLCState s1, final INextStateFunctor nss, final CostModel cm,
 			final SymbolNode opNode, final UniqueString opName) {
 		final Object val = this.lookup(opNode, c, false);
 	
 		if (val instanceof OpDefNode) {
-		  return this.processUnchanged(((OpDefNode)val).getBody(), acts, c, s0, s1, nss, cm);
+		  return this.processUnchanged(action, ((OpDefNode)val).getBody(), acts, c, s0, s1, nss, cm);
 		}
 		else if (val instanceof LazyValue) {
 		  final LazyValue lv = (LazyValue)val;
-		  return this.processUnchanged(lv.expr, acts, lv.con, s0, s1, nss, cm);
+		  return this.processUnchanged(action, lv.expr, acts, lv.con, s0, s1, nss, cm);
 		}
 		else {
 		  Assert.fail("In computing next states, TLC found the identifier\n" +
 		              opName + " undefined in an UNCHANGED expression at\n" + expr);
 		}
-		return this.getNextStates(acts, s0, s1, nss, cm);
+		return this.getNextStates(action, acts, s0, s1, nss, cm);
   }
 
   @Override
@@ -1380,7 +1329,8 @@ public final StateVec getNextStates(Action action, TLCState state) {
 	    return this.eval(expr, c, s0, TLCState.Empty, EvalControl.Clear, CostModel.DO_NOT_RECORD);
 	  }
 
-  private final TLCState processUnchangedImplTuple(ActionItemList acts, Context c, TLCState s0, TLCState s1, StateVec nss,
+  @ExpectInlined
+  private final TLCState processUnchangedImplTuple(final Action action, ActionItemList acts, Context c, TLCState s0, TLCState s1, INextStateFunctor nss,
   		ExprOrOpArgNode[] args, int alen, CostModel cm, CostModel cmNested) {
   	// a tuple:
   	if (alen != 0) {
@@ -1388,12 +1338,13 @@ public final StateVec getNextStates(Action action, TLCState state) {
   	  for (int i = alen-1; i > 0; i--) {
   	    acts1 = (ActionItemList) acts1.cons(args[i], c, cmNested, IActionItemList.UNCHANGED);
   	  }
-  	  return this.processUnchanged(args[0], acts1, c, s0, s1, nss, cmNested);
+  	  return this.processUnchanged(action, args[0], acts1, c, s0, s1, nss, cmNested);
   	}
-  	return this.getNextStates(acts, s0, s1, nss, cm);
+  	return this.getNextStates(action, acts, s0, s1, nss, cm);
   }
   
-  private final TLCState processUnchangedImplVar(SemanticNode expr, ActionItemList acts, TLCState s0, TLCState s1, StateVec nss,
+  @ExpectInlined
+  private final TLCState processUnchangedImplVar(final Action action, SemanticNode expr, ActionItemList acts, TLCState s0, TLCState s1, INextStateFunctor nss,
   		SymbolNode var, final CostModel cm) {
           TLCState resState = s1;
           // expr is a state variable:
@@ -1403,17 +1354,17 @@ public final StateVec getNextStates(Action action, TLCState state) {
           if (val1 == null) {
 		  	resState.bind(varName, val0);
             if (coverage) {
-            	resState = this.getNextStates(acts, s0, resState, nss, cm);
+            	resState = this.getNextStates(action, acts, s0, resState, nss, cm);
             } else {
-            	resState = this.getNextStates0(acts, s0, resState, nss, cm);
+            	resState = this.getNextStates0(action, acts, s0, resState, nss, cm);
             }
 		  	resState.unbind(varName);
           }
           else if (val0.equals(val1)) {
               if (coverage) {
-                  resState = this.getNextStates(acts, s0, s1, nss, cm);
+                  resState = this.getNextStates(action, acts, s0, s1, nss, cm);
               } else {
-                  resState = this.getNextStates0(acts, s0, s1, nss, cm);
+                  resState = this.getNextStates0(action, acts, s0, s1, nss, cm);
               }
           }
           else {
@@ -1439,29 +1390,11 @@ public final StateVec getNextStates(Action action, TLCState state) {
    * This method evaluates the expression expr in the given context,
    * current state, and partial next state.
    */
-  public final Value eval(SemanticNode expr, Context c, TLCState s0,
-                          TLCState s1, final int control, final CostModel cm) {
-	    if (this.callStack != null) {
-	    	return evalWithCallStack(expr, c, s0, s1, control, cm);
-	    } else {
-	    	return evalImpl(expr, c, s0, s1, control, cm);
-	    }
-  }
-  private final Value evalWithCallStack(SemanticNode expr, Context c, TLCState s0,
-          TLCState s1, final int control, final CostModel cm) {
-	    this.callStack.push(expr);
-	    try {
-	    	return evalImpl(expr, c, s0, s1, control, cm);
-	    } catch (TLCRuntimeException | EvalException e) {
-	    	// see tlc2.tool.Tool.getInitStates(SemanticNode, ActionItemList, Context, TLCState, IStateFunctor)
-	    	this.callStack.freeze();
-	    	throw e;
-	    } finally {
-	    	this.callStack.pop();
-	    }
-  }
+  public abstract Value eval(SemanticNode expr, Context c, TLCState s0,
+                          TLCState s1, final int control, final CostModel cm);
   
-  private final Value evalImpl(final SemanticNode expr, final Context c, final TLCState s0,
+  @ExpectInlined
+  protected final Value evalImpl(final SemanticNode expr, final Context c, final TLCState s0,
           final TLCState s1, final int control, CostModel cm) {
         switch (expr.getKind()) {
         /***********************************************************************
@@ -1495,7 +1428,7 @@ public final StateVec getNextStates(Action action, TLCState state) {
         case DecimalKind:
         case StringKind:
           {
-            return (Value) expr.getToolObject(toolId);
+            return (Value) WorkerValue.mux(expr.getToolObject(toolId));
           }
         case AtNodeKind:
           {
@@ -1514,6 +1447,7 @@ public final StateVec getNextStates(Action action, TLCState state) {
         }
   }
 
+  @ExpectInlined
   private final Value evalImplLetInKind(LetInNode expr1, Context c, TLCState s0, TLCState s1, final int control, final CostModel cm) {
 	OpDefNode[] letDefs = expr1.getLets();
 	int letLen = letDefs.length;
@@ -1528,28 +1462,31 @@ public final StateVec getNextStates(Action action, TLCState state) {
 	return this.eval(expr1.getBody(), c1, s0, s1, control, cm);
   }
 
+  @ExpectInlined
   private final Value evalImplSubstInKind(SubstInNode expr1, Context c, TLCState s0, TLCState s1, final int control, final CostModel cm) {
   	Subst[] subs = expr1.getSubsts();
   	int slen = subs.length;
   	Context c1 = c;
   	for (int i = 0; i < slen; i++) {
   	  Subst sub = subs[i];
-  	  c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, true, coverage ? sub.getCM() : cm));
+  	  c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, true, coverage ? sub.getCM() : cm, toolId));
   	}
   	return this.eval(expr1.getBody(), c1, s0, s1, control, cm);
   }
     
+  @ExpectInlined
   private final Value evalImplApSubstInKind(APSubstInNode expr1, Context c, TLCState s0, TLCState s1, final int control, final CostModel cm) {
   	Subst[] subs = expr1.getSubsts();
   	int slen = subs.length;
   	Context c1 = c;
   	for (int i = 0; i < slen; i++) {
   	  Subst sub = subs[i];
-  	  c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, true, cm));
+  	  c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, true, cm, toolId));
   	}
   	return this.eval(expr1.getBody(), c1, s0, s1, control, cm);
   }
   
+  @ExpectInlined
   private final Value evalImplOpArgKind(OpArgNode expr1, Context c, TLCState s0, TLCState s1, final CostModel cm) {
   	SymbolNode opNode = expr1.getOp();
   	Object val = this.lookup(opNode, c, false);
@@ -1561,30 +1498,11 @@ public final StateVec getNextStates(Action action, TLCState state) {
   
   /* evalAppl */
   
-  private final Value evalAppl(final OpApplNode expr, Context c, TLCState s0,
-          TLCState s1, final int control, final CostModel cm) {
-	  if (this.callStack != null) {
-		  return evalApplWithCallStack(expr, c, s0, s1, control, cm);
-	  } else {
-		  return evalApplImpl(expr, c, s0, s1, control, cm);
-	  }
-  }
+  @ExpectInlined
+  protected abstract Value evalAppl(final OpApplNode expr, Context c, TLCState s0,
+          TLCState s1, final int control, final CostModel cm);
 
-  private final Value evalApplWithCallStack(final OpApplNode expr, Context c, TLCState s0,
-          TLCState s1, final int control, final CostModel cm) {
-	    this.callStack.push(expr);
-	    try {
-	    	return evalApplImpl(expr, c, s0, s1, control, cm);
-	    } catch (TLCRuntimeException | EvalException e) {
-	    	// see tlc2.tool.Tool.getInitStates(SemanticNode, ActionItemList, Context, TLCState, IStateFunctor)
-	    	this.callStack.freeze();
-	    	throw e;
-	    } finally {
-	    	this.callStack.pop();
-	    }
-  }
-  
-  private final Value evalApplImpl(final OpApplNode expr, Context c, TLCState s0,
+  protected final Value evalApplImpl(final OpApplNode expr, Context c, TLCState s0,
                               TLCState s1, final int control, CostModel cm) {
     if (coverage){
     	cm = cm.getAndIncrement(expr);
@@ -1712,7 +1630,7 @@ public final StateVec getNextStates(Action action, TLCState state) {
             OpDefNode opDef = (OpDefNode)val;
             opcode = BuiltInOPs.getOpCode(opDef.getName());
             if (opcode == 0) {
-              Context c1 = this.getOpContext(opDef, args, c, true, cm);
+              Context c1 = this.getOpContext(opDef, args, c, true, cm, toolId);
               res = this.eval(opDef.getBody(), c1, s0, s1, control, cm);
             }
           }
@@ -1722,8 +1640,15 @@ public final StateVec getNextStates(Action action, TLCState state) {
             if (alen == 0) {
               if (val instanceof MethodValue) {
                 res = ((MethodValue)val).apply(EmptyArgs, EvalControl.Clear);
+              } else if (val instanceof EvaluatingValue) {
+            	  // Allow EvaluatingValue overwrites to have zero arity.
+            	  res = ((EvaluatingValue) val).eval(this, args, c, s0, s1, control, cm);
               }
             }
+            else if (val instanceof Evaluator) {
+            	  Evaluator evaluator = (Evaluator) val;
+            	  res = evaluator.eval(this, args, c, s0, s1, control, cm);
+            } 
             else {
               if (val instanceof OpValue) {
             	  res = ((OpValue) val).eval(this, args, c, s0, s1, control, cm);
@@ -1883,7 +1808,8 @@ public final StateVec getNextStates(Action action, TLCState state) {
               ExprOrOpArgNode[] pairArgs = pairNode.getArgs();
               if (pairArgs[0] == null) {
                 other = pairArgs[1];
-              }
+                if (coverage) { cm = cm.get(pairNode); }
+               }
               else {
                 Value bval = this.eval(pairArgs[0], c, s0, s1, control, coverage ? cm.get(pairNode) : cm);
                 if (!(bval instanceof BoolValue)) {
@@ -2049,7 +1975,7 @@ public final StateVec getNextStates(Action action, TLCState state) {
         case OPCODE_rs:     // RcdSelect
           {
             Value rval = this.eval(args[0], c, s0, s1, control, cm);
-            Value sval = (Value) args[1].getToolObject(toolId);
+            Value sval = (Value) WorkerValue.mux(args[1].getToolObject(toolId));
             if (rval instanceof RecordValue) {
               Value result = (Value) ((RecordValue)rval).select(sval);
               if (result == null) {
@@ -2475,12 +2401,7 @@ public final StateVec getNextStates(Action action, TLCState state) {
         }
   }
 
-  private final Value setSource(final SemanticNode expr, final Value value) {
-    if (this.callStack != null) {
-      value.setSource(expr);
-    }
-    return value;
-  }
+  protected abstract Value setSource(final SemanticNode expr, final Value value);
 
   /**
    * This method determines if the argument is a valid state.  A state
@@ -2521,6 +2442,11 @@ public final StateVec getNextStates(Action action, TLCState state) {
   }
   
   @Override
+  public final boolean hasStateOrActionConstraints() {
+	  return this.getModelConstraints().length > 0 || this.getActionConstraints().length > 0;
+  }
+  
+  @Override
   public final TLCState enabled(SemanticNode pred, Context c, TLCState s0, TLCState s1) {
 		  return enabled(pred, ActionItemList.Empty, c, s0, s1, CostModel.DO_NOT_RECORD);
   }
@@ -2542,30 +2468,10 @@ public final StateVec getNextStates(Action action, TLCState state) {
    * enabled in the state s and context act.con.
    */
   @Override
-  public final TLCState enabled(SemanticNode pred, IActionItemList acts,
-                                Context c, TLCState s0, TLCState s1, CostModel cm) {
-	    if (this.callStack != null) {
-	    	return enabledWithCallStack(pred, (ActionItemList) acts, c, s0, s1, cm);
-	    } else {
-	    	return enabledImpl(pred, (ActionItemList) acts, c, s0, s1, cm);
-	    }
-  }
+  public abstract TLCState enabled(SemanticNode pred, IActionItemList acts,
+                                Context c, TLCState s0, TLCState s1, CostModel cm);
 
-  private final TLCState enabledWithCallStack(SemanticNode pred, ActionItemList acts,
-          Context c, TLCState s0, TLCState s1, CostModel cm) {
-    this.callStack.push(pred);
-    try {
-    	return enabledImpl(pred, acts, c, s0, s1, cm);
-    } catch (TLCRuntimeException | EvalException e) {
-    	// see tlc2.tool.Tool.getInitStates(SemanticNode, ActionItemList, Context, TLCState, IStateFunctor)
-    	this.callStack.freeze();
-    	throw e;
-    } finally {
-    	this.callStack.pop();
-    }
-  }
-  
-  private final TLCState enabledImpl(SemanticNode pred, ActionItemList acts,
+  protected final TLCState enabledImpl(SemanticNode pred, ActionItemList acts,
           Context c, TLCState s0, TLCState s1, CostModel cm) {
         switch (pred.getKind()) {
         case OpApplKind:
@@ -2595,7 +2501,7 @@ public final StateVec getNextStates(Action action, TLCState state) {
             Context c1 = c;
             for (int i = 0; i < slen; i++) {
               Subst sub = subs[i];
-              c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, false, coverage ? sub.getCM() : cm));
+              c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, false, coverage ? sub.getCM() : cm, toolId));
             }
             return this.enabled(pred1.getBody(), acts, c1, s0, s1, cm);
           }
@@ -2608,7 +2514,7 @@ public final StateVec getNextStates(Action action, TLCState state) {
             Context c1 = c;
             for (int i = 0; i < slen; i++) {
               Subst sub = subs[i];
-              c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, false, cm));
+              c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, false, cm, toolId));
             }
             return this.enabled(pred1.getBody(), acts, c1, s0, s1, cm);
           }
@@ -2659,30 +2565,9 @@ public final StateVec getNextStates(Action action, TLCState state) {
     return res;
   }
 
-  private final TLCState enabledAppl(OpApplNode pred, ActionItemList acts, Context c, TLCState s0, TLCState s1, CostModel cm)
-  {
-	    if (this.callStack != null) {
-	    	return enabledApplWithCallStack(pred, acts, c, s0, s1, cm);
-	    } else {
-	    	return enabledApplImpl(pred, acts, c, s0, s1, cm);
-	    }
-  }
+  protected abstract TLCState enabledAppl(OpApplNode pred, ActionItemList acts, Context c, TLCState s0, TLCState s1, CostModel cm);
 
-  private final TLCState enabledApplWithCallStack(OpApplNode pred, ActionItemList acts, Context c, TLCState s0, TLCState s1, CostModel cm)
-  {
-	    this.callStack.push(pred);
-	    try {
-	    	return enabledApplImpl(pred, acts, c, s0, s1, cm);
-	    } catch (TLCRuntimeException | EvalException e) {
-	    	// see tlc2.tool.Tool.getInitStates(SemanticNode, ActionItemList, Context, TLCState, IStateFunctor)
-	    	this.callStack.freeze();
-	    	throw e;
-	    } finally {
-	    	this.callStack.pop();
-	    }
-  }
- 
-  private final TLCState enabledApplImpl(OpApplNode pred, ActionItemList acts, Context c, TLCState s0, TLCState s1, CostModel cm)
+  protected final TLCState enabledApplImpl(OpApplNode pred, ActionItemList acts, Context c, TLCState s0, TLCState s1, CostModel cm)
   {
     if (coverage) {cm = cm.get(pred);}
         ExprOrOpArgNode[] args = pred.getArgs();
@@ -2704,7 +2589,7 @@ public final StateVec getNextStates(Action action, TLCState state) {
             if (opcode == 0)
             {
               // Context c1 = this.getOpContext(opDef, args, c, false);
-              Context c1 = this.getOpContext(opDef, args, c, true, cm);
+              Context c1 = this.getOpContext(opDef, args, c, true, cm, toolId);
               return this.enabled(opDef.getBody(), acts, c1, s0, s1, cm);
             }
           }
@@ -3079,33 +2964,13 @@ public final StateVec getNextStates(Action action, TLCState state) {
         }
   }
 
-  private final TLCState enabledUnchanged(SemanticNode expr, ActionItemList acts,
-                                          Context c, TLCState s0, TLCState s1, CostModel cm) {
-	    if (this.callStack != null) {
-	    	return enabledUnchangedWithCallStack(expr, acts, c, s0, s1, cm);
-	    } else {
-	    	return enabledUnchangedImpl(expr, acts, c, s0, s1, cm);
-	    }
-  }
-
-  private final TLCState enabledUnchangedWithCallStack(SemanticNode expr, ActionItemList acts,
-          Context c, TLCState s0, TLCState s1, CostModel cm) {
-    this.callStack.push(expr);
-    try {
-    	return enabledUnchangedImpl(expr, acts, c, s0, s1, cm);
-    } catch (TLCRuntimeException | EvalException e) {
-    	// see tlc2.tool.Tool.getInitStates(SemanticNode, ActionItemList, Context, TLCState, IStateFunctor)
-    	this.callStack.freeze();
-    	throw e;
-    } finally {
-    	this.callStack.pop();
-    }
-  }
+  protected abstract TLCState enabledUnchanged(SemanticNode expr, ActionItemList acts,
+                                          Context c, TLCState s0, TLCState s1, CostModel cm);
   
-  private final TLCState enabledUnchangedImpl(SemanticNode expr, ActionItemList acts,
+  protected final TLCState enabledUnchangedImpl(SemanticNode expr, ActionItemList acts,
             Context c, TLCState s0, TLCState s1, CostModel cm) {
 	    if (coverage) {cm = cm.get(expr);}
-        SymbolNode var = this.getVar(expr, c, true);
+        SymbolNode var = this.getVar(expr, c, true, toolId);
         if (var != null) {
           // a state variable, e.g. UNCHANGED var1
           UniqueString varName = var.getName();
@@ -3341,13 +3206,137 @@ public final StateVec getNextStates(Action action, TLCState state) {
     if (!(symm instanceof OpDefNode)) {
       Assert.fail("The symmetry function " + name + " must specify a set of permutations.");
     }
+    final OpDefNode opDef = (OpDefNode)symm;
     // This calls tlc2.module.TLC.Permutations(Value) and returns a Value of |fcns|
     // = n! where n is the capacity of the symmetry set.
-    final IValue fcns = this.eval(((OpDefNode)symm).getBody(), Context.Empty, TLCState.Empty, CostModel.DO_NOT_RECORD);
-    if (!(fcns instanceof Enumerable)) {
+    final IValue fcns = this.eval(opDef.getBody(), Context.Empty, TLCState.Empty, CostModel.DO_NOT_RECORD);
+    if (!(fcns instanceof Enumerable) || !(fcns instanceof SetEnumValue)) {
       Assert.fail("The symmetry operator must specify a set of functions.");
     }
-    return MVPerms.permutationSubgroup((Enumerable) fcns);
+    final List<Value> values = ((SetEnumValue)fcns).elements().all();
+    for (final Value v : values) {
+    	if (!(v instanceof FcnRcdValue)) {
+    		Assert.fail("The symmetry values must be function records.");
+    	}
+    }
+    final ExprOrOpArgNode[] argNodes = ((OpApplNode)opDef.getBody()).getArgs();
+    // In the case where the config defines more than one set which is symmetric, they will pass through the
+    //		enumerable size() check even if they are single element sets
+    final StringBuilder cardinalityOneSetList = new StringBuilder();
+    int offenderCount = 0;
+    if (argNodes.length >= values.size()) {
+    	// If equal, we have as many values as we have permuted sets => we have all 1-element sets;
+    	//		if greater than, then we have a heterogenous cardinality of sets, including 0 element sets.
+    	for (final ExprOrOpArgNode node : argNodes) {
+			addToSubTwoSizedSymmetrySetList(node, cardinalityOneSetList);
+			offenderCount++;
+    	}
+    }
+    
+    final IMVPerm[] subgroup;
+    if (offenderCount == 0) {
+        subgroup = MVPerms.permutationSubgroup((Enumerable)fcns);
+        final HashSet<ModelValue> subgroupMembers = new HashSet<>();
+        for (final IMVPerm imvp : subgroup) {
+        	if (imvp instanceof MVPerm) { // should always be the case
+        		subgroupMembers.addAll(((MVPerm)imvp).getAllModelValues());
+        	}
+        }
+        for (final ExprOrOpArgNode node : argNodes) {
+        	final SetEnumValue enumValue = getSetEnumValueFromArgumentNode(node);
+        	
+        	if (enumValue != null) {
+        		final ValueEnumeration ve = enumValue.elements();
+        		
+        		boolean found = false;
+        		Value v;
+        		while ((v = ve.nextElement()) != null) {
+        			if ((v instanceof ModelValue) && subgroupMembers.contains(v)) {
+        				found = true;
+        				break;
+        			}
+        		}
+        		
+        		if (!found) {
+    				addToSubTwoSizedSymmetrySetList(node, cardinalityOneSetList);
+    				offenderCount++;
+        		}
+        	}
+        }
+    } else {
+    	subgroup = null;
+    }
+    
+    if (offenderCount > 0) {
+      final String plurality = (offenderCount > 1) ? "s" : "";
+      final String antiPlurality = (offenderCount > 1) ? "" : "s";
+      final String toHaveConjugation = (offenderCount > 1) ? "have" : "has";
+      
+      MP.printWarning(EC.TLC_SYMMETRY_SET_TOO_SMALL,
+    		  	  	  new String[] { plurality, cardinalityOneSetList.toString(), toHaveConjugation, antiPlurality });
+    }
+    
+    return subgroup;
+  }
+  
+  /**
+   * Teases the original spec name for the set out of node and appends it to the {@code StringBuilder} instance.
+   */
+  private void addToSubTwoSizedSymmetrySetList(final ExprOrOpArgNode node, final StringBuilder cardinalityOneSetList) {
+		final SyntaxTreeNode tn = (SyntaxTreeNode)node.getTreeNode();
+		final String image = tn.getHumanReadableImage();
+		final String alias;
+	    if (image.startsWith(TLAConstants.BuiltInOperators.PERMUTATIONS)) {
+		  final int imageLength = image.length();
+		  alias = image.substring((TLAConstants.BuiltInOperators.PERMUTATIONS.length() + 1),
+				  						  (imageLength - 1));
+	    } else {
+	    	alias = image;
+	    }
+		final String specDefinitionName = this.config.getOverridenSpecNameForConfigName(alias);
+		final String displayDefinition = (specDefinitionName != null) ? specDefinitionName : alias;
+		
+		if (cardinalityOneSetList.length() > 0) {
+			cardinalityOneSetList.append(", and ");
+		}
+
+		cardinalityOneSetList.append(displayDefinition);
+  }
+  
+  /**
+   * @param node
+   * @return if the node represents a permutation, this will return the {@link SetEnumValue} instance contains its
+   * 					model values
+   */
+  private SetEnumValue getSetEnumValueFromArgumentNode(final ExprOrOpArgNode node) {
+	  if (node instanceof OpApplNode) {
+		  final OpApplNode permutationNode = (OpApplNode)node;
+		  if (permutationNode.getOperator() instanceof OpDefNode) {
+			  final OpDefNode operator = (OpDefNode)permutationNode.getOperator();
+			  if (TLAConstants.BuiltInOperators.PERMUTATIONS.equals(operator.getName().toString())) {
+				  final ExprOrOpArgNode[] operands = permutationNode.getArgs();
+				  if ((operands.length == 1)
+						  && (operands[0] instanceof OpApplNode)
+						  && (((OpApplNode)operands[0]).getOperator() instanceof OpDefOrDeclNode)) {
+					  final Object o = ((OpDefOrDeclNode)((OpApplNode)operands[0]).getOperator()).getToolObject(toolId);
+					  
+					  if (o instanceof SetEnumValue) {
+						  return (SetEnumValue)o;
+					  } else if (o instanceof WorkerValue) {
+						  // If TLC was started with a -workers N specification, N > 1, o will be a WorkerValue instance
+						  final WorkerValue wv = (WorkerValue)o;
+						  final Object unwrapped = WorkerValue.mux(wv);
+						  
+						  if (unwrapped instanceof SetEnumValue) {
+							  return (SetEnumValue)unwrapped;
+						  }
+					  }
+				  }
+			  }
+		  }
+	  }
+
+	  return null;
   }
 
   @Override
@@ -3486,4 +3475,23 @@ public final StateVec getNextStates(Action action, TLCState state) {
     }
     return new ContextEnumerator(vars, enums, c);
   }
+
+    // These three are expected by implementing the {@link ITool} interface; they used
+    //		to mirror exactly methods that our parent class ({@link Spec}) implemented
+    //		however those methods have changed signature with refactoring done for 
+    //		Issue #393
+	@Override
+	public Context getOpContext(OpDefNode odn, ExprOrOpArgNode[] args, Context ctx, boolean b) {
+		return getOpContext(odn, args, ctx, b, toolId);
+	}
+	
+	@Override
+	public Object lookup(SymbolNode opNode, Context con, boolean b) {
+		return lookup(opNode, con, b, toolId);
+	}
+	
+	@Override
+	public Object getVal(ExprOrOpArgNode expr, Context con, boolean b) {
+		return getVal(expr, con, b, toolId);
+	}
 }

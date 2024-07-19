@@ -23,7 +23,7 @@ public class TLCGlobals
 	public static final int DEFAULT_CHECKPOINT_DURATION = (30 * 60 * 1000) + 42;
 
 	// The current version of TLC
-    public static String versionOfTLC = "Version 2.14 of 10 July 2019";
+    public static String versionOfTLC = "Version 2.15 of Day Month 20??";
     
     // The bound for set enumeration, used for pretty printing
     public static int enumBound = 2000;
@@ -52,7 +52,11 @@ public class TLCGlobals
 	public static String lnCheck = "default";
 	
 	public static boolean doLiveness() {
-		return !lnCheck.equals("final");
+		return !(lnCheck.equals("final") || lnCheck.equals("seqfinal"));
+	}
+
+	public static boolean doSequentialLiveness() {
+		return lnCheck.startsWith("seq");
 	}
 
 	public synchronized static void setNumWorkers(int n)

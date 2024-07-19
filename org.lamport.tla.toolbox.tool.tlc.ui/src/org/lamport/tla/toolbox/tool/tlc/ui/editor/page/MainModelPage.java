@@ -27,10 +27,14 @@ import org.eclipse.jface.resource.JFaceResources;
 import org.eclipse.jface.text.Document;
 import org.eclipse.jface.text.source.SourceViewer;
 import org.eclipse.jface.viewers.CheckboxTableViewer;
+import org.eclipse.jface.viewers.ISelection;
+import org.eclipse.jface.viewers.ISelectionChangedListener;
+import org.eclipse.jface.viewers.ISelectionProvider;
 import org.eclipse.jface.viewers.TableViewer;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.CTabFolder;
 import org.eclipse.swt.custom.StackLayout;
+import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.events.KeyAdapter;
 import org.eclipse.swt.events.KeyEvent;
 import org.eclipse.swt.events.SelectionEvent;
@@ -62,9 +66,7 @@ import org.eclipse.ui.forms.widgets.TableWrapData;
 import org.eclipse.ui.forms.widgets.TableWrapLayout;
 import org.lamport.tla.toolbox.tool.tlc.launch.IConfigurationConstants;
 import org.lamport.tla.toolbox.tool.tlc.launch.IConfigurationDefaults;
-import org.lamport.tla.toolbox.tool.tlc.model.Assignment;
 import org.lamport.tla.toolbox.tool.tlc.model.Model;
-import org.lamport.tla.toolbox.tool.tlc.model.TypedSet;
 import org.lamport.tla.toolbox.tool.tlc.ui.TLCUIActivator;
 import org.lamport.tla.toolbox.tool.tlc.ui.editor.DataBindingManager;
 import org.lamport.tla.toolbox.tool.tlc.ui.editor.ModelEditor;
@@ -84,6 +86,8 @@ import org.lamport.tla.toolbox.util.IHelpConstants;
 import org.lamport.tla.toolbox.util.UIHelper;
 
 import tla2sany.semantic.ModuleNode;
+import tlc2.model.Assignment;
+import tlc2.model.TypedSet;
 import util.TLCRuntime;
 
 /**
@@ -103,7 +107,7 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 
 	private static final String TITLE = "Model Overview";
 
-	private static final String INIT_NEXT_COMBO_LABEL = "Initial predicate and next-state";
+	private static final String INIT_NEXT_COMBO_LABEL = "Initial predicate and next-state relation";
 	private static final String TEMPORAL_FORMULA_COMBO_LABEL = "Temporal formula";
 	private static final String NO_SPEC_COMBO_LABEL = "No behavior spec";
 	private static final String[] VARIABLE_BEHAVIOR_COMBO_ITEMS = { INIT_NEXT_COMBO_LABEL, TEMPORAL_FORMULA_COMBO_LABEL,
@@ -189,6 +193,11 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 	protected HyperlinkAdapter advancedTLCOptionsOpener = new HyperlinkAdapter() {
 		public void linkActivated(final HyperlinkEvent he) {
 			getModelEditor().addOrShowAdvancedTLCOptionsPage();
+		}
+	};
+	protected HyperlinkAdapter resultsPageOpener = new HyperlinkAdapter() {
+		public void linkActivated(final HyperlinkEvent he) {
+			getModelEditor().addOrShowResultsPage();
 		}
 	};
 
@@ -395,6 +404,34 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 		validatePage(false);
 	}
 	
+	/**
+	 * This switches the behavior combo to be Init-Next behavior and potentially sets the Init and Next values in the
+	 * 	UI text areas.
+	 * 
+	 * @param initFormula if non-null, this will be set into the Init text area
+	 * @param nextFormula if non-null, this will be set into the Next text area
+	 */
+	public void setInitNextBehavior(final String initFormula, final String nextFormula) {
+		boolean setDirty = setSpecSelection(MODEL_BEHAVIOR_TYPE_SPEC_INIT_NEXT);
+		
+		if (initFormula != null) {
+			initFormulaSource.setDocument(new Document(initFormula));
+			setDirty = true;
+		}
+		
+		if (nextFormula != null) {
+			nextFormulaSource.setDocument(new Document(nextFormula));
+			setDirty = true;
+		}
+		
+		if (setDirty) {
+			final DataBindingManager dm = getDataBindingManager();
+			dm.getSection(dm.getSectionForAttribute(MODEL_BEHAVIOR_NO_SPEC)).markDirty();
+			
+			validatePage(false);
+		}
+	}
+	
 	@Override
 	public void validatePage(boolean switchToErrorPage) {
 		if (getManagedForm() == null) {
@@ -479,7 +516,7 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 					TypedSet modelValuesSet = TypedSet.parseSet(constant.getRight());
 
 					if (constant.isSymmetricalSet()) {
-						if (((CheckboxTableViewer) propertiesTable).getCheckedElements().length > 0) {
+						if (hasLivenessProperty()) {
 							modelEditor.addErrorMessage(constant.getLabel(), String.format(
 									"%s declared to be symmetric while one or more temporal formulas are set to be checked.\n"
 											+ "If the temporal formula is a liveness property, liveness checking might fail to find\n"
@@ -643,10 +680,11 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 		// that code changes the selection.
 		final Section whatToCheckSection = dm.getSection(SEC_WHAT_TO_CHECK).getSection();
 		final ResultPage rp = (ResultPage) modelEditor.findPage(ResultPage.ID);
-		final EvaluateConstantExpressionPage ecep = (EvaluateConstantExpressionPage) modelEditor
-				.findPage(EvaluateConstantExpressionPage.ID);
+		final EvaluateConstantExpressionPage ecep
+				= (rp != null) ? (EvaluateConstantExpressionPage) modelEditor.findPage(EvaluateConstantExpressionPage.ID)
+							   : null;
 
-		final Set<Section> resultPageSections = rp.getSections(SEC_GENERAL, SEC_STATISTICS);
+		final Set<Section> resultPageSections = (rp != null) ? rp.getSections(SEC_GENERAL, SEC_STATISTICS) : null;
 
 		final String hint = " (\"What is the behavior spec?\" above has no behavior spec)";
 		final String hintResults = " (\"What is the behavior spec?\" on \"Model Overview\" page has no behavior spec)";
@@ -657,15 +695,18 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 			whatToCheckSection.setExpanded(false);
 			whatToCheckSection.setEnabled(false);
 
-			resultPageSections.forEach((section) -> {
-				section.setText(!section.getText().endsWith(hintResults) ? section.getText() + hintResults : section.getText());
-				section.setEnabled(false);
-				compensateForExpandableCompositesPoorDesign(section, false);
-			});
+			if (resultPageSections != null) {
+				resultPageSections.forEach((section) -> {
+					section.setText(!section.getText().endsWith(hintResults) ? section.getText() + hintResults
+							: section.getText());
+					section.setEnabled(false);
+					compensateForExpandableCompositesPoorDesign(section, false);
+				});
+			}
 			
 			if (ecep != null) {
 				ecep.setNoBehaviorSpecToggleState(true);
-			} else {
+			} else if (rp != null) {
 				rp.setNoBehaviorSpecToggleState(true);
 			}
 		} else {
@@ -673,15 +714,17 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 			whatToCheckSection.setExpanded(true);
 			whatToCheckSection.setEnabled(true);
 
-			resultPageSections.forEach((section) -> {
-				section.setText(section.getText().replace(hintResults, ""));
-				section.setEnabled(true);
-				compensateForExpandableCompositesPoorDesign(section, true);
-			});
+			if (resultPageSections != null) {
+				resultPageSections.forEach((section) -> {
+					section.setText(section.getText().replace(hintResults, ""));
+					section.setEnabled(true);
+					compensateForExpandableCompositesPoorDesign(section, true);
+				});
+			}
 			
 			if (ecep != null) {
 				ecep.setNoBehaviorSpecToggleState(false);
-			} else {
+			} else if (rp != null) {
 				rp.setNoBehaviorSpecToggleState(false);
 			}
 		}
@@ -766,6 +809,10 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 
 		super.validatePage(switchToErrorPage);
 	}
+	
+	public boolean hasLivenessProperty() {
+		return ((CheckboxTableViewer) propertiesTable).getCheckedElements().length > 0;
+	}
 
 	public boolean workerCountCanBeModified() {
 		return workerValueCanBeModified.get();
@@ -837,8 +884,9 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 	 * This method sets the selection on the
 	 * 
 	 * @param selectedFormula
+	 * @return true if the selection changed
 	 */
-	private void setSpecSelection(int specType) {
+	private boolean setSpecSelection(int specType) {
 		int index = -1;
 
 		switch (specType) {
@@ -855,10 +903,14 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 				throw new IllegalArgumentException("Wrong spec type, this is a bug");
 		}
 		
-		if (index != -1) {
+		if ((index != -1) && (index != behaviorCombo.getSelectionIndex())) {
 			behaviorCombo.select(index);
 			moveToTopOfBehaviorOptionsStack(behaviorCombo.getText());
+			
+			return true;
 		}
+		
+		return false;
 	}
 	
 	private int getModelConstantForSpecSelection() {
@@ -977,7 +1029,7 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 		}
 		return constants;
 	}
-
+	
 	/**
 	 * Creates the UI This method is called to create the widgets and arrange them
 	 * on the page
@@ -989,6 +1041,7 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 	 * given in the article
 	 * http://www.eclipse.org/articles/article.php?file=Article-Understanding-Layouts/index.html
 	 */
+	@Override
 	protected void createBodyContent(IManagedForm managedForm) {
 		DataBindingManager dm = getDataBindingManager();
 		int sectionFlags = Section.TITLE_BAR | Section.DESCRIPTION | Section.TREE_NODE;
@@ -1046,19 +1099,19 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 
 		
 
-		Composite advancedLinkLine = new Composite(body, SWT.NONE);
+		Composite linkLineComposite = new Composite(body, SWT.NONE);
 		twd = new TableWrapData();
 		twd.colspan = 2;
 		twd.grabHorizontal = true;
 		twd.align = TableWrapData.RIGHT;
-		advancedLinkLine.setLayoutData(twd);
-		advancedLinkLine.setBackground(body.getDisplay().getSystemColor(SWT.COLOR_WHITE));
+		linkLineComposite.setLayoutData(twd);
+		linkLineComposite.setBackground(body.getDisplay().getSystemColor(SWT.COLOR_WHITE));
 		gl = new GridLayout(1, false);
 		gl.marginWidth = 0;
 		gl.marginRight = 36;
 		gl.horizontalSpacing = 0;
-		advancedLinkLine.setLayout(gl);
-		Hyperlink hyper = toolkit.createHyperlink(advancedLinkLine, "Additional Spec Options", SWT.NONE);
+		linkLineComposite.setLayout(gl);
+		Hyperlink hyper = toolkit.createHyperlink(linkLineComposite, "Additional Spec Options", SWT.NONE);
 		hyper.addHyperlinkListener(advancedModelOptionsOpener);
 		Font baseFont = JFaceResources.getFontRegistry().getBold(JFaceResources.DIALOG_FONT);
 		FontData[] baseFD = baseFont.getFontData();
@@ -1158,9 +1211,13 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 		gd.horizontalAlignment = SWT.FILL;
 		gd.grabExcessHorizontalSpace = true;
 		gd.heightHint = 48;
-		initFormulaSource.getTextWidget().setLayoutData(gd);
-		initFormulaSource.getTextWidget().addModifyListener(whatIsTheSpecListener);
-		initFormulaSource.getTextWidget().addFocusListener(focusListener);
+		StyledText st = initFormulaSource.getTextWidget();
+		st.setLayoutData(gd);
+		st.addModifyListener(whatIsTheSpecListener);
+		st.addFocusListener(focusListener);
+		st.addTraverseListener((event) -> {
+			event.doit = true;
+		});
 		dm.bindAttribute(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT, initFormulaSource, behaviorPart);
 
 		// next
@@ -1171,9 +1228,13 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 		gd.horizontalAlignment = SWT.FILL;
 		gd.grabExcessHorizontalSpace = true;
 		gd.heightHint = 48;
-		nextFormulaSource.getTextWidget().setLayoutData(gd);
-		nextFormulaSource.getTextWidget().addModifyListener(whatIsTheSpecListener);
-		nextFormulaSource.getTextWidget().addFocusListener(focusListener);
+		st = nextFormulaSource.getTextWidget();
+		st.setLayoutData(gd);
+		st.addModifyListener(whatIsTheSpecListener);
+		st.addFocusListener(focusListener);
+		st.addTraverseListener((event) -> {
+			event.doit = true;
+		});
 		dm.bindAttribute(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_NEXT, nextFormulaSource, behaviorPart);
 
 		// fairness
@@ -1261,19 +1322,19 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 		dm.bindAttribute(MODEL_PARAMETER_CONSTANTS, constantTable, constantsPart);
 		
 
-		advancedLinkLine = new Composite(body, SWT.NONE);
+		linkLineComposite = new Composite(body, SWT.NONE);
 		twd = new TableWrapData();
 		twd.colspan = 2;
 		twd.grabHorizontal = true;
 		twd.align = TableWrapData.RIGHT;
-		advancedLinkLine.setLayoutData(twd);
-		advancedLinkLine.setBackground(body.getDisplay().getSystemColor(SWT.COLOR_WHITE));
+		linkLineComposite.setLayoutData(twd);
+		linkLineComposite.setBackground(body.getDisplay().getSystemColor(SWT.COLOR_WHITE));
 		gl = new GridLayout(1, false);
 		gl.marginWidth = 0;
 		gl.marginRight = 36;
 		gl.horizontalSpacing = 0;
-		advancedLinkLine.setLayout(gl);
-		hyper = toolkit.createHyperlink(advancedLinkLine, "Additional TLC Options", SWT.NONE);
+		linkLineComposite.setLayout(gl);
+		hyper = toolkit.createHyperlink(linkLineComposite, "Additional TLC Options", SWT.NONE);
 		hyper.addHyperlinkListener(advancedTLCOptionsOpener);
 		hyper.setFont(biggerLinkFont);
 
@@ -1370,17 +1431,17 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 		gd.horizontalAlignment = SWT.CENTER;
 		tlcResourceSummaryLabel.setLayoutData(gd);
 
-		advancedLinkLine = new Composite(howToRunArea, SWT.NONE);
+		linkLineComposite = new Composite(howToRunArea, SWT.NONE);
 		gd = new GridData();
 		gd.horizontalSpan = 2;
 		gd.grabExcessHorizontalSpace = true;
 		gd.horizontalAlignment = SWT.CENTER;
-		advancedLinkLine.setLayoutData(gd);
+		linkLineComposite.setLayoutData(gd);
 		gl = new GridLayout(1, false);
 		gl.marginWidth = 0;
 		gl.horizontalSpacing = 0;
-		advancedLinkLine.setLayout(gl);
-		tlcTuneHyperlink = toolkit.createHyperlink(advancedLinkLine, "Tune these parameters and set defaults", SWT.NONE);
+		linkLineComposite.setLayout(gl);
+		tlcTuneHyperlink = toolkit.createHyperlink(linkLineComposite, "Tune these parameters and set defaults", SWT.NONE);
 		tlcTuneHyperlink.addHyperlinkListener(advancedTLCOptionsOpener);
 		baseFont = JFaceResources.getFont(JFaceResources.DIALOG_FONT);
 		baseFD = baseFont.getFontData();
@@ -1609,12 +1670,45 @@ public class MainModelPage extends BasicFormPage implements IConfigurationConsta
 
 		distributedOptions.setData(CLOUD_CONFIGURATION_KEY, jcloudsOptions);
 
+	
+		linkLineComposite = new Composite(body, SWT.NONE);
+		twd = new TableWrapData();
+		twd.colspan = 2;
+		twd.grabHorizontal = true;
+		twd.align = TableWrapData.RIGHT;
+		linkLineComposite.setLayoutData(twd);
+		linkLineComposite.setBackground(body.getDisplay().getSystemColor(SWT.COLOR_WHITE));
+		gl = new GridLayout(1, false);
+		gl.marginWidth = 0;
+		gl.marginRight = 36;
+		gl.horizontalSpacing = 0;
+		linkLineComposite.setLayout(gl);
+		hyper = toolkit.createHyperlink(linkLineComposite, "Evaluate Constant Expressions", SWT.NONE);
+		hyper.addHyperlinkListener(resultsPageOpener);
+		hyper.setFont(biggerLinkFont);
+		
+		
 		// add listeners propagating the changes of the elements to the changes
 		// of the parts to the list to be activated after the values has been loaded
 		dirtyPartListeners.add(commentsListener);
 		dirtyPartListeners.add(whatIsTheSpecListener);
 		dirtyPartListeners.add(whatToCheckListener);
 		dirtyPartListeners.add(howToRunListener);
+		
+		// add an empty ISelectionProvider; the default selection provider results in an infinite loop if the site
+		//		never gets another one set.
+		getSite().setSelectionProvider(new ISelectionProvider() {
+			@Override
+			public void addSelectionChangedListener(final ISelectionChangedListener listener) { }
+			@Override
+			public ISelection getSelection() {
+				return null;
+			}
+			@Override
+			public void removeSelectionChangedListener(final ISelectionChangedListener listener) { }
+			@Override
+			public void setSelection(final ISelection selection) { }
+		});
 	}
 
 	private void moveToTopOfDistributedOptionsStack(final String id, final boolean enableWorker,

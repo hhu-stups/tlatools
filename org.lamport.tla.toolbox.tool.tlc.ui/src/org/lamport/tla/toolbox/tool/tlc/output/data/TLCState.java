@@ -30,26 +30,24 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
 import org.lamport.tla.toolbox.tool.tlc.ui.util.IModuleLocatable;
 
 import tla2sany.st.Location;
+import util.TLAConstants;
 
 /**
  * Representation of the TLC state
+ * 
+ * TODO 393 MCState
+ * 
  * @author Simon Zambrovski
  */
 public class TLCState implements IModuleLocatable
 {
-    private static final String COLON = ":";
-    private static final String CR = "\n";
-    private static final String STUTTERING = " Stuttering"; // See tlc2.output.MP
-    private static final String AND = "/\\";
-    private static final String EQ = " = ";
-    private static final String BACK_TO_STATE = " Back to state"; // See tlc2.output.MP
+	private static final String BACK_TO_STATE = " " + TLAConstants.BACK_TO_STATE;
 
     /**
      * A factory for stuttering states
@@ -84,9 +82,9 @@ public class TLCState implements IModuleLocatable
     public static TLCState parseState(String input, String modelName)
     {
         // state number
-        int index = input.indexOf(COLON);
+        int index = input.indexOf(TLAConstants.COLON);
         // multi line
-        int index2 = input.indexOf(CR, index);
+        int index2 = input.indexOf(TLAConstants.CR, index);
         if (index2 == -1)
         {
             index2 = input.length();
@@ -94,7 +92,7 @@ public class TLCState implements IModuleLocatable
 
         int number = Integer.parseInt(input.substring(0, index));
         String label = input.substring(index + 1, index2);
-        if (label.indexOf(STUTTERING) == 0)
+        if (label.indexOf(TLAConstants.STUTTERING) == 0)
         {
             return STUTTERING_STATE(number, modelName);
         } else if (label.indexOf(BACK_TO_STATE) == 0)
@@ -120,7 +118,7 @@ public class TLCState implements IModuleLocatable
      * @return
      */
 	private static List<TLCVariable> parseVariables(String variablesText) {
-        String[] lines = variablesText.split(CR);
+        String[] lines = variablesText.split(TLAConstants.CR);
 		List<TLCVariable> vars = new ArrayList<TLCVariable>();
         int index;
 
@@ -131,7 +129,7 @@ public class TLCState implements IModuleLocatable
         for (int j = 0; j < lines.length; j++)
         {
             // find the index of the first /\ in the line
-            index = lines[j].indexOf(AND);
+            index = lines[j].indexOf(TLAConstants.TLA_AND);
 
             // adding the current line to the previous lines
             if (index != -1)
@@ -144,7 +142,7 @@ public class TLCState implements IModuleLocatable
                     vars.add(var);
                 }
 
-                stateVarString = lines[j].substring(index + AND.length()).split(EQ);
+                stateVarString = lines[j].substring(index + TLAConstants.TLA_AND.length()).split(TLAConstants.EQ);
             } else
             {
                 // no index
@@ -152,12 +150,12 @@ public class TLCState implements IModuleLocatable
                 if (stateVarString != null)
                 {
                     // either an empty line
-                    stateVarString[1] += CR;
+                    stateVarString[1] += TLAConstants.CR;
                     stateVarString[1] += lines[j];
                 } else
                 {
                     // the state has one variable only
-                    stateVarString = lines[j].split(EQ);
+                    stateVarString = lines[j].split(TLAConstants.EQ);
                 }
             }
         }
@@ -204,7 +202,7 @@ public class TLCState implements IModuleLocatable
      * is a state.
      */
 	private final String modelName;
-	private boolean wasDiffed= false;
+	private boolean wasDiffed = false;
 
     /**
      * 
@@ -240,6 +238,19 @@ public class TLCState implements IModuleLocatable
         return number;
     }
 
+    public final String getName() {
+    	// <Name line 154, col 15 to line 163, col 40 of module DijkstraMutex>
+    	if (label != null && label.length() > 3) {
+			// strip off "<" and ">"
+			return label.substring(2, label.length() - 1)
+					// strip off location if any (none with initial predicate)
+					.replaceAll(getModuleLocation().toString(), "")
+					// extra whitespaces
+					.trim();
+    	}
+    	return label;
+    }
+    
     public final String getLabel()
     {
         return label;
@@ -250,6 +261,9 @@ public class TLCState implements IModuleLocatable
         this.label = label;
     }
 
+    /*
+     * Note to developers: in TLCErrorView, we rely on the fact that this method returns the internal collection instance.
+     */
 	public final List<TLCVariable> getVariablesAsList() {
 		return this.variables;
 	}
@@ -274,55 +288,116 @@ public class TLCState implements IModuleLocatable
     }
 
     /**
-     * Returns a string describing the state with the
-     * variables representing trace explorer expressions
-     * replaced with the expressions.
+     * The returns a conjunction list of variables.
      * 
+     * For variables representing trace explorer expressions, if {@code includeTraceExpressions} is true,
+     * the returned string has:
+     * 
+     * /\ expr = value
+     * 
+     * where expr is the single line form of the trace explorer expression as shown in the Name column of
+     * the trace viewer.
+     *  
+     * For all other variables, this method attempts to display them as TLC does.
+     * 
+     * @param includeTraceExpressions whether trace expressions should be included.
      * @return
      */
-    public String getDescriptionWithTraceExpressions()
-    {
-        /*
-         * The returns a conjunction list of variables.
-         * 
-         * For variables representing trace explorer expressions,
-         * the returned string has:
-         * 
-         * /\ expr = value
-         * 
-         *  where expr is the single line form of the trace explorer expression
-         *  as shown in the Name column of the trace viewer.
-         *  
-         *  For all other variables, this method attempts to display them as TLC
-         *  does.
-         */
-        StringBuffer result = new StringBuffer();
+    public String getConjunctiveDescription(final boolean includeTraceExpressions) {
+        final StringBuilder result = new StringBuilder();
+        
 		for (int i = 0; i < variables.size(); i++) {
-			TLCVariable var = variables.get(i);
+			final TLCVariable var = variables.get(i);
+			
+			if (var.isTraceExplorerVar() && !includeTraceExpressions) {
+				continue;
+			}
+			
             result.append("/\\ ");
-            if (var.isTraceExplorerVar())
-            {
-                result.append(var.getSingleLineName());
-            } else
-            {
-                result.append(var.getName());
-            }
+			if (var.isTraceExplorerVar()) {
+				result.append(var.getSingleLineName());
+			} else {
+				result.append(var.getName());
+			}
 
             result.append(" = ");
 
-            if (var.getValue().toString() != null)
-            {
-                result.append(var.getValue().toString());
-            } else
-            {
-                result.append(var.getValue().toSimpleString());
-            }
+			if (var.getValue().toString() != null) {
+				result.append(var.getValue().toString());
+			} else {
+				result.append(var.getValue().toSimpleString());
+			}
 
-            result.append("\n");
-
+            result.append('\n');
         }
+		
         return result.toString();
     }
+
+	public String asRecord(final boolean includeHeader) {
+		final StringBuffer result = new StringBuffer();
+		result.append(TLAConstants.L_SQUARE_BRACKET);
+		result.append(TLAConstants.CR);
+		
+		if (includeHeader) {
+			result.append(TLAConstants.SPACE);
+			result.append(TLAConstants.TraceExplore.ACTION);
+			result.append(TLAConstants.RECORD_ARROW);
+			
+			result.append(TLAConstants.L_SQUARE_BRACKET);
+			result.append(TLAConstants.CR);
+			result.append(TLAConstants.SPACE).append(TLAConstants.SPACE).append(TLAConstants.SPACE);
+				result.append("position");
+				result.append(TLAConstants.RECORD_ARROW);
+				result.append(getStateNumber());
+				result.append(TLAConstants.COMMA).append(TLAConstants.CR);
+			
+				result.append(TLAConstants.SPACE).append(TLAConstants.SPACE).append(TLAConstants.SPACE);
+				result.append("name");
+				result.append(TLAConstants.RECORD_ARROW);
+				result.append(TLAConstants.QUOTE);
+				result.append(getName());
+				result.append(TLAConstants.QUOTE);
+				result.append(TLAConstants.COMMA).append(TLAConstants.CR);
+				
+				result.append(TLAConstants.SPACE).append(TLAConstants.SPACE).append(TLAConstants.SPACE);
+				result.append("location");
+				result.append(TLAConstants.RECORD_ARROW);
+				result.append(TLAConstants.QUOTE);
+				result.append(getModuleLocation());
+				result.append(TLAConstants.QUOTE);
+				
+			result.append(TLAConstants.CR);
+			result.append(TLAConstants.SPACE).append(TLAConstants.R_SQUARE_BRACKET);
+			if (!variables.isEmpty() ) {
+				// only append comma for additional records iff there are any variables to
+				// append.
+				result.append(TLAConstants.COMMA).append(TLAConstants.CR);
+			}
+		}
+		
+		for (int i = 0; i < variables.size(); i++) {
+			TLCVariable var = variables.get(i);
+			if (var.isTraceExplorerVar()) {
+				result.append(var.getSingleLineName());
+			} else {
+				result.append(var.getName());
+			}
+
+			result.append(TLAConstants.RECORD_ARROW);
+
+			if (var.getValue().toString() != null) {
+				result.append(var.getValue().toString());
+			} else {
+				result.append(var.getValue().toSimpleString());
+			}
+			if (i < variables.size() - 1) {
+				result.append(TLAConstants.COMMA).append(TLAConstants.CR);
+			}
+		}
+		result.append(TLAConstants.CR).append(TLAConstants.R_SQUARE_BRACKET);
+		return result.toString();
+	}
 
     public String getModelName()
     {
@@ -373,5 +448,23 @@ public class TLCState implements IModuleLocatable
 			return this.variables.size();
 		}
 		return 0;
+	}
+	
+	/**
+	 * This clone includes a shallow copy of the variables list.
+	 */
+	@Override
+	public TLCState clone() {
+		final TLCState clone = new TLCState(number, modelName);
+		
+		clone.stuttering = stuttering;
+		clone.isBackToState = isBackToState;
+		clone.label = label;
+		clone.variablesAsString = variablesAsString;
+		clone.location = location;
+		clone.wasDiffed = wasDiffed;
+		clone.variables.addAll(variables);
+		
+		return clone;
 	}
 }

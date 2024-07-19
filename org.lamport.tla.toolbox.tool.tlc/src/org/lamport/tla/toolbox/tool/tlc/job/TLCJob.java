@@ -25,6 +25,7 @@ import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationConstants;
 import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationDefaults;
 import org.lamport.tla.toolbox.tool.tlc.launch.TraceExplorerDelegate;
 import org.lamport.tla.toolbox.tool.tlc.model.Model;
+import org.lamport.tla.toolbox.tool.tlc.model.ModelCoverage;
 import org.lamport.tla.toolbox.tool.tlc.result.IResultPresenter;
 import org.lamport.tla.toolbox.tool.tlc.util.ModelHelper;
 import org.lamport.tla.toolbox.util.ResourceHelper;
@@ -32,6 +33,7 @@ import org.lamport.tla.toolbox.util.ToolboxJob;
 
 import tlc2.TLCGlobals;
 import tlc2.util.FP64;
+import util.TLAConstants;
 
 /**
  * Abstract TLC job
@@ -98,9 +100,9 @@ public abstract class TLCJob extends AbstractJob implements IModelConfigurationC
             this.outFile = this.launchDir.getFile(ModelHelper.TE_FILE_OUT);
         } else
         {
-            this.rootModule = this.launchDir.getFile(ModelHelper.FILE_TLA);
-            this.cfgFile = this.launchDir.getFile(ModelHelper.FILE_CFG);
-            this.outFile = this.launchDir.getFile(ModelHelper.FILE_OUT);
+            this.rootModule = this.launchDir.getFile(TLAConstants.Files.MODEL_CHECK_TLA_FILE);
+            this.cfgFile = this.launchDir.getFile(TLAConstants.Files.MODEL_CHECK_CONFIG_FILE);
+            this.outFile = this.launchDir.getFile(TLAConstants.Files.MODEL_CHECK_OUTPUT_FILE);
         }
     }
 
@@ -276,7 +278,7 @@ public abstract class TLCJob extends AbstractJob implements IModelConfigurationC
 
     protected boolean collectCoverage() throws CoreException {
 		final ILaunchConfiguration launchConfiguration = launch.getLaunchConfiguration();
-		if (launchConfiguration.getAttribute(LAUNCH_COVERAGE, LAUNCH_COVERAGE_DEFAULT) != Model.Coverage.OFF.ordinal()) {
+		if (launchConfiguration.getAttribute(LAUNCH_COVERAGE, LAUNCH_COVERAGE_DEFAULT) != ModelCoverage.OFF.ordinal()) {
 			return launchConfiguration.getAttribute(MODEL_BEHAVIOR_SPEC_TYPE,
 					MODEL_BEHAVIOR_TYPE_DEFAULT) != MODEL_BEHAVIOR_TYPE_NO_SPEC;
 		} else {

@@ -67,7 +67,7 @@ public class DumpAsDotTest extends ModelCheckerTestCase {
 	}
 	
 	// http://stackoverflow.com/a/17861016
-	private static byte[] getBytes(InputStream is) throws IOException {
+	public static byte[] getBytes(InputStream is) throws IOException {
 		final ByteArrayOutputStream os = new ByteArrayOutputStream();
 		try {
 			byte[] buffer = new byte[0xFFFF];

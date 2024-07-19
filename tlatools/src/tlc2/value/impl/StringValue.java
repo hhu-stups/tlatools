@@ -7,6 +7,7 @@
 package tlc2.value.impl;
 
 import java.io.IOException;
+import java.util.Map;
 
 import tlc2.tool.FingerprintException;
 import tlc2.tool.coverage.CostModel;
@@ -37,10 +38,12 @@ public class StringValue extends Value {
 	  this.cm = cm;
   }
 
+  @Override
   public final byte getKind() { return STRINGVALUE; }
 
   public final UniqueString getVal() { return this.val; }
 
+  @Override
   public final int compareTo(Object obj) {
     try {
       if (obj instanceof StringValue) {
@@ -75,6 +78,7 @@ public class StringValue extends Value {
     }
   }
 
+  @Override
   public final boolean member(Value elem) {
     try {
       Assert.fail("Attempted to check if the value:\n" + Values.ppr(elem.toString()) +
@@ -87,6 +91,7 @@ public class StringValue extends Value {
     }
   }
 
+  @Override
   public final boolean isFinite() {
     try {
       Assert.fail("Attempted to check if the string " + Values.ppr(this.toString()) +
@@ -99,6 +104,7 @@ public class StringValue extends Value {
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept ex) {
     try {
       if (ex.idx < ex.path.length) {
@@ -113,6 +119,7 @@ public class StringValue extends Value {
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept[] exs) {
     try {
       if (exs.length != 0) {
@@ -127,6 +134,7 @@ public class StringValue extends Value {
     }
   }
 
+  @Override
   public final int size() {
     try {
       Assert.fail("Attempted to compute the number of elements in the string " +
@@ -139,14 +147,35 @@ public class StringValue extends Value {
     }
   }
 
+  @Override
+  public boolean mutates() {
+	  // finalized after construction.
+	  return true;
+  }
+  
+  @Override
+  public final Value toTuple() {
+		final String s = val.toString();
+		Value[] vals = new Value[s.length()];
+		for (int i = 0; i < s.length(); i++) {
+			vals[i] = new StringValue(Character.toString(s.charAt(i)));
+		}
+		return new TupleValue(vals);
+  }
+
+  @Override
   public final boolean isNormalized() { return true; }
 
+  @Override
   public final Value normalize() { /*SKIP*/return this; }
 
+  @Override
   public final boolean isDefined() { return true; }
 
+  @Override
   public final IValue deepCopy() { return this; }
 
+  @Override
   public final boolean assignable(Value val) {
     try {
       return ((val instanceof StringValue) &&
@@ -181,6 +210,7 @@ public class StringValue extends Value {
 	}
 
   /* The fingerprint method */
+  @Override
   public final long fingerPrint(long fp) {
     try {
       fp = FP64.Extend(fp, STRINGVALUE) ;
@@ -194,6 +224,7 @@ public class StringValue extends Value {
     }
   }
 
+  @Override
   public final IValue permute(IMVPerm perm) { return this; }
 
   /*************************************************************************
@@ -227,7 +258,7 @@ public class StringValue extends Value {
             buf.append(str.charAt(i)) ;
             break ;
          } // switch
-       }; // for
+       }// for
       return buf.toString();
     }
     catch (RuntimeException | OutOfMemoryError e) {
@@ -238,6 +269,7 @@ public class StringValue extends Value {
 
 
   /* The string representation of the value. */
+  @Override
   public StringBuffer toString(StringBuffer sb, int offset, boolean swallow) {
     try {
       return sb.append("\"" + PrintVersion(this.val.toString()) + "\"");
@@ -248,6 +280,12 @@ public class StringValue extends Value {
     }
   }
 
+  /* Same as toString. */
+  @Override
+  public final String toUnquotedString() {
+	  return PrintVersion(this.val.toString());
+  }
+
 	public static IValue createFrom(final IValueInputStream vos) throws IOException {
 		final UniqueString str = UniqueString.read(vos.getInputStream());
 		final IValue res = new StringValue(str);
@@ -255,5 +293,12 @@ public class StringValue extends Value {
 		vos.assign(res, index);
 		return res;
 	}
-
+	
+	public static IValue createFrom(final IValueInputStream vos, final Map<String, UniqueString> tbl) throws IOException {
+		final UniqueString str = UniqueString.read(vos.getInputStream(), tbl);
+		final IValue res = new StringValue(str);
+		final int index = vos.getIndex();
+		vos.assign(res, index);
+		return res;
+	}
 }

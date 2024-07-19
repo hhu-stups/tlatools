@@ -2,11 +2,15 @@
 // Portions Copyright (c) 2003 Microsoft Corporation.  All rights reserved.
 package tla2sany.modanalyzer;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Set;
 
+import pcal.Validator;
 import tla2sany.semantic.AbortException;
 import tla2sany.semantic.Errors;
 import tla2sany.semantic.ExternalModuleTable;
@@ -221,10 +225,19 @@ public class SpecObj
         return semanticErrors;
     }
 
+	public Set<String> getModuleNames() {
+		final Set<String> s = new HashSet<>();
+		final Enumeration<ModulePointer> modules = getModules();
+		while (modules.hasMoreElements()) {
+			s.add(modules.nextElement().getName());
+		}
+		return s;
+	}
+
     // Returns enumeration of the modules so far included in the spec.
     // As whoever wrote this documentation didn't think was worth mentioning,
     // it appears that the "modules" being returned are ModulePointer objects.
-    public final Enumeration<String> getModules()
+    public final Enumeration<ModulePointer> getModules()
     {
         return moduleRelationshipsSpec.getKeys();
     }
@@ -880,18 +893,33 @@ public class SpecObj
     }
 
     /**
-     * This method "loads" an entire specification, starting with the
-     * top-level rootExternalModule and followed by all of the external
-     * modules it references via EXTENDS and INSTANCE statements.
+     * This invokes {@code loadSpec(rootExternalModuleName, errors, false);}
      */
-    public boolean loadSpec(String rootExternalModuleName, Errors errors) throws AbortException
-    {
+    public boolean loadSpec(final String rootExternalModuleName, final Errors errors) throws AbortException {
+    	return loadSpec(rootExternalModuleName, errors, false);
+    }
+    
+    /**
+	 * This method "loads" an entire specification, starting with the top-level
+	 * rootExternalModule and followed by all of the external modules it references
+	 * via EXTENDS and INSTANCE statements.
+	 * 
+	 * @param validateParseUnits if true, each parseable unit will be checked for
+	 *                           PlusCal and its accompanied TLA translation block,
+	 *                           followed by a validation of them if they exist
+	 * @see Validator
+	 */
+	public boolean loadSpec(final String rootExternalModuleName, final Errors errors, final boolean validateParseUnits)
+			throws AbortException {
         // If rootExternalModuleName" has *not* already been parsed, then
         // go to the file system and find the file containing it, create a
         // ParseUnit for it, and parse it. Parsing includes determining
         // module relationships. Aborts if not found in file system
         rootParseUnit = findOrCreateParsedUnit(rootExternalModuleName, errors, true /* first call */);
         rootModule = rootParseUnit.getRootModule();
+        if (validateParseUnits) {
+        	validateParseUnit(rootParseUnit);
+        }
 
         // Retrieve and parse all module extentions: As long as there is
         // another unresolved module name...
@@ -930,6 +958,10 @@ public class SpecObj
 
             if (extentionFound)
             {
+                if (validateParseUnits) {
+                	validateParseUnit(nextExtentionOrInstantiationParseUnit);
+                }
+
                 extenderOrInstancerParseUnit.addExtendee(nextExtentionOrInstantiationParseUnit);
                 nextExtentionOrInstantiationParseUnit.addExtendedBy(extenderOrInstancerParseUnit);
             }
@@ -969,6 +1001,40 @@ public class SpecObj
         return true;
         // loadUnresolvedRelatives(moduleRelationshipsSpec, rootModule, errors);
     }
+	
+	private void validateParseUnit(final ParseUnit parseUnit) {
+    	final File f = parseUnit.getNis().sourceFile();
+    	
+    	try (final FileInputStream fis = new FileInputStream(f)) {
+    		final Validator.ValidationResult result = Validator.validate(fis);
+    		
+            switch (result) {
+            	case NO_PLUSCAL_EXISTS:
+            	case NO_DIVERGENCE:
+            	case NO_CHECKSUMS_EXIST:
+            		break;
+            	case ERROR_ENCOUNTERED:
+					ToolIO.err.println("A Java problem was encountered attempting to validate the specification for "
+							+ parseUnit.getName());
+
+        			break;
+            	case NO_TRANSLATION_EXISTS:
+					ToolIO.out.println("PlusCal was found in the specification for " + parseUnit.getName()
+							+ " but no TLA+ translation block for it could be found.");
+
+            		break;
+            	case DIVERGENCE_EXISTS:
+					ToolIO.out.println("!! WARNING: Either the PlusCal or its TLA+ translation has changed in the "
+							+ "specification for " + parseUnit.getName()
+							+ " since the last time translation was performed.");
+            		
+            		break;
+            }
+    	} catch (final IOException e) {
+    		ToolIO.err.println("Encountered an exception while attempt to validate " + f.getAbsolutePath() + " - "
+    				+ e.getMessage());
+    	}
+	}
 
     /**
      * Getter for the name resolver used in the Spec

@@ -89,7 +89,7 @@ public class ModelValue extends Value implements IModelValue {
         && (val.charAt(1) == '_')) {
       this.type = val.charAt(0) ;
       }
-     else { this.type = 0 ; } ;
+     else { this.type = 0 ; }
   }
 
   /* Make str a new model value, if it is not one yet.  */
@@ -111,8 +111,10 @@ public class ModelValue extends Value implements IModelValue {
     }
   }
 
+  @Override
   public final byte getKind() { return MODELVALUE; }
 
+  @Override
   public final int compareTo(Object obj) {
     try {
       if (obj instanceof ModelValue) {
@@ -131,7 +133,7 @@ public class ModelValue extends Value implements IModelValue {
       if (this.type == 0) {
         return (obj instanceof ModelValue &&
           this.val.equals(((ModelValue)obj).val));
-       };
+       }
       if (obj instanceof ModelValue) {
         ModelValue mobj = (ModelValue) obj ;
         if (   (mobj.type == this.type)
@@ -143,8 +145,8 @@ public class ModelValue extends Value implements IModelValue {
                       + "of the differently-typed model values "
                         + Values.ppr(this.toString()) + " and "
                         + Values.ppr(mobj.toString()));
-          } ;
-       } ;
+          }
+      }
       Assert.fail("Attempted to check equality of typed model value "
                    + Values.ppr(this.toString()) + " and non-model value\n"
                    + Values.ppr(obj.toString())) ;
@@ -168,7 +170,7 @@ public class ModelValue extends Value implements IModelValue {
                    + Values.ppr(this.toString()) + " and the non-model value\n"
                    + Values.ppr(obj.toString())) ;
 
-       } ;
+       }
       return false ;
     }
     catch (RuntimeException | OutOfMemoryError e) {
@@ -185,7 +187,7 @@ public class ModelValue extends Value implements IModelValue {
                    + " is an element of\n"
                    + Values.ppr(obj.toString())) ;
 
-       } ;
+       }
       return false ;
     }
     catch (RuntimeException | OutOfMemoryError e) {
@@ -194,6 +196,7 @@ public class ModelValue extends Value implements IModelValue {
     }
   }
 
+  @Override
   public final boolean member(Value elem) {
     try {
       Assert.fail("Attempted to check if the value:\n" + Values.ppr(elem.toString()) +
@@ -206,6 +209,7 @@ public class ModelValue extends Value implements IModelValue {
     }
   }
 
+  @Override
   public final boolean isFinite() {
     try {
       Assert.fail("Attempted to check if the model value " + Values.ppr(this.toString()) +
@@ -218,6 +222,7 @@ public class ModelValue extends Value implements IModelValue {
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept ex) {
     try {
       if (ex.idx < ex.path.length) {
@@ -232,6 +237,7 @@ public class ModelValue extends Value implements IModelValue {
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept[] exs) {
     try {
       if (exs.length != 0) {
@@ -246,6 +252,7 @@ public class ModelValue extends Value implements IModelValue {
     }
   }
 
+  @Override
   public final int size() {
     try {
       Assert.fail("Attempted to compute the number of elements in the model value " +
@@ -258,14 +265,24 @@ public class ModelValue extends Value implements IModelValue {
     }
   }
 
+  @Override
+  public boolean mutates() {
+	  return false;
+  }
+
+  @Override
   public final boolean isNormalized() { return true; }
 
+  @Override
   public final Value normalize() { /*nop*/return this; }
 
+  @Override
   public final boolean isDefined() { return true; }
 
+  @Override
   public final IValue deepCopy() { return this; }
 
+  @Override
   public final boolean assignable(Value val) {
     try {
       return ((val instanceof ModelValue) &&
@@ -284,6 +301,7 @@ public class ModelValue extends Value implements IModelValue {
 	}
 
   /* The fingerprint methods */
+  @Override
   public final long fingerPrint(long fp) {
     try {
       return this.val.fingerPrint(FP64.Extend(fp, MODELVALUE));
@@ -294,6 +312,7 @@ public class ModelValue extends Value implements IModelValue {
     }
   }
 
+  @Override
   public final IValue permute(IMVPerm perm) {
     try {
       IValue res = perm.get(this);
@@ -307,6 +326,7 @@ public class ModelValue extends Value implements IModelValue {
   }
 
   /* The string representation. */
+  @Override
   public final StringBuffer toString(StringBuffer sb, int offset, boolean ignored) {
     try {
       return sb.append(this.val);

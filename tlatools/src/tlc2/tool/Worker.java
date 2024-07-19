@@ -10,8 +10,11 @@ import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
 
+import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.tool.fp.FPSet;
+import tlc2.tool.impl.FastTool;
 import tlc2.tool.queue.IStateQueue;
 import tlc2.util.BufferedRandomAccessFile;
 import tlc2.util.IStateWriter;
@@ -19,10 +22,13 @@ import tlc2.util.IdThread;
 import tlc2.util.SetOfStates;
 import tlc2.util.statistics.FixedSizedBucketStatistics;
 import tlc2.util.statistics.IBucketStatistics;
+import util.Assert.TLCRuntimeException;
 import util.FileUtil;
+import util.WrongInvocationException;
 
-public final class Worker extends IdThread implements IWorker {
+public final class Worker extends IdThread implements IWorker, INextStateFunctor {
 
+	protected static final boolean coverage = TLCGlobals.isCoverageEnabled();
 	private static final int INITIAL_CAPACITY = 16;
 	
 	/**
@@ -31,10 +37,14 @@ public final class Worker extends IdThread implements IWorker {
 	 * We expect to get linear speedup with respect to the number of processors.
 	 */
 	private final ModelChecker tlc;
+	private final FastTool tool;
 	private final IStateQueue squeue;
+	private final FPSet theFPSet;
+	private final IStateWriter allStateWriter;
 	private final IBucketStatistics outDegree;
 	private final String filename;
 	private final BufferedRandomAccessFile raf;
+	private final boolean checkDeadlock;
 
 	private long lastPtr;
 	private long statesGenerated;
@@ -47,7 +57,12 @@ public final class Worker extends IdThread implements IWorker {
 		// SZ 12.04.2009: added thread name
 		this.setName("TLC Worker " + id);
 		this.tlc = (ModelChecker) tlc;
+		this.checkLiveness = this.tlc.checkLiveness;
+		this.checkDeadlock = this.tlc.checkDeadlock;
+		this.tool = (FastTool) this.tlc.tool;
 		this.squeue = this.tlc.theStateQueue;
+		this.theFPSet = this.tlc.theFPSet;
+		this.allStateWriter = this.tlc.allStateWriter;
 		this.outDegree = new FixedSizedBucketStatistics(this.getName(), 32); // maximum outdegree of 32 appears sufficient for now.
 		this.setName("TLCWorkerThread-" + String.format("%03d", id));
 
@@ -61,7 +76,6 @@ public final class Worker extends IdThread implements IWorker {
    * updates the state set and state queue.
 	 */
 	public void run() {
-		final boolean checkLiveness = this.tlc.checkLiveness;
 		TLCState curState = null;
 		try {
 			while (true) {
@@ -76,17 +90,28 @@ public final class Worker extends IdThread implements IWorker {
 				}
 				setCurrentState(curState);
 				
-				SetOfStates setOfStates = null;
-				if (checkLiveness) {
+				if (this.checkLiveness) {
+					// Allocate iff liveness is checked.
 					setOfStates = createSetOfStates();
 				}
 				
-				if (this.tlc.doNext(curState, setOfStates, this)) {
-					return;
+				final long preNext = this.statesGenerated;
+				try {
+					this.tool.getNextStates(this, curState);
+				} catch (TLCRuntimeException e) {
+					// The next-state relation couldn't be evaluated.
+					this.tlc.doNextFailed(curState, null, e);
+				}
+				
+				if (this.checkDeadlock && preNext == this.statesGenerated) {
+					// A deadlock is defined as a state without (seen or unseen) successor
+					// states. In other words, evaluating the next-state relation for a state
+					// yields no states.
+	                this.tlc.doNextSetErr(curState, null, false, EC.TLC_DEADLOCK_REACHED, null);
 				}
 				
 	            // Finally, add curState into the behavior graph for liveness checking:
-	            if (checkLiveness)
+	            if (this.checkLiveness)
 	            {
 					doNextCheckLiveness(curState, setOfStates);
 	            }
@@ -112,6 +137,10 @@ public final class Worker extends IdThread implements IWorker {
 	/* Liveness */
 	
 	private int multiplier = 1;
+
+	private SetOfStates setOfStates;
+
+	private final boolean checkLiveness;
 
 	private final void doNextCheckLiveness(TLCState curState, SetOfStates liveNextStates) throws IOException {
 		final long curStateFP = curState.fingerPrint();
@@ -207,6 +236,10 @@ public final class Worker extends IdThread implements IWorker {
 
 	// Read from previously written (see writeState) trace file.
 	public final synchronized ConcurrentTLCTrace.Record readStateRecord(final long ptr) throws IOException {
+		// Remember current tip of the file before we rewind.
+		this.raf.mark();
+		
+		// rewind to position we want to read from.
 		this.raf.seek(ptr);
 		
 		final long prev = this.raf.readLongNat();
@@ -217,6 +250,11 @@ public final class Worker extends IdThread implements IWorker {
 			
 		final long fp = this.raf.readLong();
 		assert tlc.theFPSet.contains(fp);
+		
+		// forward/go back back to tip of file.
+		// This is only necessary iff TLC runs with '-continue'. In other words, state
+		// space exploration continues after an error trace has been written.
+		this.raf.seek(this.raf.getMark());
 		
 		return new ConcurrentTLCTrace.Record(prev, worker, fp);
 	}
@@ -280,5 +318,147 @@ public final class Worker extends IdThread implements IWorker {
 		public void close() throws IOException {
 			this.enumRaf.close();
 		}
+	}
+	
+	//**************************************************************//
+
+	@Override
+	public final Object addElement(final TLCState state) {
+		throw new WrongInvocationException("tlc2.tool.Worker.addElement(TLCState) should not be called");
+	}
+
+	@Override
+	public final Object addElement(final TLCState curState, final Action action, final TLCState succState) {
+	    if (coverage) { action.cm.incInvocations(); }
+		this.statesGenerated++;
+		
+		try {
+			if (!this.tool.isGoodState(succState)) {
+				this.tlc.doNextSetErr(curState, succState, action);
+				throw new InvariantViolatedException();
+			}
+			
+			// Check if state is excluded by a state or action constraint.
+			final boolean inModel = (this.tool.isInModel(succState) && this.tool.isInActions(curState, succState));
+			
+			// Check if state is new or has been seen earlier.
+			boolean unseen = true;
+			if (inModel) {
+				unseen = !isSeenState(curState, succState, action);
+			}
+			
+			// Check if succState violates any invariant:
+			if (unseen) {
+				if (this.doNextCheckInvariants(curState, succState)) {
+					throw new InvariantViolatedException();
+				}
+			}
+			
+			// Check if the state violates any implied action. We need to do it
+			// even if succState is not new.
+			if (this.doNextCheckImplied(curState, succState)) {
+				throw new InvariantViolatedException();
+			}
+			
+			if (inModel && unseen) {
+				// The state is inModel, unseen and neither invariants
+				// nor implied actions are violated. It is thus eligible
+				// for further processing by other workers.
+				this.squeue.sEnqueue(succState);
+			}
+			return this;
+		} catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+	}
+
+	private final boolean isSeenState(final TLCState curState, final TLCState succState, final Action action)
+			throws IOException {
+		final long fp = succState.fingerPrint();
+		final boolean seen = this.theFPSet.put(fp);
+		// Write out succState when needed:
+		this.allStateWriter.writeState(curState, succState, !seen, action);
+		if (!seen) {
+			// Write succState to trace only if it satisfies the
+			// model constraints. Do not enqueue it yet, but wait
+			// for implied actions and invariants to be checked.
+			// Those checks - if violated - will cause model checking
+			// to terminate. Thus we cannot let concurrent workers start
+			// exploring this new state. Conversely, the state has to
+			// be in the trace in case either invariant or implied action
+			// checks want to print the trace.
+			this.writeState(curState, fp, succState);
+			if (coverage) {	action.cm.incSecondary(); }
+		}
+		// For liveness checking:
+		if (this.checkLiveness)
+		{
+			this.setOfStates.put(fp, succState);
+		}
+		return seen;
+	}
+
+	private final boolean doNextCheckInvariants(final TLCState curState, final TLCState succState) throws IOException, WorkerException, Exception {
+        int k = 0;
+		try
+        {
+			for (k = 0; k < this.tool.getInvariants().length; k++)
+            {
+                if (!tool.isValid(this.tool.getInvariants()[k], succState))
+                {
+                    // We get here because of invariant violation:
+                	if (TLCGlobals.continuation) {
+                        synchronized (this.tlc)
+                        {
+							MP.printError(EC.TLC_INVARIANT_VIOLATED_BEHAVIOR,
+									this.tool.getInvNames()[k]);
+							this.tlc.trace.printTrace(curState, succState);
+							return false;
+                        }
+                	} else {
+						return this.tlc.doNextSetErr(curState, succState, false,
+								EC.TLC_INVARIANT_VIOLATED_BEHAVIOR, this.tool.getInvNames()[k]);
+                	}
+				}
+			}
+        } catch (Exception e)
+        {
+			this.tlc.doNextEvalFailed(curState, succState, EC.TLC_INVARIANT_EVALUATION_FAILED,
+					this.tool.getInvNames()[k], e);
+		}
+		return false;
+	}
+
+	private final boolean doNextCheckImplied(final TLCState curState, final TLCState succState) throws IOException, WorkerException, Exception {
+		int k = 0;
+        try
+        {
+			for (k = 0; k < this.tool.getImpliedActions().length; k++)
+            {
+                if (!tool.isValid(this.tool.getImpliedActions()[k], curState, succState))
+                {
+                    // We get here because of implied-action violation:
+                    if (TLCGlobals.continuation)
+                    {
+                        synchronized (this.tlc)
+                        {
+                            MP.printError(EC.TLC_ACTION_PROPERTY_VIOLATED_BEHAVIOR, this.tool
+                                    .getImpliedActNames()[k]);
+                            this.tlc.trace.printTrace(curState, succState);
+							return false;
+                       }
+                    } else {
+						return this.tlc.doNextSetErr(curState, succState, false,
+								EC.TLC_ACTION_PROPERTY_VIOLATED_BEHAVIOR,
+								this.tool.getImpliedActNames()[k]);
+                	}
+				}
+			}
+        } catch (Exception e)
+        {
+        	this.tlc.doNextEvalFailed(curState, succState, EC.TLC_ACTION_PROPERTY_EVALUATION_FAILED,
+					this.tool.getImpliedActNames()[k], e);
+		}
+        return false;
 	}
 }

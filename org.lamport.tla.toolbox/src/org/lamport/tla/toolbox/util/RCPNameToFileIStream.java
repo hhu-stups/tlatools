@@ -8,8 +8,14 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Arrays;
 import java.util.Enumeration;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.Vector;
+import java.util.stream.Collectors;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 import org.eclipse.core.runtime.FileLocator;
 import org.eclipse.core.runtime.Platform;
@@ -18,6 +24,7 @@ import org.osgi.framework.Bundle;
 import tla2sany.semantic.ModuleNode;
 import tlc2.module.BuiltInModuleHelper;
 import util.FilenameToStream;
+import util.TLAConstants;
 import util.ToolIO;
 
 /**
@@ -99,7 +106,7 @@ public class RCPNameToFileIStream implements FilenameToStream
      */
     public File resolve(String name, boolean isModule)
     {
-        if (isModule && name.endsWith(".tla"))
+        if (isModule && name.endsWith(TLAConstants.Files.TLA_EXTENSION))
         {
             // user/Foo.tla => user/Foo
             name = name.substring(0, name.length() - 4);
@@ -109,7 +116,7 @@ public class RCPNameToFileIStream implements FilenameToStream
         if (isModule)
         {
             // user/Foo => user/Foo.tla
-            sourceFileName = name + ".tla"; // could be Foo.tla or user/Foo.tla
+            sourceFileName = name + TLAConstants.Files.TLA_EXTENSION; // could be Foo.tla or user/Foo.tla
         } else {
             // user/Foo.cfg => user/Foo.cfg
             sourceFileName = name;
@@ -137,7 +144,7 @@ public class RCPNameToFileIStream implements FilenameToStream
             // improve this: ToolIO.getUserDir()
             if ((idx == 0) && (ToolIO.getUserDir() != null))
             {
-                sourceFile = new File(ToolIO.getUserDir(), name);
+                sourceFile = new TLAFile(ToolIO.getUserDir(), name, this);
             } else
             {
             	if(FilenameToStream.isArchive(prefix)) {
@@ -146,7 +153,7 @@ public class RCPNameToFileIStream implements FilenameToStream
     					return sourceFile;
     				}
             	} else {
-                    sourceFile = new File(prefix + name);
+                    sourceFile = new TLAFile(prefix + name, true, this);
             	}
             }
             if (sourceFile != null && sourceFile.exists()) {
@@ -166,7 +173,7 @@ public class RCPNameToFileIStream implements FilenameToStream
 	// the resource. The problem is, that the Toolbox and TLC work with File instead
 	// of InputStream which is why we can't extract to memory only.
 	private File getFromArchive(String prefix, String name) {
-		final File outputFile = new File(TMPDIR + File.separator + name);
+		final File outputFile = new TLAFile(TMPDIR + File.separator + name, true, this);
 		outputFile.deleteOnExit(); // Written to TMPDIR which is likely deleted regularly anyway.
 		try (FileSystem fileSystem = FileSystems.newFileSystem(new File(prefix).toPath(), null)) {
 	        Path fileToExtract = fileSystem.getPath(name);
@@ -197,6 +204,11 @@ public class RCPNameToFileIStream implements FilenameToStream
 
 	}
 
+	@Override
+	public boolean isLibraryModule(String moduleName) {
+		return isStandardModule(moduleName);
+	}
+	
 	/**
 	 * August 2014 - TL added a stub for this informative interface method. All
 	 * the usages of this class were written before the addition of this
@@ -213,4 +225,41 @@ public class RCPNameToFileIStream implements FilenameToStream
 		}
 		return buf.toString();
 	}
+    
+	/**
+	 * @return The set of the names of all modules found in the various
+	 * libraryPathEntries (Toolbox & TLC installation, spec directories, library
+	 * directories, and library archives.
+	 * <p>
+	 * This are not the modules extended by the current spec.
+	 */
+    public Set<String> getAllModules() {
+    	final Set<String> s = new HashSet<>();
+    	for (final String path : libraryPathEntries) {
+    		if(FilenameToStream.isArchive(path)) {
+    			s.addAll(listTLAFilesInZip(path));
+    		} else {
+    			// List .tla files in the given directory.
+				s.addAll(Arrays.stream(new File(path).listFiles((d, name) -> name.endsWith(TLAConstants.Files.TLA_EXTENSION)))
+						.map(f -> f.getName()).collect(Collectors.toSet()));
+    		}
+		}
+    	return s;
+    }
+    
+    private Set<String> listTLAFilesInZip(String path) {
+    	final Set<String> s = new HashSet<>();
+		try (final ZipFile zipFile = new ZipFile(path)) {
+			final Enumeration<? extends ZipEntry> e = zipFile.entries();
+			while (e.hasMoreElements()) {
+				ZipEntry entry = e.nextElement();
+				String entryName = entry.getName();
+				if (entryName.endsWith(TLAConstants.Files.TLA_EXTENSION)) {
+					s.add(entryName);
+				}
+			}
+		} catch (IOException ignored) {
+		}
+		return s;
+    }
 }

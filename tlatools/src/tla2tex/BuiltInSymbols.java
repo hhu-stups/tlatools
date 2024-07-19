@@ -33,6 +33,8 @@ package tla2tex;
 import java.util.Enumeration;
 import java.util.Hashtable;
 
+import util.TLAConstants;
+
 public final class BuiltInSymbols
   { 
     /***********************************************************************
@@ -224,7 +226,7 @@ public final class BuiltInSymbols
              // Changed to INFIX from KEYWORD by LL on 21 July 2012 to allow 
              // left-aligning with [].  It produces something reasonable when
              // a bunch of [] symbols are right-aligned with CASE as well.
-        add("CONSTANT",   "{\\CONSTANT}",    Symbol.KEYWORD, 0);
+        add(TLAConstants.KeyWords.CONSTANT,   "{\\CONSTANT}",    Symbol.KEYWORD, 0);
         add("CONSTANTS",  "{\\CONSTANTS}",   Symbol.KEYWORD, 0);
         add("EXCEPT",     "{\\EXCEPT}",      Symbol.KEYWORD, 0);
         add("EXTENDS",    "{\\EXTENDS}",     Symbol.KEYWORD, 0);
@@ -237,7 +239,7 @@ public final class BuiltInSymbols
         add("STRING",     "{\\STRING}",      Symbol.KEYWORD, 0);
         add("THEOREM",    "{\\THEOREM}",     Symbol.KEYWORD, 0);
         add("TRUE",       "{\\TRUE}",        Symbol.KEYWORD, 0);
-        add("VARIABLE",   "{\\VARIABLE}",    Symbol.KEYWORD, 0);
+        add(TLAConstants.KeyWords.VARIABLE,   "{\\VARIABLE}",    Symbol.KEYWORD, 0);
         add("VARIABLES",  "{\\VARIABLES}",   Symbol.KEYWORD, 0);
         add("WITH",       "{\\WITH}",        Symbol.KEYWORD, 0);
 // The following added for tla2tex

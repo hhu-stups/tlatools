@@ -2,13 +2,16 @@ package org.lamport.tla.toolbox.tool.tlc.ui.editor.page.results;
 
 import java.util.Comparator;
 
+import org.eclipse.core.runtime.Platform;
 import org.eclipse.jface.layout.TableColumnLayout;
 import org.eclipse.jface.viewers.ColumnWeightData;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.graphics.Color;
 import org.eclipse.swt.graphics.Image;
+import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Table;
 import org.eclipse.swt.widgets.TableColumn;
+import org.lamport.tla.toolbox.editor.basic.TLAEditorActivator;
 import org.lamport.tla.toolbox.tool.tlc.output.data.ActionInformationItem;
 import org.lamport.tla.toolbox.tool.tlc.ui.TLCUIActivator;
 import org.lamport.tla.toolbox.tool.tlc.ui.util.AbstractTableLabelProvider;
@@ -32,7 +35,11 @@ class CoverageLabelProvider extends AbstractTableLabelProvider {
 
     static final String TOOLTIP = "Click on a row to go to action.";
     
+    private static final boolean RUNNING_WINDOWS = Platform.getOS().equals(Platform.OS_WIN32);
 	private static final String[] COLUMN_TITLES = new String[] { "Module", "Action", "Location", "States Found", "Distinct States"  };
+	private static final String[] COLUMN_TOOLTIPS = new String[] { TOOLTIP, TOOLTIP, TOOLTIP,
+			"\u03A3 of this column equals (total) States Found on the State Space progress table to the left.",
+			"\u03A3 of this column equals (total) Distinct States on the State Space progress table to the left." };
     private static final int[] COLUMN_WIDTHS;
     private static final Comparator<ActionInformationItem>[] COLUMN_COMP;
 	private static final double[] COLUMN_WIDTH_PERCENTAGES;
@@ -107,7 +114,7 @@ class CoverageLabelProvider extends AbstractTableLabelProvider {
 			final TableColumn column = new TableColumn(stateTable, SWT.NULL);
 			column.setWidth(COLUMN_WIDTHS[i]);
 			column.setText(COLUMN_TITLES[i]);
-			column.setToolTipText(TOOLTIP);
+			column.setToolTipText(COLUMN_TOOLTIPS[i]);
 			column.setData(COVERAGE_COMPARATOR, COLUMN_COMP[i]);
 
 			final int weight = (int)(100.0 * COLUMN_WIDTH_PERCENTAGES[i]);
@@ -154,13 +161,20 @@ class CoverageLabelProvider extends AbstractTableLabelProvider {
 	}
 
 	public Color getForeground(final Object element, final int columnIndex) {
+		if (TLAEditorActivator.getDefault().isCurrentThemeDark() && (element instanceof ActionInformationItem)
+				&& !RUNNING_WINDOWS) {	// RUNNING_WINDOWS check due to https://github.com/tlaplus/tlaplus/issues/341
+			final ActionInformationItem aii = (ActionInformationItem) element;
+			if ((aii.getCount() == 0) && (aii.getUnseen() == 0)) {
+				return Display.getCurrent().getSystemColor(SWT.COLOR_BLACK);
+			}
+		}
 		return null; // Use default color
 	}
 
 	public Color getBackground(final Object element, final int columnIndex) {
 		if (element instanceof ActionInformationItem) {
 			final ActionInformationItem aii = (ActionInformationItem) element;
-			if (aii.getCount() == 0 && aii.getUnseen() == 0) {
+			if ((aii.getCount() == 0) && (aii.getUnseen() == 0)) {
 				return TLCUIActivator.getColor(SWT.COLOR_YELLOW);
 			}
 		}

@@ -13,12 +13,14 @@ import util.Assert;
 
 public class UndefValue extends Value {
 
-  public final static UndefValue ValUndef = new UndefValue();
+  public static final UndefValue ValUndef = new UndefValue();
 
   public UndefValue() { /*SKIP*/ }
 
+  @Override
   public byte getKind() { return UNDEFVALUE; }
 
+  @Override
   public final int compareTo(Object obj) {
     try {
       return (obj instanceof UndefValue) ? 0 : 1;
@@ -39,6 +41,7 @@ public class UndefValue extends Value {
     }
   }
 
+  @Override
   public final boolean member(Value elem) {
     try {
       Assert.fail("Attempted to check if the value:\n" + Values.ppr(elem.toString()) +
@@ -51,6 +54,7 @@ public class UndefValue extends Value {
     }
   }
 
+  @Override
   public final boolean isFinite() {
     try {
       Assert.fail("Attempted to check if the value " + Values.ppr(this.toString()) +
@@ -63,6 +67,7 @@ public class UndefValue extends Value {
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept ex) {
     try {
       if (ex.idx < ex.path.length) {
@@ -77,6 +82,7 @@ public class UndefValue extends Value {
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept[] exs) {
     try {
       if (exs.length != 0) {
@@ -91,6 +97,7 @@ public class UndefValue extends Value {
     }
   }
 
+  @Override
   public final int size() {
     try {
       Assert.fail("Attempted to compute the number of elements in the value " +
@@ -103,17 +110,28 @@ public class UndefValue extends Value {
     }
   }
 
+  @Override
+  public boolean mutates() {
+	  return false;
+  }
+
+  @Override
   public final boolean isNormalized() { return true; }
 
+  @Override
   public final Value normalize() { /*nop*/return this; }
 
+  @Override
   public final boolean isDefined() { return false; }
 
+  @Override
   public final IValue deepCopy() { return this; }
 
+  @Override
   public final boolean assignable(Value val) { return true; }
 
   /* The string representation. */
+  @Override
   public final StringBuffer toString(StringBuffer sb, int offset, boolean swallow) {
     try {
       return sb.append("UNDEF");

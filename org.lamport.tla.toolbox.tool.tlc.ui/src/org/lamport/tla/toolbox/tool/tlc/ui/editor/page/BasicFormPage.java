@@ -163,7 +163,7 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
             {
                 if (getModel() != null)
                 {
-                    TLCErrorView.updateErrorView(getModel());
+                    TLCErrorView.updateErrorView(getModelEditor());
                 }
             } else
             {
@@ -779,9 +779,9 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
     }
 
     /**
-     * Subclasses may override this to be notified when model checking has been launched.
+     * Subclasses may override this to be notified when model checking is about to be launched.
      */
-    public void modelCheckingHasBegun() { }
+    public void modelCheckingWillBegin() { }
     
     /**
      * Retrieves the data binding manager
@@ -838,7 +838,7 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
 
     public void resetMessage(final Object key) {
         getManagedForm().getMessageManager().setAutoUpdate(false);
-        getManagedForm().getMessageManager().removeMessage(key);;
+        getManagedForm().getMessageManager().removeMessage(key);
         // make the run possible
         setComplete(true);
         // make the change visible
@@ -876,9 +876,9 @@ public abstract class BasicFormPage extends FormPage implements IModelConfigurat
      */
     class RunAction extends Action
     {
-        RunAction()
-        {
-            super("Run", TLCUIActivator.imageDescriptorFromPlugin(TLCUIActivator.PLUGIN_ID, "icons/full/lrun_obj.gif"));
+    	// TODO: HiDPI on this icon as we also have an @2x version
+        RunAction() {
+            super("Run", TLCUIActivator.imageDescriptorFromPlugin(TLCUIActivator.PLUGIN_ID, "icons/full/run_exc.png"));
             this.setDescription("Run TLC");
             this.setToolTipText("Runs TLC on the model.");
         }

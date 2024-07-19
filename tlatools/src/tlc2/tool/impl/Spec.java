@@ -14,19 +14,15 @@ import java.util.List;
 import java.util.Set;
 
 import tla2sany.modanalyzer.ParseUnit;
-import tla2sany.modanalyzer.SpecObj;
 import tla2sany.semantic.APSubstInNode;
 import tla2sany.semantic.ExprNode;
 import tla2sany.semantic.ExprOrOpArgNode;
-import tla2sany.semantic.ExternalModuleTable;
 import tla2sany.semantic.FormalParamNode;
 import tla2sany.semantic.FrontEnd;
 import tla2sany.semantic.LabelNode;
 import tla2sany.semantic.LetInNode;
 import tla2sany.semantic.ModuleNode;
 import tla2sany.semantic.OpApplNode;
-import tla2sany.semantic.OpArgNode;
-import tla2sany.semantic.OpDeclNode;
 import tla2sany.semantic.OpDefNode;
 import tla2sany.semantic.SemanticNode;
 import tla2sany.semantic.Subst;
@@ -40,21 +36,25 @@ import tlc2.tool.BuiltInOPs;
 import tlc2.tool.Defns;
 import tlc2.tool.TLCState;
 import tlc2.tool.ToolGlobals;
-import tlc2.tool.coverage.CostModel;
 import tlc2.util.Context;
 import tlc2.util.ObjLongTable;
 import tlc2.util.Vect;
-import tlc2.value.IValue;
 import tlc2.value.ValueConstants;
-import tlc2.value.impl.IntValue;
 import tlc2.value.impl.LazyValue;
 import tlc2.value.impl.ModelValue;
 import util.Assert;
 import util.FilenameToStream;
+import util.TLAConstants;
 import util.UniqueString;
 
-abstract class Spec implements ValueConstants, ToolGlobals, Serializable
-{
+// Note that we use all of the {@code default} defined functionality in our
+//		implemented interface {@link SymbolNodeValueLookupProvider} (and our
+//		lack of implementation of {@link OpDefEvaluator} is why this class
+//		is marked {@code abstract}.)
+abstract class Spec
+		implements ValueConstants, ToolGlobals, Serializable, OpDefEvaluator, SymbolNodeValueLookupProvider {
+	private static final long serialVersionUID = 1L;
+
 	/**
 	 * @see See note on performance in CostModelCreator.
 	 */
@@ -65,42 +65,21 @@ abstract class Spec implements ValueConstants, ToolGlobals, Serializable
 	protected final String specDir; // The spec directory.
     protected final String rootFile; // The root file of this spec.
     protected final String configFile; // The model config file.
-    protected final ModelConfig config; // The model configuration.
-    protected final ExternalModuleTable moduleTbl; // The external modules reachable from root
-    protected final ModuleNode rootModule; // The root module.
     protected final Set<OpDefNode> processedDefs ; 
-    protected final SpecObj specObj;
       // The set of OpDefNodes on which processSpec has been called.
       // Added by LL & YY on 25 June 2014 to eliminate infinite
       // loop when a recursively defined operator is used as an
       // operator argument in its own definition.
     protected final Defns defns; // Global definitions reachable from root
 	protected final Defns unprocessedDefns;
-    // SZ 10.04.2009: changed the name of the variable to reflect its nature
-    protected final OpDeclNode[] variablesNodes; // The state variables.
     protected final TLAClass tlaClass; // TLA built-in classes.
-    protected final Vect<Action> initPredVec; // The initial state predicate.
-    protected final Action nextPred; // The next state predicate.
-    protected final Action[] temporals; // Fairness specifications...
-    protected final String[] temporalNames; // ... and their names
-    protected final Action[] impliedTemporals; // Liveness conds to check...
-    protected final String[] impliedTemporalNames; // ... and their names
-    protected final Action[] invariants; // Invariants to be checked...
-    protected final String[] invNames; // ... and their names
-    protected final Action[] impliedInits; // Implied-inits to be checked...
-    protected final String[] impliedInitNames; // ... and their names
-    protected final Action[] impliedActions; // Implied-actions to be checked...
-    protected final String[] impliedActNames; // ... and their names
-    protected final ExprNode[] modelConstraints; // Model constraints
-    protected final ExprNode[] actionConstraints; // Action constraints
-    protected final ExprNode[] assumptions; // Assumpt	ions
-    protected final boolean[] assumptionIsAxiom; // assumptionIsAxiom[i] is true iff assumptions[i]
-                                           // is an AXIOM.  Added 26 May 2010 by LL
     private final FilenameToStream resolver; // takes care of path to stream resolution
 
+    protected final ModelConfig config; // The model configuration.
+    private final SpecProcessor specProcessor;
+
     // SZ Feb 20, 2009: added support to name resolver, to be able to run outside of the tool
-    public Spec(String specDir, String specFile, String configFile, FilenameToStream resolver)
-    {
+	public Spec(final String specDir, final String specFile, final String configFile, final FilenameToStream resolver) {
         this.specDir = specDir;
         this.rootFile = specFile;
         this.defns = new Defns();
@@ -111,98 +90,34 @@ abstract class Spec implements ValueConstants, ToolGlobals, Serializable
         // SZ Mar 9, 2009: added initialization of the modelValue class
         ModelValue.init();
         this.configFile = configFile;
-        this.config = new ModelConfig(configFile + ".cfg", resolver);
+        this.config = new ModelConfig(configFile + TLAConstants.Files.CONFIG_EXTENSION, resolver);
         this.config.parse();
         ModelValue.setValues(); // called after seeing all model values
 
-		// SpecProcessor has be factored out to be able to assign the variables below as
-		// final. SpecProcessor duplicates most of the variables here but I don't have
-		// time to clean it up.
-		final SpecProcessor processor = new SpecProcessor(rootFile, resolver, toolId, defns, config, this, tlaClass);
-        this.rootModule = processor.getRootModule();
-        this.moduleTbl = processor.getModuleTbl();
-        this.variablesNodes = processor.getVariablesNodes();
-        this.initPredVec = processor.getInitPred();
-        this.nextPred = processor.getNextPred();
-        this.temporals = processor.getTemporal();
-        this.temporalNames = processor.getTemporalNames();
-        this.impliedTemporals = processor.getImpliedTemporals();
-        this.impliedTemporalNames = processor.getImpliedTemporalNames();
-        this.invariants = processor.getInvariants();
-        this.invNames = processor.getInvariantsNames();
-        this.impliedInits = processor.getImpliedInits();
-        this.impliedInitNames = processor.getImpliedInitNames();
-        this.impliedActions = processor.getImpliedActions();
-        this.impliedActNames = processor.getImpliedActionNames();
-        this.modelConstraints = processor.getModelConstraints();
-        this.actionConstraints = processor.getActionConstraints();
-        this.assumptions = processor.getAssumptions();
-        this.assumptionIsAxiom = processor.getAssumptionIsAxiom();
-        this.specObj = processor.getSpecObj();
+        specProcessor = new SpecProcessor(getRootName(), resolver, toolId, defns, config, this, this, tlaClass);
         
-        this.unprocessedDefns = processor.getUnprocessedDefns();
+        this.unprocessedDefns = specProcessor.getUnprocessedDefns();
     }
     
-    protected Spec(Spec other) {
+    protected Spec(final Spec other) {
     	this.specDir = other.specDir;
     	this.rootFile = other.rootFile;
     	this.configFile = other.configFile;
-    	this.config = other.config;
-    	this.moduleTbl = other.moduleTbl;
-    	this.rootModule = other.rootModule;
     	this.processedDefs = other.processedDefs;
     	this.defns = other.defns;
-    	this.variablesNodes = other.variablesNodes;
     	this.tlaClass = other.tlaClass;
-        this.initPredVec = other.initPredVec;
-    	this.nextPred = other.nextPred;
-    	this.temporals = other.temporals;
-    	this.temporalNames = other.temporalNames;
-    	this.impliedTemporals = other.impliedTemporals;
-    	this.impliedTemporalNames = other.impliedTemporalNames;
-    	this.invariants = other.invariants;
-    	this.invNames = other.invNames;
-    	this.impliedInits = other.impliedInits;
-        this.impliedInitNames = other.impliedInitNames;
-        this.impliedActions = other.impliedActions;
-        this.impliedActNames = other.impliedActNames;
-        this.modelConstraints = other.modelConstraints;
-        this.actionConstraints = other.actionConstraints;
-        this.assumptions = other.assumptions;
-        this.assumptionIsAxiom = other.assumptionIsAxiom;
         this.resolver = other.resolver;
-        this.specObj = other.specObj;
         this.unprocessedDefns = other.unprocessedDefns;
+    	this.config = other.config;
+        this.specProcessor = other.specProcessor;
     }
-
-    /* Return the variable if expr is a state variable. Otherwise, null. */
-    public final SymbolNode getVar(SemanticNode expr, Context c, boolean cutoff)
-    {
-        if (expr instanceof OpApplNode)
-        {
-            SymbolNode opNode = ((OpApplNode) expr).getOperator();
-
-            if (opNode.getArity() == 0)
-            {
-                boolean isVarDecl = (opNode.getKind() == VariableDeclKind);
-                Object val = this.lookup(opNode, c, cutoff && isVarDecl);
-
-                if (val instanceof LazyValue)
-                {
-                    LazyValue lval = (LazyValue) val;
-                    return this.getVar(lval.expr, lval.con, cutoff);
-                }
-                if (val instanceof OpDefNode)
-                {
-                    return this.getVar(((OpDefNode) val).getBody(), c, cutoff);
-                }
-                if (isVarDecl)
-                {
-                    return opNode;
-                }
-            }
-        }
-        return null;
+    
+    public ModelConfig getModelConfig() {
+    	return config;
+    }
+    
+    public SpecProcessor getSpecProcessor() {
+    	return specProcessor;
     }
 
     /* Return the variable if expr is a primed state variable. Otherwise, null. */
@@ -215,13 +130,13 @@ abstract class Spec implements ValueConstants, ToolGlobals, Serializable
 
             if (BuiltInOPs.getOpCode(opNode.getName()) == OPCODE_prime)
             {
-                return this.getVar(expr1.getArgs()[0], c, cutoff);
+                return this.getVar(expr1.getArgs()[0], c, cutoff, toolId);
             }
 
             if (opNode.getArity() == 0)
             {
                 boolean isVarDecl = (opNode.getKind() == VariableDeclKind);
-                Object val = this.lookup(opNode, c, cutoff && isVarDecl);
+                Object val = this.lookup(opNode, c, cutoff && isVarDecl, toolId);
 
                 if (val instanceof LazyValue)
                 {
@@ -240,30 +155,26 @@ abstract class Spec implements ValueConstants, ToolGlobals, Serializable
     /** 
      * Get model constraints.  
      */
-    public final ExprNode[] getModelConstraints()
-    {
-        return this.modelConstraints;
-    }
+	public final ExprNode[] getModelConstraints() {
+		return specProcessor.getModelConstraints();
+	}
 
     /**
      * Get action constraints.  
      */
-    public final ExprNode[] getActionConstraints()
-    {
-        return this.actionConstraints;
-    }
+	public final ExprNode[] getActionConstraints() {
+		return specProcessor.getActionConstraints();
+	}
 
     /* Get the initial state predicate of the specification.  */
-    public final Vect<Action> getInitStateSpec()
-    {
-        return this.initPredVec;
-    }
+	public final Vect<Action> getInitStateSpec() {
+		return specProcessor.getInitPred();
+	}
 
     /* Get the action (next state) predicate of the specification. */
-    public final Action getNextStateSpec()
-    {
-        return this.nextPred;
-    }
+	public final Action getNextStateSpec() {
+		return specProcessor.getNextPred();
+	}
 
     /** 
      * Get the view mapping for the specification. 
@@ -344,76 +255,67 @@ abstract class Spec implements ValueConstants, ToolGlobals, Serializable
         return def.getBody();
     }
 
-    public final boolean livenessIsTrue()
-    {
-        return this.impliedTemporals.length == 0;
-    }
+	public final boolean livenessIsTrue() {
+		return getImpliedTemporals().length == 0;
+	}
 
     /* Get the fairness condition of the specification.  */
     public final Action[] getTemporals()
     {
-        return this.temporals;
+        return specProcessor.getTemporal();
     }
 
     public final String[] getTemporalNames()
     {
-        return this.temporalNames;
+        return specProcessor.getTemporalNames();
     }
 
     /* Get the liveness checks of the specification.  */
-    public final Action[] getImpliedTemporals()
-    {
-        return this.impliedTemporals;
-    }
+	public final Action[] getImpliedTemporals() {
+		return specProcessor.getImpliedTemporals();
+	}
 
-    public final String[] getImpliedTemporalNames()
-    {
-        return this.impliedTemporalNames;
-    }
+	public final String[] getImpliedTemporalNames() {
+		return specProcessor.getImpliedTemporalNames();
+	}
 
     /* Get the invariants of the specification. */
-    public final Action[] getInvariants()
-    {
-        return this.invariants;
-    }
+	public final Action[] getInvariants() {
+		return specProcessor.getInvariants();
+	}
 
-    public final String[] getInvNames()
-    {
-        return this.invNames;
-    }
+	public final String[] getInvNames() {
+		return specProcessor.getInvariantsNames();
+	}
 
     /* Get the implied-inits of the specification. */
-    public final Action[] getImpliedInits()
-    {
-        return this.impliedInits;
-    }
+	public final Action[] getImpliedInits() {
+		return specProcessor.getImpliedInits();
+	}
 
-    public final String[] getImpliedInitNames()
-    {
-        return this.impliedInitNames;
-    }
+	public final String[] getImpliedInitNames() {
+		return specProcessor.getImpliedInitNames();
+	}
 
     /* Get the implied-actions of the specification. */
-    public final Action[] getImpliedActions()
-    {
-        return this.impliedActions;
-    }
+	public final Action[] getImpliedActions() {
+		return specProcessor.getImpliedActions();
+	}
 
-    public final String[] getImpliedActNames()
-    {
-        return this.impliedActNames;
-    }
+	public final String[] getImpliedActNames() {
+		return specProcessor.getImpliedActionNames();
+	}
 
     /* Get the assumptions of the specification. */
-    public final ExprNode[] getAssumptions()
-    {
-        return this.assumptions;
-    }
+	public final ExprNode[] getAssumptions() {
+		return specProcessor.getAssumptions();
+	}
     
     /* Get the assumptionIsAxiom field */
     public final boolean[] getAssumptionIsAxiom() {
-        return this.assumptionIsAxiom;
+        return specProcessor.getAssumptionIsAxiom();
     }
+    
     /**
      * This method gets the value of a symbol from the environment. We
      * look up in the context c, its tool object, and the state s.
@@ -447,7 +349,7 @@ abstract class Spec implements ValueConstants, ToolGlobals, Serializable
      */
     public final Object lookup(SymbolNode opNode, Context c, TLCState s, boolean cutoff)
     {
-    	Object result = lookup(opNode, c, cutoff);
+    	Object result = lookup(opNode, c, cutoff, toolId);
     	if (result != opNode) {
     		return result;
     	}
@@ -458,73 +360,8 @@ abstract class Spec implements ValueConstants, ToolGlobals, Serializable
         return opNode;
     }
 
-    public final Object lookup(SymbolNode opNode, Context c, boolean cutoff)
-    {
-        boolean isVarDecl = (opNode.getKind() == VariableDeclKind);
-        Object result = c.lookup(opNode, cutoff && isVarDecl);
-        if (result != null) {
-        	return result;
-        }
-
-        result = opNode.getToolObject(toolId);
-        if (result != null) {
-        	return result;
-        }
-
-        if (opNode.getKind() == UserDefinedOpKind)
-        {
-            // Changed by LL on 10 Apr 2011 from
-            //
-            //    result = ((OpDefNode) opNode).getBody().getToolObject(toolId);
-            //
-            // to the following
-            ExprNode body = ((OpDefNode) opNode).getBody();
-            result = body.getToolObject(toolId);
-            while ((result == null) && (body.getKind() == SubstInKind)) {
-                body = ((SubstInNode) body).getBody();
-                result = body.getToolObject(toolId);
-            }
-            // end change
-
-            if (result != null) {
-            	return result;
-            }
-        }
-        return opNode;
-    }
     public final Object lookup(final SymbolNode opNode) {
-    	return lookup(opNode, Context.Empty, false);
-    }
-    public final Object getVal(ExprOrOpArgNode expr, Context c, final boolean cachable)
-    {
-    	return getVal(expr, c, cachable, CostModel.DO_NOT_RECORD);
-    }
-
-    public final Object getVal(ExprOrOpArgNode expr, Context c, final boolean cachable, CostModel cm)
-    {
-        if (expr instanceof ExprNode)
-        {
-            return new LazyValue(expr, c, cachable, cm);
-        }
-        SymbolNode opNode = ((OpArgNode) expr).getOp();
-        return this.lookup(opNode, c, false);
-    }
-    public final Context getOpContext(OpDefNode opDef, ExprOrOpArgNode[] args, Context c, boolean cachable)
-    {
-    	return getOpContext(opDef, args, c, cachable, CostModel.DO_NOT_RECORD);
-    }
-
-    public final Context getOpContext(OpDefNode opDef, ExprOrOpArgNode[] args, Context c, boolean cachable, final CostModel cm)
-    {
-        FormalParamNode[] formals = opDef.getParams();
-        int alen = args.length;
-        Context c1 = c;
-        for (int i = 0; i < alen; i++)
-        {
-            Object aval = this.getVal(args[i], c, cachable, cm);
-            c1 = c1.cons(formals[i], aval);
-        }
-        return c1;
+    	return lookup(opNode, Context.Empty, false, toolId);
     }
 
     /**
@@ -544,11 +381,12 @@ abstract class Spec implements ValueConstants, ToolGlobals, Serializable
         Context c1 = c;
         for (int i = 0; i < alen; i++)
         {
-            Object aval = this.getVal(args[i], c, cachable);
+            Object aval = this.getVal(args[i], c, cachable, toolId);
             c1 = c1.cons(formals[i], aval);
         }
         return c1;
     }
+    
     /**
      * Return a table containing the locations of subexpression in the
      * spec of forms x' = e and x' \in e. Warning: Current implementation
@@ -589,7 +427,7 @@ abstract class Spec implements ValueConstants, ToolGlobals, Serializable
             for (int i = 0; i < subs.length; i++)
             {
                 Subst sub = subs[i];
-                c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, true));
+                c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, true, toolId));
             }
             this.collectPrimedLocs(pred1.getBody(), c, tbl);
             return;
@@ -603,7 +441,7 @@ abstract class Spec implements ValueConstants, ToolGlobals, Serializable
             for (int i = 0; i < subs.length; i++)
             {
                 Subst sub = subs[i];
-                c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, true));
+                c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, true, toolId));
             }
             this.collectPrimedLocs(pred1.getBody(), c, tbl);
             return;
@@ -690,7 +528,7 @@ abstract class Spec implements ValueConstants, ToolGlobals, Serializable
         default: {
             if (opcode == 0)
             {
-                Object val = this.lookup(opNode, c, false);
+                Object val = this.lookup(opNode, c, false, toolId);
 
                 if (val instanceof OpDefNode)
                 {
@@ -700,7 +538,7 @@ abstract class Spec implements ValueConstants, ToolGlobals, Serializable
                     if (opDef.getInRecursive()) {
                         return ;
                     }
-                    Context c1 = this.getOpContext(opDef, args, c, true);
+                    Context c1 = this.getOpContext(opDef, args, c, true, toolId);
                     this.collectPrimedLocs(opDef.getBody(), c1, tbl);
                 } else if (val instanceof LazyValue)
                 {
@@ -749,7 +587,7 @@ abstract class Spec implements ValueConstants, ToolGlobals, Serializable
             if (opcode == 0 && args.length == 0)
             {
                 // a 0-arity operator:
-                Object val = this.lookup(opNode, c, false);
+                Object val = this.lookup(opNode, c, false, toolId);
                 if (val instanceof OpDefNode)
                 {
                     this.collectUnchangedLocs(((OpDefNode) val).getBody(), c, tbl);
@@ -760,147 +598,13 @@ abstract class Spec implements ValueConstants, ToolGlobals, Serializable
         return;
     }
 
-    /**
-     * This method only returns an approximation of the level of the
-     * expression.  The "real" level is at most the return value. Adding
-     * <name, ValOne> to the context means that there is no need to
-     * compute level for name.
-     *
-     * Note that this method does not work if called on a part of an
-     * EXCEPT expression.
-     */
-    public final int getLevelBound(SemanticNode expr, Context c)
-    {
-        switch (expr.getKind()) {
-        case OpApplKind: {
-            OpApplNode expr1 = (OpApplNode) expr;
-            return this.getLevelBoundAppl(expr1, c);
-        }
-        case LetInKind: {
-            LetInNode expr1 = (LetInNode) expr;
-            OpDefNode[] letDefs = expr1.getLets();
-            int letLen = letDefs.length;
-            Context c1 = c;
-            int level = 0;
-            for (int i = 0; i < letLen; i++)
-            {
-                OpDefNode opDef = letDefs[i];
-                level = Math.max(level, this.getLevelBound(opDef.getBody(), c1));
-                c1 = c1.cons(opDef, IntValue.ValOne);
-            }
-            return Math.max(level, this.getLevelBound(expr1.getBody(), c1));
-        }
-        case SubstInKind: {
-            SubstInNode expr1 = (SubstInNode) expr;
-            Subst[] subs = expr1.getSubsts();
-            int slen = subs.length;
-            Context c1 = c;
-            for (int i = 0; i < slen; i++)
-            {
-                Subst sub = subs[i];
-                c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, true));
-            }
-            return this.getLevelBound(expr1.getBody(), c1);
-        }
-
-        // Added by LL on 13 Nov 2009 to handle theorem and assumption names.
-        case APSubstInKind: {
-            APSubstInNode expr1 = (APSubstInNode) expr;
-            Subst[] subs = expr1.getSubsts();
-            int slen = subs.length;
-            Context c1 = c;
-            for (int i = 0; i < slen; i++)
-            {
-                Subst sub = subs[i];
-                c1 = c1.cons(sub.getOp(), this.getVal(sub.getExpr(), c, true));
-            }
-            return this.getLevelBound(expr1.getBody(), c1);
-        }
-
-
-            /***********************************************************************
-            * LabelKind case added by LL on 13 Jun 2007.                           *
-            ***********************************************************************/
-        case LabelKind: {
-            LabelNode expr1 = (LabelNode) expr;
-            return this.getLevelBound(expr1.getBody(), c);
-        }
-        default: {
-            return 0;
-        }
-        }
-    }
-
-    private final int getLevelBoundAppl(OpApplNode expr, Context c)
-    {
-        SymbolNode opNode = expr.getOperator();
-        UniqueString opName = opNode.getName();
-        int opcode = BuiltInOPs.getOpCode(opName);
-
-        if (BuiltInOPs.isTemporal(opcode))
-        {
-            return 3; // Conservative estimate
-        }
-
-        if (BuiltInOPs.isAction(opcode))
-        {
-            return 2; // Conservative estimate
-        }
-
-        if (opcode == OPCODE_enabled)
-        {
-            return 1; // Conservative estimate
-        }
-
-        int level = 0;
-        ExprNode[] bnds = expr.getBdedQuantBounds();
-        for (int i = 0; i < bnds.length; i++)
-        {
-            level = Math.max(level, this.getLevelBound(bnds[i], c));
-        }
-
-        if (opcode == OPCODE_rfs)
-        {
-            // For recursive function, don't compute level of the function body
-            // again in the recursive call.
-            SymbolNode fname = expr.getUnbdedQuantSymbols()[0];
-            c = c.cons(fname, IntValue.ValOne);
-        }
-
-        ExprOrOpArgNode[] args = expr.getArgs();
-        int alen = args.length;
-        for (int i = 0; i < alen; i++)
-        {
-            if (args[i] != null)
-            {
-                level = Math.max(level, this.getLevelBound(args[i], c));
-            }
-        }
-
-        if (opcode == 0)
-        {
-            // This operator is a user-defined operator.
-            if (opName.getVarLoc() >= 0)
-                return 1;
-
-            Object val = this.lookup(opNode, c, false);
-            if (val instanceof OpDefNode)
-            {
-                OpDefNode opDef = (OpDefNode) val;
-                c = c.cons(opNode, IntValue.ValOne);
-                level = Math.max(level, this.getLevelBound(opDef.getBody(), c));
-            } else if (val instanceof LazyValue)
-            {
-                LazyValue lv = (LazyValue) val;
-                level = Math.max(level, this.getLevelBound(lv.expr, lv.con));
-            }
-        }
-        return level;
-    }
-
     public FilenameToStream getResolver()
     {
         return resolver;
+    }
+    
+    public String getRootName() {
+    	return new File(this.rootFile).getName();
     }
     
     public String getRootFile() {
@@ -908,7 +612,7 @@ abstract class Spec implements ValueConstants, ToolGlobals, Serializable
     }
 
     public ModuleNode getRootModule() {
-        return this.rootModule;
+        return this.getSpecProcessor().getRootModule();
     }
 
     public String getConfigFile() {
@@ -923,12 +627,10 @@ abstract class Spec implements ValueConstants, ToolGlobals, Serializable
     	return toolId;
     }
 
-	abstract IValue eval(SemanticNode body, Context empty, TLCState empty2, CostModel doNotRecord);
-
 	public List<File> getModuleFiles(final FilenameToStream resolver) {
 		final List<File> result = new ArrayList<File>();
 	
-		final Enumeration<ParseUnit> parseUnitContext = this.specObj.parseUnitContext.elements();
+		final Enumeration<ParseUnit> parseUnitContext = specProcessor.getSpecObj().parseUnitContext.elements();
 		while (parseUnitContext.hasMoreElements()) {
 			ParseUnit pu = (ParseUnit) parseUnitContext.nextElement();
 			File resolve = resolver.resolve(pu.getFileName(), false);

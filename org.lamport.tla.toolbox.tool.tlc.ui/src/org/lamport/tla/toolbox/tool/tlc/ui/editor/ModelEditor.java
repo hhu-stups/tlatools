@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.commons.lang3.tuple.Pair;
 import org.eclipse.core.resources.IFile;
@@ -67,9 +68,11 @@ import org.lamport.tla.toolbox.tool.tlc.TLCActivator;
 import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationConstants;
 import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationDefaults;
 import org.lamport.tla.toolbox.tool.tlc.launch.TLCModelLaunchDelegate;
+import org.lamport.tla.toolbox.tool.tlc.model.AbstractModelStateChangeListener;
 import org.lamport.tla.toolbox.tool.tlc.model.Model;
-import org.lamport.tla.toolbox.tool.tlc.model.Model.StateChangeListener.ChangeEvent.State;
 import org.lamport.tla.toolbox.tool.tlc.model.TLCModelFactory;
+import org.lamport.tla.toolbox.tool.tlc.output.data.CoverageInformation;
+import org.lamport.tla.toolbox.tool.tlc.output.data.ITLCModelLaunchDataPresenter;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCModelLaunchDataProvider;
 import org.lamport.tla.toolbox.tool.tlc.output.source.TLCOutputSourceRegistry;
 import org.lamport.tla.toolbox.tool.tlc.ui.TLCUIActivator;
@@ -80,6 +83,7 @@ import org.lamport.tla.toolbox.tool.tlc.ui.editor.page.advanced.AdvancedModelPag
 import org.lamport.tla.toolbox.tool.tlc.ui.editor.page.advanced.AdvancedTLCOptionsPage;
 import org.lamport.tla.toolbox.tool.tlc.ui.editor.page.results.EvaluateConstantExpressionPage;
 import org.lamport.tla.toolbox.tool.tlc.ui.editor.page.results.ResultPage;
+import org.lamport.tla.toolbox.tool.tlc.ui.editor.preference.IModelEditorPreferenceConstants;
 import org.lamport.tla.toolbox.tool.tlc.ui.preference.ITLCPreferenceConstants;
 import org.lamport.tla.toolbox.tool.tlc.ui.util.ModelEditorPartListener;
 import org.lamport.tla.toolbox.tool.tlc.ui.util.SemanticHelper;
@@ -94,6 +98,7 @@ import org.lamport.tla.toolbox.util.UIHelper;
 import com.abstratt.graphviz.GraphViz;
 
 import tla2sany.semantic.ModuleNode;
+import util.TLAConstants;
 
 /**
  * Editor for the model.
@@ -119,75 +124,7 @@ public class ModelEditor extends FormEditor {
      */
     // helper to resolve semantic matches of words
     private SemanticHelper helper;
-    private final Model.StateChangeListener modelStateListener = new Model.StateChangeListener() {
-    	private State m_lastState = State.NOT_RUNNING;
-    	
-		@Override
-		public boolean handleChange(final ChangeEvent event) {
-			if (event.getState().in(State.NOT_RUNNING, State.RUNNING)) {
-				final State lastStateCopy = m_lastState;
-				UIHelper.runUIAsync(new Runnable() {
-					public void run() {
-						for (int i = 0; i < getPageCount(); i++) {
-							final Object object = pages.get(i);
-							if (object instanceof BasicFormPage) {
-								final BasicFormPage bfp = (BasicFormPage) object;
-								bfp.refresh();
-							}
-						}
-						if (event.getState().in(State.RUNNING)) {
-							// Switch to Result Page (put on top) of model editor stack. A user wants to see
-							// the status of a model run she has just started.
-							final IPreferenceStore ips = TLCUIActivator.getDefault().getPreferenceStore();
-							final boolean eceInItsOwnTab = ips.getBoolean(ITLCPreferenceConstants.I_TLC_SHOW_ECE_AS_TAB);
-
-							if (!eceInItsOwnTab || !modelIsConfiguredWithNoBehaviorSpec()) {
-								showResultPage();
-							}
-						} else if (event.getState().in(State.NOT_RUNNING)) {
-							// Model checking finished, lets open state graph if any.
-							if (event.getModel().hasStateGraphDump()) {
-								try {
-									addOrUpdateStateGraphEditor(event.getModel().getStateGraphDump());
-								} catch (CoreException e) {
-									TLCUIActivator.getDefault().logError("Error initializing editor", e);
-								}
-							}
-							
-							if (lastStateCopy.in(State.RUNNING, State.REMOTE_RUNNING)) {
-								final IPreferenceStore ips = TLCUIActivator.getDefault().getPreferenceStore();
-								final boolean eceInItsOwnTab = ips
-										.getBoolean(ITLCPreferenceConstants.I_TLC_SHOW_ECE_AS_TAB);
-								
-								if (eceInItsOwnTab && modelIsConfiguredWithNoBehaviorSpec()) {
-									setActivePage(EvaluateConstantExpressionPage.ID);
-								}
-							}
-							
-							// MAK 01/2018: Re-validate the page because running the model removes or sets
-							// problem markers (Model#setMarkers) which are presented to the user by
-							// ModelEditor#handleProblemMarkers. If we don't re-validate once a model is
-							// done running, the user visible presentation resulting from an earlier run of
-							// handleProblemMarkers gets stale.
-							// This behavior can be triggered by creating a spec (note commented EXTENDS): 
-							//   \* EXTENDS Integers
-							//   VARIABLE s
-							//   Spec == s = 0 /\ [][s'=s]_s
-							// and a model that defines the invariant (s >= 0). Upon the first launch of
-							// the model, the ModelEditor correctly marks the invariant due to the operator
-							// >= being not defined. Uncommenting EXTENDS, saving the spec and rerunning
-							// the model would incorrectly not remove the marker on the invariant.
-							UIHelper.runUISync(validateRunable);
-						}
-					}
-				});
-			}
-			
-			m_lastState = event.getState();
-			
-			return false;
-		}
-	};
+    private ModelStateListener modelStateListener = new ModelStateListener();
 
     /**
      * This runnable is responsible for the validation of the pages.
@@ -199,90 +136,59 @@ public class ModelEditor extends FormEditor {
      */
     private final ValidateRunnable validateRunable = new ValidateRunnable();
 
-    // TODO this is pretty poor design - there is one instance of this inner class per instance of ModelEditor; the 
-    //			code below tweaks the switchToErrorPage ivar and then hands it off to a run async method, i guess just
-    //			hoping that the flag isn't tweaked again before the async method does what was originally intended...
-	private class ValidateRunnable implements Runnable {
-        private boolean switchToErrorPage = false;
+    // data binding manager
+    private DataBindingManager dataBindingManager = new DataBindingManager();
 
-        public void run()
-        {
-            // Re-validate the pages, iff the model is not running.
-			// Also check if the model is nulled by now which
-			// happens if the ModelEditor disposed before a scheduled run gets
-			// executed.
-            if (model != null && !model.isRunning())
-            {
-                /*
-                 * Note that all pages are not necessarily
-                 * instances of BasicFormPage. Some are read
-                 * only editors showing saved versions of
-                 * modules.
-                 */
-                for (int i = 0; i < getPageCount(); i++)
-                {
-                    if (pages.get(i) instanceof BasicFormPage)
-                    {
-                        BasicFormPage page = (BasicFormPage) pages.get(i);
-                        page.resetAllMessages(true);
-                    }
-                }
-                for (int i = 0; i < getPageCount(); i++)
-                {
-                    if (pages.get(i) instanceof BasicFormPage)
-                    {
-                        BasicFormPage page = (BasicFormPage) pages.get(i);
-                        // re-validate the model on changes of the spec
-                        page.validatePage(switchToErrorPage);
-                    }
-                }
-            }
-        }
-    };
+    /**
+     * A listener that reacts to when editor tabs showing saved modules
+     * get closed. This listener properly disposes of the editor and its contents.
+     * See the class documentation for more details.
+     */
+    private CTabFolder2Listener listener = new CloseModuleTabListener();
+    
+    private final Map<Integer, Closeable> indexCloseableMap;
+
+    // array of pages to add
+    private BasicFormPage[] pagesToAdd;
+
+	private Model model;
 
     // react on spec file changes
-    private IResourceChangeListener workspaceResourceChangeListener = new IResourceChangeListener() {
-        public void resourceChanged(IResourceChangeEvent event)
-        {
-            IResourceDelta delta = event.getDelta();
+	private IResourceChangeListener workspaceResourceChangeListener = (event) -> {
+		final IResourceDelta delta = event.getDelta();
 
-            /**
-             * This is a helper method that returns a new instance of ChangedModulesGatheringDeltaVisitor,
-             * which gathers the changed TLA modules from a resource delta tree.
-             */
-            ChangedSpecModulesGatheringDeltaVisitor visitor = new ChangedSpecModulesGatheringDeltaVisitor(model) {
-                public IResource getModel()
-                {
-                    return model.getFile();
-                }
-            };
+		/**
+		 * This is a helper method that returns a new instance of
+		 * ChangedModulesGatheringDeltaVisitor, which gathers the changed TLA modules
+		 * from a resource delta tree.
+		 */
+		final ChangedSpecModulesGatheringDeltaVisitor visitor = new ChangedSpecModulesGatheringDeltaVisitor(model) {
+			public IResource getModel() {
+				return model.getFile();
+			}
+		};
 
-            try
-            {
-                delta.accept(visitor);
-                // one of the modules in the specification has changed
-                // this means that identifiers defined in a spec might have changed
-                // re-validate the editor
-                if (!visitor.getModules().isEmpty() || visitor.isModelChanged() || visitor.getCheckpointChanged())
-                {
-                    // update the specObject of the helper
-                    helper.resetSpecNames();
+		try {
+			delta.accept(visitor);
+			// one of the modules in the specification has changed
+			// this means that identifiers defined in a spec might have changed
+			// re-validate the editor
+			if (!visitor.getModules().isEmpty() || visitor.isModelChanged() || visitor.getCheckpointChanged()) {
+				// update the specObject of the helper
+				helper.resetSpecNames();
 
-                    // iff the model has changed, switch to the error page after the validation
-                    validateRunable.switchToErrorPage = visitor.isModelChanged();
+				// iff the model has changed, switch to the error page after the validation
+				validateRunable.switchToErrorPage = visitor.isModelChanged();
 
-                    // re-validate the pages
-                    UIHelper.runUIAsync(validateRunable);
+				// re-validate the pages
+				UIHelper.runUIAsync(validateRunable);
 
-                    return;
-                }
-            } catch (CoreException e)
-            {
-                TLCUIActivator.getDefault().logError("Error visiting changed resource", e);
-                return;
-            }
-
-        }
+				return;
+			}
+		} catch (CoreException e) {
+			TLCUIActivator.getDefault().logError("Error visiting changed resource", e);
+			return;
+		}
     };
     
 	/**
@@ -297,11 +203,16 @@ public class ModelEditor extends FormEditor {
 		navigationHistory.markLocation((IEditorPart) event.getSelectedPage());
 	};
 	
-	private final IPropertyChangeListener m_preferenceChangeListener = (event) -> {
-		if (ITLCPreferenceConstants.I_TLC_SHOW_ECE_AS_TAB.equals(event.getProperty())) {
+	private final IPropertyChangeListener preferenceChangeListener = (event) -> {
+		if (IModelEditorPreferenceConstants.I_MODEL_EDITOR_SHOW_ECE_AS_TAB.equals(event.getProperty())) {
 			final boolean eceAsTab = ((Boolean) event.getNewValue()).booleanValue();
 			final Pair<Integer, FormPage> pair = getLastFormPage();
 			final String id = pair.getRight().getId();
+			
+			// No results page open, so don't show the ECE page, slash, affect the results page to show the ECE section
+			if (!ResultPage.ID.equals(id) && !EvaluateConstantExpressionPage.ID.equals(id)) {
+				return;
+			}
 
 			if (eceAsTab) {
 				if (!EvaluateConstantExpressionPage.ID.equals(id)) {
@@ -335,29 +246,21 @@ public class ModelEditor extends FormEditor {
 		}
 	};
 
-    // data binding manager
-    private DataBindingManager dataBindingManager = new DataBindingManager();
-
-    /**
-     * A listener that reacts to when editor tabs showing saved modules
-     * get closed. This listener properly disposes of the editor and its contents.
-     * See the class documentation for more details.
-     */
-    private CTabFolder2Listener listener = new CloseModuleTabListener();
-    
-    private final Map<Integer, Closeable> m_indexCloseableMap;
-
-    // array of pages to add
-    private BasicFormPage[] pagesToAdd;
-
-	private Model model;
-
     /**
      * Simple editor constructor
      */
 	public ModelEditor() {
 		helper = new SemanticHelper();
-		m_indexCloseableMap = new HashMap<>();
+		indexCloseableMap = new HashMap<>();
+	}
+	
+	/**
+	 * This constructor should only be used with certain unit tests.
+	 */
+	public ModelEditor(final Model testingModel) {
+		this();
+		
+		model = testingModel;
 	}
 
     /**
@@ -382,37 +285,42 @@ public class ModelEditor extends FormEditor {
         try {
 			openTabsValue = model.getLaunchConfiguration().getAttribute(IModelConfigurationConstants.EDITOR_OPEN_TABS, 0);
         } catch (CoreException e) { }
-        
+
+        final boolean mustShowResultsPage
+        			= model.isSnapshot()
+        				|| parsePotentialAssociatedTLCRunToDetermineWhetherResultsPageMustBeShown();
 		final IPreferenceStore ips = TLCUIActivator.getDefault().getPreferenceStore();
-		final boolean eceInItsOwnTab = ips.getBoolean(ITLCPreferenceConstants.I_TLC_SHOW_ECE_AS_TAB);
-
         if (openTabsValue == IModelConfigurationConstants.EDITOR_OPEN_TAB_NONE) {
-        	if (eceInItsOwnTab) {
-				pagesToAdd = new BasicFormPage[] { new MainModelPage(this), new ResultPage(this), new EvaluateConstantExpressionPage(this) };
-			} else {
-				pagesToAdd = new BasicFormPage[] { new MainModelPage(this), new ResultPage(this) };
-			}
+			pagesToAdd = mustShowResultsPage
+									? new BasicFormPage[] { new MainModelPage(this), new ResultPage(this) }
+									: new BasicFormPage[] { new MainModelPage(this) };
         } else {
-        	ArrayList<BasicFormPage> pages = new ArrayList<>();
-        	
-        	pages.add(new MainModelPage(this));
-			if ((openTabsValue
-					& IModelConfigurationConstants.EDITOR_OPEN_TAB_ADVANCED_MODEL) == IModelConfigurationConstants.EDITOR_OPEN_TAB_ADVANCED_MODEL) {
-				pages.add(new AdvancedModelPage(this));
+        	final ArrayList<BasicFormPage> editorPages = new ArrayList<>();
+            
+        	editorPages.add(new MainModelPage(this));
+			if ((openTabsValue & IModelConfigurationConstants.EDITOR_OPEN_TAB_ADVANCED_MODEL) != 0) {
+				editorPages.add(new AdvancedModelPage(this));
         	}
-			if ((openTabsValue
-					& IModelConfigurationConstants.EDITOR_OPEN_TAB_ADVANCED_TLC) == IModelConfigurationConstants.EDITOR_OPEN_TAB_ADVANCED_TLC) {
-				pages.add(new AdvancedTLCOptionsPage(this));
+			if ((openTabsValue & IModelConfigurationConstants.EDITOR_OPEN_TAB_ADVANCED_TLC) != 0) {
+				editorPages.add(new AdvancedTLCOptionsPage(this));
         	}
-        	pages.add(new ResultPage(this));
-        	if (eceInItsOwnTab) {
-        		pages.add(new EvaluateConstantExpressionPage(this));
+			if (mustShowResultsPage
+							|| ((openTabsValue & IModelConfigurationConstants.EDITOR_OPEN_TAB_RESULTS) != 0)) {
+				editorPages.add(new ResultPage(this));
+	        	if (ips.getBoolean(IModelEditorPreferenceConstants.I_MODEL_EDITOR_SHOW_ECE_AS_TAB)) {
+	        		editorPages.add(new EvaluateConstantExpressionPage(this));
+	        	}
+	        	
+	        	if (mustShowResultsPage) {
+	        		final int openTabState = getModel().getOpenTabsValue();
+	        		updateOpenTabsState(openTabState | IModelConfigurationConstants.EDITOR_OPEN_TAB_RESULTS);	        		
+	        	}
         	}
 
-            pagesToAdd = pages.toArray(new BasicFormPage[pages.size()]);
+            pagesToAdd = editorPages.toArray(new BasicFormPage[editorPages.size()]);
         }
         
-        ips.addPropertyChangeListener(m_preferenceChangeListener);
+        ips.addPropertyChangeListener(preferenceChangeListener);
         
         
         // setContentDescription(path.toString());
@@ -453,6 +361,40 @@ public class ModelEditor extends FormEditor {
 		model.add(modelStateListener);
 	}
     
+    // how's that for a method name....
+    private boolean parsePotentialAssociatedTLCRunToDetermineWhetherResultsPageMustBeShown() {
+        final TLCModelLaunchDataProvider ldp = TLCOutputSourceRegistry.getModelCheckSourceRegistry().getProvider(model);
+        final AtomicBoolean hasStartTime = new AtomicBoolean(false);
+        final AtomicBoolean hasError = new AtomicBoolean(false);
+        final AtomicBoolean hasZeroCoverage = new AtomicBoolean(false);
+    	final ITLCModelLaunchDataPresenter consumer = (dataProvider, fieldId) -> {
+    		switch (fieldId) {
+    			case ITLCModelLaunchDataPresenter.START_TIME:
+    				hasStartTime.set(dataProvider.getStartTimestamp() > 0);
+    				break;
+    			case ITLCModelLaunchDataPresenter.COVERAGE:
+    				if (!hasZeroCoverage.get()) {
+						final CoverageInformation coverageInfo = dataProvider.getCoverageInfo();
+						if (dataProvider.isDone() && !coverageInfo.isEmpty() && dataProvider.hasZeroCoverage()) {
+							hasZeroCoverage.set(true);
+						}
+					}
+    				break;
+    			case ITLCModelLaunchDataPresenter.ERRORS:
+    				if (dataProvider.getErrors().size() > 0) {
+    					hasError.set(true);
+    				}
+    				break;
+    		}
+    	};
+    	
+    	ldp.addDataPresenter(consumer);
+    	ldp.waitForParsingFinish();
+    	ldp.removeDataPresenter(consumer);
+    	
+    	return hasStartTime.get() || hasError.get() || hasZeroCoverage.get();
+    }
+    
     /**
 	 * @param index the tab index
 	 * @return null if the index is greater than or equal to the number of tabs,
@@ -475,7 +417,7 @@ public class ModelEditor extends FormEditor {
 	public void dispose() {
 		removePageChangedListener(pageChangedListener);
 		
-		TLCUIActivator.getDefault().getPreferenceStore().removePropertyChangeListener(m_preferenceChangeListener);
+		TLCUIActivator.getDefault().getPreferenceStore().removePropertyChangeListener(preferenceChangeListener);
 		
         // TLCUIActivator.getDefault().logDebug("entering ModelEditor#dispose()");
         // remove the listeners
@@ -662,11 +604,9 @@ public class ModelEditor extends FormEditor {
         	tabFolder.setTabPosition(SWT.TOP);
         	tabFolder.addCTabFolder2Listener(listener);
 
-            for (int i = 0; i < pagesToAdd.length; i++)
-            {
+			for (int i = 0; i < pagesToAdd.length; i++) {
                 addPage(pagesToAdd[i]);
                 // initialize the page
-
                 // this means the content will be created
                 // the data will be loaded
                 // the refresh method will update the UI state
@@ -685,7 +625,7 @@ public class ModelEditor extends FormEditor {
                 if (pagesToAdd[i] instanceof Closeable) {
         			item.setShowClose(true);
         			
-        			m_indexCloseableMap.put(new Integer(i), (Closeable)pagesToAdd[i]);
+        			indexCloseableMap.put(new Integer(i), (Closeable)pagesToAdd[i]);
                 }
             }
 
@@ -697,7 +637,7 @@ public class ModelEditor extends FormEditor {
             final ModuleNode rootModule = SemanticHelper.getRootModuleNode();
 			if ((rootModule != null) && (rootModule.getVariableDecls().length == 0)
 					&& (rootModule.getConstantDecls().length == 0)) {
-            	showResultPage();
+            	addOrShowResultsPage();
             }
             
             if (model.hasStateGraphDump()) {
@@ -730,22 +670,27 @@ public class ModelEditor extends FormEditor {
 		// constants to not introduce a plugin dependency.
 		// org.lamport.tla.toolbox.tool.tla2tex.TLA2TeXActivator.PLUGIN_ID
 		// org.lamport.tla.toolbox.tool.tla2tex.preference.ITLA2TeXPreferenceConstants.EMBEDDED_VIEWER
+		// org.lamport.tla.toolbox.tool.tla2tex.preference.ITLA2TeXPreferenceConstants.HAVE_OS_OPEN_PDF
 		final boolean useEmbeddedViewer = Platform.getPreferencesService()
 				.getBoolean("org.lamport.tla.toolbox.tool.tla2tex", "embeddedViewer", false, null);
+		final boolean osOpensPDF = Platform.getPreferencesService()
+				.getBoolean("org.lamport.tla.toolbox.tool.tla2tex", "osHandlesPDF", false, null);
 		
-		final IEditorPart findEditor;
-		if (useEmbeddedViewer) {
+		final IEditorPart pdfEditor;
+		if (osOpensPDF) {
+			pdfEditor = null;
+		} else if (useEmbeddedViewer) {
 			// Try to get hold of the editor instance without opening it yet. Opening is
 			// triggered by calling addPage.
-			findEditor = UIHelper.findEditor("de.vonloesch.pdf4eclipse.editors.PDFEditor");
+			pdfEditor = UIHelper.findEditor("de.vonloesch.pdf4eclipse.editors.PDFEditor");
 		} else {
-			findEditor = UIHelper.findEditor(PDFBrowserEditor.ID);
+			pdfEditor = UIHelper.findEditor(PDFBrowserEditor.ID);
 		}
 
 		// Load a previously generated pdf file.
 		final IFile pdfFile = model.getFolder().getFile(model.getName() + ".pdf");
 		if (pdfFile.exists()) {
-			saferAddPage(stateGraphDotDump, findEditor, pdfFile, useEmbeddedViewer);
+			saferAddPage(stateGraphDotDump, pdfEditor, pdfFile, useEmbeddedViewer);
 			return;
 		}
 
@@ -767,7 +712,7 @@ public class ModelEditor extends FormEditor {
 					UIHelper.runUISync(new Runnable() {
 						@Override
 						public void run() {
-							ModelEditor.this.saferAddPage(stateGraphDotDump, findEditor, pdfFile, useEmbeddedViewer);
+							ModelEditor.this.saferAddPage(stateGraphDotDump, pdfEditor, pdfFile, useEmbeddedViewer);
 						}
 					});
 				} catch (CoreException e) {
@@ -789,9 +734,23 @@ public class ModelEditor extends FormEditor {
 	}
 
 	// Attempt to handle (primarily) OutOfMemory errors when opening large pdf files. 
-	private void saferAddPage(final IFile stateGraphDotDump, final IEditorPart findEditor, final IFile file, final boolean usesEmbeddedViewer) {
+	private void saferAddPage(final IFile stateGraphDotDump, final IEditorPart pdfEditor, final IFile file,
+			final boolean usesEmbeddedViewer) {
+		if (pdfEditor == null) {
+			// This is the case when the user would like the OS to open the PDF.
+			final String openCommand = "open " + file.getLocation().toOSString();
+			
+			try {
+				Runtime.getRuntime().exec(openCommand);
+			} catch (final Exception e) {
+				TLCUIActivator.getDefault().logError("Unable to execute 'open' command on PDF.", e);
+			}
+			
+			return;
+		}
+		
 		try {
-			addPage(findEditor, new FileEditorInput(file));
+			addPage(pdfEditor, new FileEditorInput(file));
 		} catch (PartInitException e) {
 			final Shell shell = Display.getDefault().getActiveShell();
 			MessageDialog.openError(shell == null ? new Shell() : shell,
@@ -963,7 +922,7 @@ public class ModelEditor extends FormEditor {
 							if (ModelHelper.containsModelCheckingModuleConflict(rootModuleName)) {
 								MessageDialog.openError(getSite().getShell(), "Illegal module name",
 										"Model validation and checking is not allowed on a spec containing a module named "
-												+ ModelHelper.MC_MODEL_NAME + "."
+												+ TLAConstants.Files.MODEL_CHECK_FILE_BASENAME + "."
 												+ (userInvoked ? "" : " However, the model can still be saved."));
 								return;
 							}
@@ -1039,10 +998,10 @@ public class ModelEditor extends FormEditor {
 							return;
 						}
 					} else {
-						// launching the config
-						model.launch(mode, SubMonitor.convert(monitor, 1), true);
-						
 						/*
+						 * Notify that model checking has begun ahead the launch to avoid potentially cleaning state
+						 * 	after it has started mutating.
+						 * 
 						 * Close any tabs in this editor containing read-only versions of modules. They
 						 * will be changed by the launch, regardless of the mode. We could do something
 						 * more sophisticated like listening to resource changes and updating the
@@ -1053,7 +1012,7 @@ public class ModelEditor extends FormEditor {
 						 */
 						for (int i = getPageCount() - 1; i >= 0; i--) {
 							if (pages.get(i) instanceof BasicFormPage) {
-								((BasicFormPage)pages.get(i)).modelCheckingHasBegun();
+								((BasicFormPage)pages.get(i)).modelCheckingWillBegin();
 							} else {
 								/*
 								 * The normal form pages (main model page, advanced options, results) are remain
@@ -1064,6 +1023,9 @@ public class ModelEditor extends FormEditor {
 							}
 						}
 
+						// launching the config
+						model.launch(mode, SubMonitor.convert(monitor, 1), true);
+						
 						// clear the error view when launching the model
 						// checker
 						// but not when validating
@@ -1151,16 +1113,14 @@ public class ModelEditor extends FormEditor {
             IMarker[] modelProblemMarkers = model.getMarkers();
             DataBindingManager dm = getDataBindingManager();
 
-            for (int j = 0; j < getPageCount(); j++)
-            {
+			for (int j = 0; j < getPageCount(); j++) {
                 /*
                  * Note that all pages are not necessarily
                  * instances of BasicFormPage. Some are read
                  * only editors showing saved versions of
                  * modules.
                  */
-                if (pages.get(j) instanceof BasicFormPage)
-                {
+				if (pages.get(j) instanceof BasicFormPage) {
                     // get the current page
                     BasicFormPage page = (BasicFormPage) pages.get(j);
                     Assert.isNotNull(page.getManagedForm(), "Page not initialized, this is a bug.");
@@ -1191,40 +1151,36 @@ public class ModelEditor extends FormEditor {
                             bubbleType = IMessageProvider.INFORMATION;
                         }
 
-                        if (ModelHelper.EMPTY_STRING.equals(attributeName))
-                        {
+						if (ModelHelper.EMPTY_STRING.equals(attributeName)) {
                             final String message = modelProblemMarkers[i].getAttribute(IMarker.MESSAGE,
                                     IModelConfigurationDefaults.EMPTY_STRING);
-							int pageId = modelProblemMarkers[i]
-									.getAttribute(ModelHelper.TLC_MODEL_ERROR_MARKER_ATTRIBUTE_PAGE, -1);
+							final String pageId = modelProblemMarkers[i]
+									.getAttribute(ModelHelper.TLC_MODEL_ERROR_MARKER_ATTRIBUTE_PAGE, null);
                             // no attribute, this is a global error, not bound to a particular attribute
                             // install it on the first page
                             // if it is a global TLC error, then we call addGlobalTLCErrorMessage()
                             // to add a hyperlink to the TLC Error view
-							if ((pageId != -1) && (bubbleType == IMessageProvider.WARNING)
+							if ((pageId != null) && (bubbleType == IMessageProvider.WARNING)
 									&& !IModelConfigurationDefaults.EMPTY_STRING.equals(message)) {
-								// Used by the ResultPage to display an error on
-								// incomplete state space exploration.
-								if (pageId >= pagesToAdd.length) {
-									pageId = pagesToAdd.length - 1;
+								final ResultPage rp = (ResultPage)findPage(ResultPage.ID);
+								if (rp != null) {
+									rp.addGlobalTLCErrorMessage(ResultPage.RESULT_PAGE_PROBLEM, message);
 								}
-								pagesToAdd[pageId].addGlobalTLCErrorMessage(ResultPage.RESULT_PAGE_PROBLEM, message);
 							} else if (bubbleType == IMessageProvider.WARNING) {
 								final PageIterator iterator = new PageIterator();		
 								while (iterator.hasNext()) {
 									final BasicFormPage bfp = iterator.next();
 									
-									if (!bfp.getId().equals(ResultPage.ID)) {
+									if (!ResultPage.ID.equals(bfp.getId())) {
 										bfp.addGlobalTLCErrorMessage("modelProblem_" + i);
 									}
 								}
 							} else {
 								// else install as with other messages
-								IMessageManager mm = pagesToAdd[0].getManagedForm().getMessageManager();
+								IMessageManager mm = ((BasicFormPage)pages.get(0)).getManagedForm().getMessageManager();
 								mm.addMessage("modelProblem_" + i, message, null, bubbleType);
 							}
-                        } else
-                        {
+						} else {
                             // attribute found
                             String sectionId = dm.getSectionForAttribute(attributeName);
                             Assert.isNotNull(sectionId,
@@ -1289,9 +1245,9 @@ public class ModelEditor extends FormEditor {
     }
     
     public void setActivePage(int index) {
-    	if(pages != null) {
-    		super.setActivePage(index);
-    	}
+		if ((pages != null) && (getCurrentPage() != index)) {
+			super.setActivePage(index);
+		}
     }
 
     /**
@@ -1348,25 +1304,6 @@ public class ModelEditor extends FormEditor {
             }
         }
         return null;
-    }
-
-    /**
-     * Show the result page of the editor    
-     */
-    public void showResultPage()
-    {
-        // goto result page
-        IFormPage resultPage = setActivePage(ResultPage.ID);
-        if (resultPage != null)
-        {
-            try
-            {
-                ((ResultPage) resultPage).loadData();
-            } catch (CoreException e)
-            {
-                TLCUIActivator.getDefault().logError("Error refreshing the result page", e);
-            }
-        }
     }
     
 	/**
@@ -1473,7 +1410,7 @@ public class ModelEditor extends FormEditor {
     }
 
     /**
-     * Invoke this to save the model.
+     * Invoke this to save the model via a workspace job.
      */
     public void saveModel() {
     	final Job job = new WorkspaceJob("Saving updated model...") {
@@ -1506,10 +1443,13 @@ public class ModelEditor extends FormEditor {
         if (setActivePage(AdvancedTLCOptionsPage.ID) == null) {
         	try {
         		int pageIndex = 1;
-        		final String id = getIdForEditorAtIndex(1);
+        		
+        		if (pageIndex < getPageCount()) {
+            		final String id = getIdForEditorAtIndex(pageIndex);
 
-        		if (AdvancedModelPage.ID.equals(id)) {
-        			pageIndex++;
+            		if (AdvancedModelPage.ID.equals(id)) {
+            			pageIndex++;
+            		}
         		}
 
         		addPage(pageIndex, new AdvancedTLCOptionsPage(this), getEditorInput());
@@ -1523,7 +1463,62 @@ public class ModelEditor extends FormEditor {
         	}
         }
     }
+    
+    public void addOrShowResultsPage() {
+        if (setActivePage(ResultPage.ID) == null) {
+        	try {
+        		int pageIndex = 1;
+        		
+        		if (pageIndex < getPageCount()) {
+            		String id = getIdForEditorAtIndex(pageIndex);
 
+            		if (AdvancedTLCOptionsPage.ID.equals(id) || AdvancedModelPage.ID.equals(id)) {
+            			pageIndex++;
+            			
+                		if (pageIndex < getPageCount()) {
+                    		id = getIdForEditorAtIndex(pageIndex);
+
+                    		if (AdvancedTLCOptionsPage.ID.equals(id) || AdvancedModelPage.ID.equals(id)) {
+                    			pageIndex++;
+                    		}
+                		}
+            		}
+        		}
+
+        		addPage(pageIndex, new ResultPage(this), getEditorInput());
+
+        		final IPreferenceStore ips = TLCUIActivator.getDefault().getPreferenceStore();
+	        	if (ips.getBoolean(IModelEditorPreferenceConstants.I_MODEL_EDITOR_SHOW_ECE_AS_TAB)) {
+	        		addPage((pageIndex + 1), new EvaluateConstantExpressionPage(this), getEditorInput());
+	        	}
+
+        		ResultPage rp = (ResultPage)setActivePage(ResultPage.ID);
+        		
+        		final int openTabState = getModel().getOpenTabsValue();
+        		updateOpenTabsState(openTabState | IModelConfigurationConstants.EDITOR_OPEN_TAB_RESULTS);
+        		
+        		rp.loadData();
+        		
+        		// MMP for architecturally unclear reasons, is charged with updating content on the RP
+        		final MainModelPage page = (MainModelPage)findPage(MainModelPage.ID);
+        		page.validatePage(true);
+        	} catch (Exception e) {
+				TLCActivator.getDefault().getLog().log(new Status(IStatus.ERROR, TLCActivator.PLUGIN_ID,
+						"Could not add results page", e));
+        	}
+        }
+    }
+    
+    public void resultsPageIsClosing() {
+		final IPreferenceStore ips = TLCUIActivator.getDefault().getPreferenceStore();
+    	if (ips.getBoolean(IModelEditorPreferenceConstants.I_MODEL_EDITOR_SHOW_ECE_AS_TAB)) {
+    		removePage(getPageCount() - 1);
+    	}
+    	
+		final int openTabState = getModel().getOpenTabsValue();
+		updateOpenTabsState(openTabState & ~IModelConfigurationConstants.EDITOR_OPEN_TAB_RESULTS);
+    }
+    
     /**
      * Overrides the method in {@link FormEditor}. Calls this method in the superclass
      * and then makes some changes if the input is a tla file.
@@ -1537,8 +1532,7 @@ public class ModelEditor extends FormEditor {
      * 2.) Set those pages to be closeable. This makes it possible to click on the tab
      *     to close it.
      */
-    public void addPage(int index, IEditorPart editor, IEditorInput input) throws PartInitException
-    {
+	public void addPage(int index, IEditorPart editor, IEditorInput input) throws PartInitException {
         super.addPage(index, editor, input);
         //TODO This method screams to be refactored and simplified, but sadly life is short.
         /*
@@ -1571,14 +1565,14 @@ public class ModelEditor extends FormEditor {
 
 			final int tabCount = tabFolder.getItemCount();
 			for (int i = tabCount - 2; i >= index; i--) {
-				final Closeable c = m_indexCloseableMap.remove(new Integer(i));
+				final Closeable c = indexCloseableMap.remove(new Integer(i));
 				
 				if (c != null) {
-					m_indexCloseableMap.put(new Integer(i + 1), c);
+					indexCloseableMap.put(new Integer(i + 1), c);
 				}
 			}
 
-			m_indexCloseableMap.put(new Integer(index), (Closeable)editor);
+			indexCloseableMap.put(new Integer(index), (Closeable)editor);
 		}
     }
 
@@ -1614,14 +1608,14 @@ public class ModelEditor extends FormEditor {
         	//	man-years wasted writing and dealing with you..
         	// event.item is already disposed by the time we get notified so we can't use its data holder which is
 			//	what is being used to hold the editor part by our super-superclass... kwality
-			final Closeable c = m_indexCloseableMap.remove(new Integer(index));
+			final Closeable c = indexCloseableMap.remove(new Integer(index));
 			if (c != null) {
 				final int tabCount = tabFolder.getItemCount();
 				for (int i = index; i <= tabCount; i++) {
-					final Closeable remaining = m_indexCloseableMap.remove(new Integer(i));
+					final Closeable remaining = indexCloseableMap.remove(new Integer(i));
 					
 					if (remaining != null) {
-						m_indexCloseableMap.put(new Integer(i - 1), remaining);
+						indexCloseableMap.put(new Integer(i - 1), remaining);
 					}
 				}
 
@@ -1642,29 +1636,29 @@ public class ModelEditor extends FormEditor {
 	 */
 	private class PageIterator implements Iterator<BasicFormPage> {
 
-		private final List<Object> m_pages;
-		private int m_counter;
+		private final List<Object> cachedPages;
+		private int counter;
 		
-		private BasicFormPage m_nextPage;
+		private BasicFormPage nextPage;
 		
 		PageIterator() {
-			m_pages = new ArrayList<>(pages);
-			m_counter = 0;
-			
-			m_nextPage = findNextPage();
+			cachedPages = new ArrayList<>(pages);
+			counter = 0;
+
+			nextPage = findNextPage();
 		}
 		
 		private BasicFormPage findNextPage() {
 			BasicFormPage page = null;
 			
-			while ((page == null) && (m_counter < m_pages.size())) {
-				final Object o = m_pages.get(m_counter);
+			while ((page == null) && (counter < cachedPages.size())) {
+				final Object o = cachedPages.get(counter);
 				
 				if (o instanceof BasicFormPage) {
 					page = (BasicFormPage)o;
 				}
 				
-				m_counter++;
+				counter++;
 			}
 			
 			return page;
@@ -1672,16 +1666,128 @@ public class ModelEditor extends FormEditor {
 		
 		@Override
 		public boolean hasNext() {
-			return (m_nextPage != null);
+			return (nextPage != null);
 		}
 
 		@Override
 		public BasicFormPage next() {
-			final BasicFormPage next = m_nextPage;
+			final BasicFormPage next = nextPage;
 			
-			m_nextPage = findNextPage();
+			nextPage = findNextPage();
 
 			return next;
+		}
+	}
+
+	
+    // TODO this is pretty poor design - there is one instance of this inner class per instance of ModelEditor; the 
+    //			code below tweaks the switchToErrorPage ivar and then hands it off to a run async method, i guess just
+    //			hoping that the flag isn't tweaked again before the async method does what was originally intended...
+	private class ValidateRunnable implements Runnable {
+        private boolean switchToErrorPage = false;
+
+        @Override
+		public void run() {
+            // Re-validate the pages, iff the model is not running.
+			// Also check if the model is nulled by now which
+			// happens if the ModelEditor disposed before a scheduled run gets
+			// executed.
+            if ((model != null) && !model.isRunning())
+            {
+                /*
+                 * Note that all pages are not necessarily
+                 * instances of BasicFormPage. Some are read
+                 * only editors showing saved versions of
+                 * modules.
+                 */
+                for (int i = 0; i < getPageCount(); i++)
+                {
+                    if (pages.get(i) instanceof BasicFormPage)
+                    {
+                        BasicFormPage page = (BasicFormPage) pages.get(i);
+                        page.resetAllMessages(true);
+                    }
+                }
+                for (int i = 0; i < getPageCount(); i++)
+                {
+                    if (pages.get(i) instanceof BasicFormPage)
+                    {
+                        BasicFormPage page = (BasicFormPage) pages.get(i);
+                        // re-validate the model on changes of the spec
+                        page.validatePage(switchToErrorPage);
+                    }
+                }
+            }
+        }
+    }
+	
+	
+	private class ModelStateListener extends AbstractModelStateChangeListener {
+    	private State lastState = State.NOT_RUNNING;
+    	
+		@Override
+		public boolean handleChange(final ChangeEvent event) {
+			if (event.getState().in(State.NOT_RUNNING, State.RUNNING)) {
+				final State lastStateCopy = lastState;
+				UIHelper.runUIAsync(() -> {
+					for (int i = 0; i < getPageCount(); i++) {
+						final Object object = pages.get(i);
+						if (object instanceof BasicFormPage) {
+							final BasicFormPage bfp = (BasicFormPage) object;
+							bfp.refresh();
+						}
+					}
+					if (event.getState().in(State.RUNNING)) {
+						// Switch to Result Page (put on top) of model editor stack. A user wants to see
+						// the status of a model run she has just started.
+						final IPreferenceStore ips = TLCUIActivator.getDefault().getPreferenceStore();
+						final boolean eceInItsOwnTab = ips
+								.getBoolean(IModelEditorPreferenceConstants.I_MODEL_EDITOR_SHOW_ECE_AS_TAB);
+
+						if (!eceInItsOwnTab || !modelIsConfiguredWithNoBehaviorSpec()) {
+							addOrShowResultsPage();
+						}
+					} else if (event.getState().in(State.NOT_RUNNING)) {
+						// Model checking finished, lets open state graph if any.
+						if (event.getModel().hasStateGraphDump()) {
+							try {
+								addOrUpdateStateGraphEditor(event.getModel().getStateGraphDump());
+							} catch (CoreException e) {
+								TLCUIActivator.getDefault().logError("Error initializing editor", e);
+							}
+						}
+
+						if (lastStateCopy.in(State.RUNNING, State.REMOTE_RUNNING)) {
+							final IPreferenceStore ips = TLCUIActivator.getDefault().getPreferenceStore();
+							final boolean eceInItsOwnTab = ips
+									.getBoolean(IModelEditorPreferenceConstants.I_MODEL_EDITOR_SHOW_ECE_AS_TAB);
+
+							if (eceInItsOwnTab && modelIsConfiguredWithNoBehaviorSpec()) {
+								setActivePage(EvaluateConstantExpressionPage.ID);
+							}
+						}
+
+						// MAK 01/2018: Re-validate the page because running the model removes or sets
+						// problem markers (Model#setMarkers) which are presented to the user by
+						// ModelEditor#handleProblemMarkers. If we don't re-validate once a model is
+						// done running, the user visible presentation resulting from an earlier run of
+						// handleProblemMarkers gets stale.
+						// This behavior can be triggered by creating a spec (note commented EXTENDS):
+						// \* EXTENDS Integers
+						// VARIABLE s
+						// Spec == s = 0 /\ [][s'=s]_s
+						// and a model that defines the invariant (s >= 0). Upon the first launch of
+						// the model, the ModelEditor correctly marks the invariant due to the operator
+						// >= being not defined. Uncommenting EXTENDS, saving the spec and rerunning
+						// the model would incorrectly not remove the marker on the invariant.
+						UIHelper.runUISync(validateRunable);
+					}
+				});
+			}
+			
+			lastState = event.getState();
+			
+			return false;
 		}
 	}
 }

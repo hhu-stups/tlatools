@@ -33,7 +33,14 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
     ***********************************************************************/
   public Value inVal;           // the in value or the real set
   public final SemanticNode pred;     // the predicate
-  public ITool tool;             // null iff inVal is the real set
+  public final ITool tool;             // null iff inVal is the real set
+  /**
+   * true after inVal has been converted to a SetEnumValue.  I assume this
+   * implies (inVal instanceof SetEnumValue) too but the serialization
+   * might interfere.
+   * MAK 07/18/2019
+   */
+  private boolean converted = false; 
   public final Context con;
   public final TLCState state;
   public final TLCState pstate;
@@ -68,13 +75,19 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
 	  this(vars, inVal, pred, tool, con, s0, s1, control);
 	  this.cm = cm;
   }
+  
+	public SetPredValue(SetPredValue other, ITool tool) {
+		this(other.vars, other.inVal, other.pred, tool, other.con, other.state, other.pstate, other.control, other.cm);
+	}
 
+  @Override
   public final byte getKind() { return SETPREDVALUE; }
 
+  @Override
   public final int compareTo(Object obj) {
     try {
       this.inVal = this.toSetEnum();
-      this.tool = null;
+      this.converted = true;
       return this.inVal.compareTo(obj);
     }
     catch (RuntimeException | OutOfMemoryError e) {
@@ -86,7 +99,7 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
   public final boolean equals(Object obj) {
     try {
       this.inVal = this.toSetEnum();
-      this.tool = null;
+      this.converted = true;
       return this.inVal.equals(obj);
     }
     catch (RuntimeException | OutOfMemoryError e) {
@@ -95,9 +108,10 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
     }
   }
 
+  @Override
   public final boolean member(Value elem) {
     try {
-      if (this.tool == null) {
+      if (this.converted) {
         return this.inVal.member(elem);
       }
       try {
@@ -141,6 +155,7 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
     }
   }
 
+  @Override
   public final boolean isFinite() {
     try {
       if (!(this.inVal.isFinite())) {
@@ -156,6 +171,7 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept ex) {
     try {
       if (ex.idx < ex.path.length) {
@@ -169,6 +185,7 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept[] exs) {
     try {
       if (exs.length != 0) {
@@ -182,10 +199,11 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
     }
   }
 
+  @Override
   public final int size() {
     try {
       this.inVal = this.toSetEnum();
-      this.tool = null;
+      this.converted = true;
       return this.inVal.size();
     }
     catch (RuntimeException | OutOfMemoryError e) {
@@ -196,18 +214,19 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
 
   private final void readObject(ObjectInputStream ois) throws IOException, ClassNotFoundException {
     this.inVal = (Value )ois.readObject();
-    this.tool = null;
+    this.converted = true;
   }
 
   private final void writeObject(ObjectOutputStream oos) throws IOException {
-    if (this.tool != null) {
+    if (!this.converted) {
       this.inVal = this.toSetEnum();
-      this.tool = null;
+      this.converted = true;
     }
     oos.writeObject(this.inVal);
   }
 
   /* This method normalizes (destructively) this set. */
+  @Override
   public final boolean isNormalized() {
     try {
       return this.inVal.isNormalized();
@@ -218,6 +237,7 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
     }
   }
 
+  @Override
   public final Value normalize() {
     try {
       this.inVal.normalize();
@@ -240,10 +260,13 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
 	    }
   }
 
+  @Override
   public final boolean isDefined() { return true; }
 
+  @Override
   public final IValue deepCopy() { return this; }
 
+  @Override
   public final boolean assignable(Value val) {
     try {
       return this.equals(val);
@@ -255,10 +278,11 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
   }
 
   /* The fingerprint method */
+  @Override
   public final long fingerPrint(long fp) {
     try {
       this.inVal = this.toSetEnum();
-      this.tool = null;
+      this.converted = true;
       return this.inVal.fingerPrint(fp);
     }
     catch (RuntimeException | OutOfMemoryError e) {
@@ -267,10 +291,11 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
     }
   }
 
+  @Override
   public final IValue permute(IMVPerm perm) {
     try {
       this.inVal = this.toSetEnum();
-      this.tool = null;
+      this.converted = true;
       return this.inVal.permute(perm);
     }
     catch (RuntimeException | OutOfMemoryError e) {
@@ -281,7 +306,7 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
 
   @Override
   public Value toSetEnum() {
-      if (this.tool == null) {
+      if (this.converted) {
     	  return (SetEnumValue) this.inVal;
       }
       ValueVec vals = new ValueVec();
@@ -300,6 +325,7 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
   }
 
   /* The string representation of the value. */
+  @Override
   public final StringBuffer toString(StringBuffer sb, int offset, boolean swallow) {
     try {
       try {
@@ -331,9 +357,10 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
     }
   }
 
+  @Override
   public final ValueEnumeration elements() {
     try {
-      if (this.tool == null) {
+      if (this.converted) {
         return ((SetEnumValue)this.inVal).elements();
       }
       return new Enumerator();
@@ -355,8 +382,10 @@ public class SetPredValue extends EnumerableValue implements Enumerable {
       this.Enum = ((Enumerable)inVal).elements();
     }
 
+    @Override
     public final void reset() { this.Enum.reset(); }
 
+    @Override
     public final Value nextElement() {
     	Value  elem;
       while ((elem = this.Enum.nextElement()) != null) {

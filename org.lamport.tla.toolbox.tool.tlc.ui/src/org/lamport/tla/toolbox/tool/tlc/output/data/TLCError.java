@@ -36,8 +36,10 @@ import java.util.List;
 import java.util.Map;
 
 import org.eclipse.core.runtime.Assert;
-import org.lamport.tla.toolbox.tool.tlc.launch.TraceExpressionInformationHolder;
-import org.lamport.tla.toolbox.tool.tlc.model.Formula;
+
+import tlc2.model.Formula;
+import tlc2.model.TraceExpressionInformationHolder;
+import util.TLAConstants;
 
 /**
  * Representation of the TLC error
@@ -194,6 +196,10 @@ public class TLCError
 		}
 		return states;
 	}
+	
+	public void removeStates(final List<TLCState> statesToRemove) {
+		states.removeAll(statesToRemove);
+	}
 
 	public boolean isTraceEmpty() {
 		return numberOfStatesToShow == 0 || states.isEmpty();
@@ -229,6 +235,36 @@ public class TLCError
 			Collections.reverse(states);
 			stateSortDirection = order;
 		}
+	}
+
+	public String toSequenceOfRecords(final boolean includeHeaders) {
+		final StringBuffer buf = new StringBuffer();
+		buf.append(TLAConstants.BEGIN_TUPLE);
+		buf.append(TLAConstants.CR);
+		
+		for (int i = 0; i < states.size(); i++) {
+			final TLCState tlcState = states.get(i);
+			if (tlcState.isBackToState() || tlcState.isStuttering()) {
+				//TODO How to represent these two types of states?
+				continue;
+			}
+			if (tlcState.getVariablesAsList().isEmpty() && includeHeaders == false) {
+				// When an user has used filtering to hide all variables, the error trace here
+				// has no variables. In this case just return empty sequence <<>> by breaking
+				// from the loop.
+				break;
+			}
+			
+			if (i > 0) {
+				// Append a comma if a record is going to be added below.
+				buf.append(TLAConstants.COMMA).append(TLAConstants.CR);
+			}
+			buf.append(tlcState.asRecord(includeHeaders));
+		}
+			
+		buf.append(TLAConstants.CR);
+		buf.append(TLAConstants.END_TUPLE);
+		return buf.toString();
 	}
 
 	public void applyFrom(final TLCError originalErrorWithTrace, final Map<String, Formula> traceExplorerExpressions,
@@ -464,5 +500,21 @@ public class TLCError
 				currentStateNewTraceVariables[i].setTraceExplorerVar(true);
 			}
 		}
+	}
+	
+	/**
+	 * This clone includes clones of each TLCState held.
+	 */
+	@Override
+	public TLCError clone() {
+		final TLCError clone = new TLCError(stateSortDirection);
+		
+		clone.message = message;
+		clone.cause = cause;
+		clone.errorCode = errorCode;
+		clone.numberOfStatesToShow =  numberOfStatesToShow;
+		states.stream().forEach((state) -> clone.states.add(state.clone()));
+		
+		return clone;
 	}
 }

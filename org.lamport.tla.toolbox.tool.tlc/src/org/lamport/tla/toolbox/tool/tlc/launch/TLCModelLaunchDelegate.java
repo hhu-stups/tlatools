@@ -7,14 +7,22 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URL;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Hashtable;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Random;
+import java.util.Set;
 import java.util.Vector;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import org.eclipse.core.internal.resources.ResourceException;
@@ -33,7 +41,7 @@ import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Platform;
 import org.eclipse.core.runtime.Status;
-import org.eclipse.core.runtime.SubProgressMonitor;
+import org.eclipse.core.runtime.SubMonitor;
 import org.eclipse.core.runtime.jobs.IJobChangeEvent;
 import org.eclipse.core.runtime.jobs.ISchedulingRule;
 import org.eclipse.core.runtime.jobs.Job;
@@ -46,14 +54,18 @@ import org.eclipse.debug.core.Launch;
 import org.eclipse.debug.core.model.IProcess;
 import org.eclipse.debug.core.model.IStreamsProxy;
 import org.eclipse.debug.core.model.LaunchConfigurationDelegate;
+import org.eclipse.jface.dialogs.IDialogConstants;
 import org.eclipse.jface.dialogs.MessageDialog;
+import org.eclipse.jface.dialogs.MessageDialogWithToggle;
 import org.eclipse.jface.text.FindReplaceDocumentAdapter;
 import org.eclipse.jface.text.IDocument;
+import org.eclipse.swt.SWT;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.editors.text.FileDocumentProvider;
 import org.eclipse.ui.part.FileEditorInput;
+import org.lamport.tla.toolbox.spec.Module;
 import org.lamport.tla.toolbox.tool.IParseResult;
 import org.lamport.tla.toolbox.tool.ToolboxHandle;
 import org.lamport.tla.toolbox.tool.tlc.TLCActivator;
@@ -61,26 +73,31 @@ import org.lamport.tla.toolbox.tool.tlc.job.DistributedTLCJob;
 import org.lamport.tla.toolbox.tool.tlc.job.ITLCJobStatus;
 import org.lamport.tla.toolbox.tool.tlc.job.TLCJobFactory;
 import org.lamport.tla.toolbox.tool.tlc.job.TLCProcessJob;
-import org.lamport.tla.toolbox.tool.tlc.model.Assignment;
-import org.lamport.tla.toolbox.tool.tlc.model.Formula;
 import org.lamport.tla.toolbox.tool.tlc.model.Model;
 import org.lamport.tla.toolbox.tool.tlc.model.ModelWriter;
 import org.lamport.tla.toolbox.tool.tlc.model.TLCSpec;
-import org.lamport.tla.toolbox.tool.tlc.model.TypedSet;
 import org.lamport.tla.toolbox.tool.tlc.output.IProcessOutputSink;
 import org.lamport.tla.toolbox.tool.tlc.util.ModelHelper;
+import org.lamport.tla.toolbox.ui.handler.ShowHistoryHandler;
 import org.lamport.tla.toolbox.util.AdapterFactory;
 import org.lamport.tla.toolbox.util.ResourceHelper;
 import org.lamport.tla.toolbox.util.TLAMarkerInformationHolder;
+import org.lamport.tla.toolbox.util.UIHelper;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.FrameworkUtil;
 import org.osgi.framework.ServiceReference;
 
+import pcal.Validator;
 import tla2sany.semantic.ModuleNode;
 import tla2sany.semantic.OpDeclNode;
 import tlc2.TLCGlobals;
+import tlc2.model.Assignment;
+import tlc2.model.Formula;
+import tlc2.model.TypedSet;
+import tlc2.output.SpecWriterUtilities;
 import tlc2.util.FP64;
 import util.ExecutionStatisticsCollector;
+import util.TLAConstants;
 
 /**
  * Represents a launch delegate for TLC<br>
@@ -98,12 +115,8 @@ import util.ExecutionStatisticsCollector;
  * Modified on 10 Sep 2009 to add No Spec TLC launch option.
  */
 @SuppressWarnings("restriction")
-public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implements IModelConfigurationConstants,
-        IModelConfigurationDefaults
-{
-    // Mutex rule for the following jobs to run after each other
-    protected MutexRule mutexRule = new MutexRule();
-
+public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate
+		implements IModelConfigurationConstants, IModelConfigurationDefaults {
     /**
      * Configuration type
      */
@@ -116,8 +129,25 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
      * Only generate the models but do not run TLC
      */
     public static final String MODE_GENERATE = "generate";
+    
+    private static final AtomicBoolean PERFORM_VALIDATION_BEFORE_LAUNCH = new AtomicBoolean(true);
+    
+    private static final Integer DIVERGENCE_CONTINUE_LAUNCH = Integer.valueOf(1);
+    private static final Integer DIVERGENCE_SHOW_HISTORY = Integer.valueOf(2);
+    private static final LinkedHashMap<String, Integer> DIVERGENCE_DIALOG_BUTTONS;
+    
+    static {
+    	DIVERGENCE_DIALOG_BUTTONS = new LinkedHashMap<>();
+    	DIVERGENCE_DIALOG_BUTTONS.put("&Abort Launch", Integer.valueOf(0));
+    	DIVERGENCE_DIALOG_BUTTONS.put("Continue &Launch", DIVERGENCE_CONTINUE_LAUNCH);
+    	DIVERGENCE_DIALOG_BUTTONS.put("Abort Launch && Show &History", DIVERGENCE_SHOW_HISTORY); // "&&" because "&" is mnemonic.
+    }
 
-	private Launch launch;
+
+    // Mutex rule for the following jobs to run after each other
+    protected MutexRule mutexRule = new MutexRule();
+
+    private Launch launch;
 
     /**
      * 1. method called during the launch
@@ -146,24 +176,122 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
      * @return whether the launch should proceed
      * @see org.eclipse.debug.core.model.ILaunchConfigurationDelegate2#preLaunchCheck(org.eclipse.debug.core.ILaunchConfiguration, java.lang.String, org.eclipse.core.runtime.IProgressMonitor)
      */
-    public boolean preLaunchCheck(ILaunchConfiguration config, String mode, IProgressMonitor monitor)
-            throws CoreException
-    {
-
+	public boolean preLaunchCheck(final ILaunchConfiguration config, final String mode, final IProgressMonitor monitor)
+			throws CoreException {
         // check the config existence
-        if (!config.exists())
-        {
+		if (!config.exists()) {
             return false;
         }
-        
-        try
-        {
-            monitor.beginTask("Reading model parameters", 1);
-        } finally
-        {
-            // finish the monitor
-            monitor.done();
+
+        final int specType = config.getAttribute(MODEL_BEHAVIOR_SPEC_TYPE, MODEL_BEHAVIOR_TYPE_DEFAULT);
+        if ((specType != MODEL_BEHAVIOR_TYPE_NO_SPEC)
+        		&& PERFORM_VALIDATION_BEFORE_LAUNCH.get()
+        		&& mode.equals(MODE_MODELCHECK)) {
+            final Model model = config.getAdapter(Model.class);
+            final IFile rootModule = model.getSpec().toSpec().getRootFile();
+            final Validator.ValidationResult result;
+
+            try (final InputStream is = rootModule.getContents()) {
+            	result = Validator.validate(is);
+            } catch (final IOException e) {
+            	monitor.done();
+            	
+            	throw new CoreException(new Status(IStatus.ERROR, TLCActivator.PLUGIN_ID, e.getMessage()));
+            }
+            
+    		final Display d = PlatformUI.getWorkbench().getDisplay();
+    		final AtomicInteger returnCode = new AtomicInteger(-1);
+            switch (result) {
+            	case NO_PLUSCAL_EXISTS:
+            	case NO_DIVERGENCE:
+            		break;
+            	case ERROR_ENCOUNTERED:
+            		d.syncExec(() -> {
+            			final MessageDialogWithToggle dialog = MessageDialogWithToggle.openYesNoQuestion(
+    							d.getActiveShell(), "Error encountered",
+    							"Something went wrong attempting to detect divergence between PlusCal and its translation, continue anyway?",
+    							"Do not bug me about PlusCal verification during the rest of my Toolbox session.", false,
+    							null, null);
+    					
+    					if (dialog.getToggleState()) {
+    						PERFORM_VALIDATION_BEFORE_LAUNCH.set(false);
+    					}
+    					
+    					returnCode.set(dialog.getReturnCode());
+            		});
+					
+					if (returnCode.get() == IDialogConstants.NO_ID) {
+						return false;
+					}
+        			break;
+            	case NO_TRANSLATION_EXISTS:
+            		d.syncExec(() -> {
+            			final MessageDialogWithToggle dialog = MessageDialogWithToggle.openYesNoQuestion(
+    							d.getActiveShell(), "Translation missing",
+    							"Your spec appears to contain PlusCal but no TLA+ translation, are you sure you want to continue?",
+    							"Do not bug me about PlusCal verification during the rest of my Toolbox session.", false,
+    							null, null);
+    					
+    					if (dialog.getToggleState()) {
+    						PERFORM_VALIDATION_BEFORE_LAUNCH.set(false);
+    					}
+    					
+    					returnCode.set(dialog.getReturnCode());
+            		});
+					
+					if (returnCode.get() == IDialogConstants.NO_ID) {
+						return false;
+					}
+        			break;
+            	case NO_CHECKSUMS_EXIST:
+            		d.syncExec(() -> {
+            			final MessageDialogWithToggle dialog = MessageDialogWithToggle.openInformation(
+    							d.getActiveShell(), "A note about your spec",
+    							"Your spec contains PlusCal and a TLA+ translation - but they have not been verified to "
+    									+ "be in sync; consider re-translating the PlusCal algorithm.",
+    							"Do not bug me about PlusCal verification during the rest of my Toolbox session.", false,
+    							null, null);
+    					
+    					if (dialog.getToggleState()) {
+    						PERFORM_VALIDATION_BEFORE_LAUNCH.set(false);
+    					}
+            		});
+					
+            		break;
+            	case DIVERGENCE_EXISTS:
+            		d.syncExec(() -> {
+            			final MessageDialogWithToggle dialog = MessageDialogWithToggle.open(MessageDialogWithToggle.QUESTION,
+    							d.getActiveShell(), "PlusCal out of sync",
+    							"The PlusCal and TLA+ translation in your spec appear to be out of sync - would you like to"
+    									+ " stop the launch?",
+    							"Do not bug me about PlusCal verification during the rest of my Toolbox session.", false,
+    							null, null, SWT.NONE, DIVERGENCE_DIALOG_BUTTONS);
+    					
+    					if (dialog.getToggleState()) {
+    						PERFORM_VALIDATION_BEFORE_LAUNCH.set(false);
+    					}
+    					
+    					returnCode.set(dialog.getReturnCode());
+            		});
+					
+					if (returnCode.get() != DIVERGENCE_CONTINUE_LAUNCH.intValue()) {
+						if (returnCode.get() == DIVERGENCE_SHOW_HISTORY.intValue()) {
+							final Module m = new Module(model.getSpec().getRootFile());
+							ShowHistoryHandler.openHistoryForModule(m);
+						}
+						
+						return false;
+					}
+            		break;
+            }
         }
+        
+		try {
+			monitor.beginTask("Reading model parameters", 1);
+		} finally {
+			// finish the monitor
+			monitor.done();
+		}
 
         return true;
     }
@@ -193,22 +321,23 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             // step 1
             monitor.subTask("Creating directories");
 
-            // retrieve the project containing the specification
-            final IProject project = model.getSpec().getProject();
+            final TLCSpec spec = model.getSpec();
+			// retrieve the project containing the specification
+            final IProject project = spec.getProject();
             if (project == null)
             {
                 // project could not be found
                 throw new CoreException(new Status(IStatus.ERROR, TLCActivator.PLUGIN_ID,
-                        "Error accessing the spec project " + model.getSpec().getName()));
+                        "Error accessing the spec project " + spec.getName()));
             }
 
             // retrieve the root file
-            final IFile specRootFile = model.getSpec().getRootFile();
+            final IFile specRootFile = spec.getRootFile();
             if (specRootFile == null)
             {
                 // root module file not found
                 throw new CoreException(new Status(IStatus.ERROR, TLCActivator.PLUGIN_ID,
-                        "Error accessing the root module " + model.getSpec().getRootFilename()));
+                        "Error accessing the root module " + spec.getRootFilename()));
             }
 
             // retrieve the model folder
@@ -216,9 +345,9 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             IPath targetFolderPath = modelFolder.getProjectRelativePath().addTrailingSeparator();
 
             // create the handles: MC.tla, MC.cfg and MC.out
-            IFile tlaFile = project.getFile(targetFolderPath.append(ModelHelper.FILE_TLA));
-            IFile cfgFile = project.getFile(targetFolderPath.append(ModelHelper.FILE_CFG));
-            IFile outFile = project.getFile(targetFolderPath.append(ModelHelper.FILE_OUT));
+            IFile tlaFile = project.getFile(targetFolderPath.append(TLAConstants.Files.MODEL_CHECK_TLA_FILE));
+            IFile cfgFile = project.getFile(targetFolderPath.append(TLAConstants.Files.MODEL_CHECK_CONFIG_FILE));
+            IFile outFile = project.getFile(targetFolderPath.append(TLAConstants.Files.MODEL_CHECK_OUTPUT_FILE));
 
             final IFile[] files = new IFile[] { tlaFile, cfgFile, outFile };
 
@@ -261,7 +390,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
                             {
                                 if (!members[i].getName().equals(ModelHelper.TE_TRACE_SOURCE))
                                 {
-                                    members[i].delete(IResource.FORCE, new SubProgressMonitor(monitor, 1));
+                                    members[i].delete(IResource.FORCE, SubMonitor.convert(monitor).split(1));
                                 }
                             } catch (CoreException e)
                             {
@@ -278,7 +407,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             } else
             {
                 // create it
-                modelFolder.create(IResource.DERIVED | IResource.FORCE, true, new SubProgressMonitor(monitor, STEP));
+                modelFolder.create(IResource.DERIVED | IResource.FORCE, true, SubMonitor.convert(monitor).split(STEP));
             }
 
             // step 2
@@ -286,7 +415,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 
             // copy
             specRootFile.copy(targetFolderPath.append(specRootFile.getProjectRelativePath()), IResource.DERIVED
-                    | IResource.FORCE, new SubProgressMonitor(monitor, 1));
+                    | IResource.FORCE, SubMonitor.convert(monitor).split(1));
             // find the result
             IResource specRootFileCopy = modelFolder.findMember(specRootFile.getProjectRelativePath());
 
@@ -294,20 +423,20 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             if (specRootFileCopy == null)
             {
                 throw new CoreException(new Status(IStatus.ERROR, TLCActivator.PLUGIN_ID, "Error copying "
-                        + model.getSpec().getRootFilename() + " into " + targetFolderPath.toOSString()));
+                        + spec.getRootFilename() + " into " + targetFolderPath.toOSString()));
             }
             
             // Copy the spec's root file userModule override if any.
             copyUserModuleOverride(monitor, 2, project, targetFolderPath, specRootFile);
             
             // get the list of dependent modules
-            List extendedModules = ToolboxHandle.getExtendedModules(specRootFile.getName());
+            List<String> extendedModules = ToolboxHandle.getExtendedModules(specRootFile.getName());
 
             // iterate and copy modules that are needed for the spec
             IFile moduleFile = null;
             for (int i = 0; i < extendedModules.size(); i++)
             {
-                String module = (String) extendedModules.get(i);
+                String module = extendedModules.get(i);
 				// Only take care of user modules and actually *linked* files
 				// (not files defined via TLA_LIBRARY_PATH)
                 if (ToolboxHandle.isUserModule(module) && ResourceHelper.isLinkedFile(project, module))
@@ -317,7 +446,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
                     {
 						try {
 	                        moduleFile.copy(targetFolderPath.append(moduleFile.getProjectRelativePath()), IResource.DERIVED
-	                                | IResource.FORCE, new SubProgressMonitor(monitor, STEP / extendedModules.size()));
+	                                | IResource.FORCE, SubMonitor.convert(monitor).split(STEP / extendedModules.size()));
 							copyUserModuleOverride(monitor, STEP / extendedModules.size(), project, targetFolderPath, moduleFile);
 						} catch (ResourceException re) {
                     		// Trying to copy the file to the targetFolderPath produces an exception.
@@ -347,15 +476,34 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
                     // TODO check the existence of copied files
                 }
             }
+            
+			// CloudTLC deploys a custom packaged tla2tools.jar on the remote instance,
+			// which is self-contained. I.e. it contains all of the spec's dependencies such
+			// as modules from the library path and TLC module overrides. Here we make sure
+            // these dependencies get included in the custom tla2tools.jar (see PayloadHelper)
+            // by copying them to the model directory.
+            if (!local.contains(getMode(config))) {
+				final Path modelDirectoryPath = Paths.get(modelFolder.getRawLocation().makeAbsolute().toFile().toURI());
+            	for (Module m : spec.getModulesSANY()) {
+					if (m.isLibraryModule() && !m.isStandardModule()) {
+						try {
+							m.copyTo(modelDirectoryPath);
+						} catch (IOException e) {
+							throw new CoreException(new Status(Status.ERROR, "org.lamport.tlc.toolbox.tool.tlc",
+									String.format("Error copying file %s to %s.", m.getFile(), modelDirectoryPath), e));
+						}
+					}
+				}
+            }
 
             // create files
 			for (int i = 0; i < files.length; i++) {
 				if (files[i].exists()) {
 					files[i].setContents(new ByteArrayInputStream("".getBytes()), IResource.DERIVED | IResource.FORCE,
-							new SubProgressMonitor(monitor, 1));
+							SubMonitor.convert(monitor).split(1));
 				} else {
 					files[i].create(new ByteArrayInputStream("".getBytes()), IResource.DERIVED | IResource.FORCE,
-							new SubProgressMonitor(monitor, 1));
+							SubMonitor.convert(monitor).split(1));
 				}
 			}
 
@@ -365,15 +513,15 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             ModelWriter writer = new ModelWriter();
        
             // add the MODULE beginning and EXTENDS statement
-            writer.addPrimer(ModelHelper.MC_MODEL_NAME, model.getSpec().getRootModuleName());
+            writer.addPrimer(TLAConstants.Files.MODEL_CHECK_FILE_BASENAME, spec.getRootModuleName());
 
             // Sets constants to a Vector of the substitutions for the CONSTANT substitutions
             List<Assignment> constants = ModelHelper.deserializeAssignmentList(config.getAttribute(MODEL_PARAMETER_CONSTANTS,
-                    new Vector<String>()));
+                    new ArrayList<String>()));
 
             // Sets modelValues to a TypedSet object whose value is a String array containing
             // the names of the model values declared on the Advanced model page.
-            TypedSet modelValues = TypedSet.parseSet(config.getAttribute(MODEL_PARAMETER_MODEL_VALUES, EMPTY_STRING));
+            TypedSet modelValues = TypedSet.parseSet(config.getAttribute(MODEL_PARAMETER_MODEL_VALUES, TLAConstants.EMPTY_STRING));
 
             // Adds to MC.cfg the CONSTANT declarations for (in order) 
             //  - The model values declared on the advanced model page.
@@ -387,7 +535,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             writer.addConstants(constants, modelValues, MODEL_PARAMETER_CONSTANTS, MODEL_PARAMETER_MODEL_VALUES);
             
             // The additional definitions from the Advanced model page.
-            writer.addNewDefinitions(config.getAttribute(MODEL_PARAMETER_NEW_DEFINITIONS, EMPTY_STRING),
+            writer.addNewDefinitions(config.getAttribute(MODEL_PARAMETER_NEW_DEFINITIONS, TLAConstants.EMPTY_STRING),
                     MODEL_PARAMETER_NEW_DEFINITIONS);
 
             // Adds to MC.cfg the CONSTANT declarations for CONSTANT parameters instantiated with ordinary values. 
@@ -396,12 +544,13 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 
             // Sets overrides to the Vector of definition overrides.
             List<Assignment> overrides = ModelHelper.deserializeAssignmentList(config.getAttribute(MODEL_PARAMETER_DEFINITIONS,
-                    new Vector<String>()));
+                    new ArrayList<String>()));
             
             // For the definition overrides, it adds the definitions to the MC.tla file and the
             // overriding CONSTANT statements to the MC.cfg file.
-            writer.addFormulaList(ModelWriter.createOverridesContent(overrides, ModelWriter.DEFOV_SCHEME), "CONSTANT",
-                    MODEL_PARAMETER_DEFINITIONS);
+            writer.addFormulaList(SpecWriterUtilities.createOverridesContent(overrides, TLAConstants.Schemes.DEFOV_SCHEME,
+            		ToolboxHandle.getCurrentSpec().getValidRootModule()), TLAConstants.KeyWords.CONSTANT,
+            		MODEL_PARAMETER_DEFINITIONS);
 
             /* 
              * specType is used to write the desired spec or lack of spec to the MC files.
@@ -422,19 +571,21 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             int specType = config.getAttribute(MODEL_BEHAVIOR_SPEC_TYPE, MODEL_BEHAVIOR_TYPE_DEFAULT);
             boolean hasSpec = specType != MODEL_BEHAVIOR_TYPE_NO_SPEC;
 
-            if (hasSpec)
-            {
+			if (hasSpec) {
                 // constraint
-                writer.addFormulaList(ModelWriter.createSourceContent(MODEL_PARAMETER_CONSTRAINT,
-                        ModelWriter.CONSTRAINT_SCHEME, config), "CONSTRAINT", MODEL_PARAMETER_CONSTRAINT);
+				String constraintValue = config.getAttribute(MODEL_PARAMETER_CONSTRAINT, TLAConstants.EMPTY_STRING);
+                writer.addFormulaList(SpecWriterUtilities.createSourceContent(constraintValue,
+                        TLAConstants.Schemes.CONSTRAINT_SCHEME), "CONSTRAINT", MODEL_PARAMETER_CONSTRAINT);
+                
                 // action constraint
-                writer.addFormulaList(ModelWriter.createSourceContent(MODEL_PARAMETER_ACTION_CONSTRAINT,
-                        ModelWriter.ACTIONCONSTRAINT_SCHEME, config), "ACTION_CONSTRAINT",
+                constraintValue = config.getAttribute(MODEL_PARAMETER_ACTION_CONSTRAINT, TLAConstants.EMPTY_STRING);
+                writer.addFormulaList(SpecWriterUtilities.createSourceContent(constraintValue,
+                		TLAConstants.Schemes.ACTIONCONSTRAINT_SCHEME), TLAConstants.KeyWords.ACTION_CONSTRAINT,
                         MODEL_PARAMETER_ACTION_CONSTRAINT);
                 // Changed from incorrect "ACTION-CONSTRAINT" on 11 Sep 2009
 
                 // view
-                writer.addView(config.getAttribute(LAUNCH_VIEW, EMPTY_STRING), MODEL_PARAMETER_VIEW);
+                writer.addView(config.getAttribute(LAUNCH_VIEW, TLAConstants.EMPTY_STRING), MODEL_PARAMETER_VIEW);
             }
 
             // calculator expression
@@ -450,38 +601,45 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
                     if (vars != null && vars.length > 0)
                     {
                         String var = rootModuleNode.getVariableDecls()[0].getName().toString();
-                        writer.addFormulaList(ModelWriter.createFalseInit(var), "INIT", MODEL_BEHAVIOR_NO_SPEC);
-                        writer.addFormulaList(ModelWriter.createFalseNext(var), "NEXT", MODEL_BEHAVIOR_NO_SPEC);
+                        writer.addFormulaList(SpecWriterUtilities.createFalseInit(var), TLAConstants.KeyWords.INIT,
+                        		MODEL_BEHAVIOR_NO_SPEC);
+                        writer.addFormulaList(SpecWriterUtilities.createFalseNext(var), TLAConstants.KeyWords.NEXT,
+                        		MODEL_BEHAVIOR_NO_SPEC);
                     }
                 }
                 break;
             case MODEL_BEHAVIOR_TYPE_SPEC_CLOSED:
 
                 // the specification name-formula pair
-            	final String spec = config.getAttribute(MODEL_BEHAVIOR_CLOSED_SPECIFICATION, EMPTY_STRING);
-    			if (model.getSpec().declares(spec) && !isExpression(spec)) {
-            		writer.addFormulaList(spec, "SPECIFICATION", MODEL_BEHAVIOR_CLOSED_SPECIFICATION);
+            	final String specIdentifier = config.getAttribute(MODEL_BEHAVIOR_CLOSED_SPECIFICATION, TLAConstants.EMPTY_STRING);
+    			if (spec.declares(specIdentifier) && !isExpression(specIdentifier)) {
+            		writer.addFormulaList(specIdentifier, TLAConstants.KeyWords.SPECIFICATION, MODEL_BEHAVIOR_CLOSED_SPECIFICATION);
     			} else {
-    				writer.addFormulaList(ModelWriter.createSourceContent(MODEL_BEHAVIOR_CLOSED_SPECIFICATION,
-    						ModelWriter.SPEC_SCHEME, config), "SPECIFICATION", MODEL_BEHAVIOR_CLOSED_SPECIFICATION);
+    				final String value = config.getAttribute(MODEL_BEHAVIOR_CLOSED_SPECIFICATION, TLAConstants.EMPTY_STRING);
+    				writer.addFormulaList(SpecWriterUtilities.createSourceContent(value,
+    						TLAConstants.Schemes.SPEC_SCHEME), TLAConstants.KeyWords.SPECIFICATION, MODEL_BEHAVIOR_CLOSED_SPECIFICATION);
     			}
                 break;
             case MODEL_BEHAVIOR_TYPE_SPEC_INIT_NEXT:
             	// the init and next formulas
-            	final String init = config.getAttribute(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT, EMPTY_STRING);
-				if (model.getSpec().declares(init) && !isExpression(init)) {
-            		writer.addFormulaList(init, "INIT", MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT);
+            	final String init = config.getAttribute(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT, TLAConstants.EMPTY_STRING);
+				if (spec.declares(init) && !isExpression(init)) {
+            		writer.addFormulaList(init, TLAConstants.KeyWords.INIT, MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT);
             	} else {
-            		writer.addFormulaList(ModelWriter.createSourceContent(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT,
-            				ModelWriter.INIT_SCHEME, config), "INIT", MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT);
+    				final String value = config.getAttribute(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT, TLAConstants.EMPTY_STRING);
+            		writer.addFormulaList(SpecWriterUtilities.createSourceContent(value,
+            				TLAConstants.Schemes.INIT_SCHEME), TLAConstants.KeyWords.INIT,
+            				MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT);
             	}
 				
-            	final String next = config.getAttribute(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_NEXT, EMPTY_STRING);
-				if (model.getSpec().declares(next) && !isExpression(next)) {
-	           		writer.addFormulaList(next, "NEXT", MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT);
+            	final String next = config.getAttribute(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_NEXT, TLAConstants.EMPTY_STRING);
+				if (spec.declares(next) && !isExpression(next)) {
+	           		writer.addFormulaList(next, TLAConstants.KeyWords.NEXT, MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_INIT);
             	} else {
-	                writer.addFormulaList(ModelWriter.createSourceContent(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_NEXT,
-	                        ModelWriter.NEXT_SCHEME, config), "NEXT", MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_NEXT);
+    				final String value = config.getAttribute(MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_NEXT, TLAConstants.EMPTY_STRING);
+	                writer.addFormulaList(SpecWriterUtilities.createSourceContent(value,
+	                		TLAConstants.Schemes.NEXT_SCHEME), TLAConstants.KeyWords.NEXT,
+	                		MODEL_BEHAVIOR_SEPARATE_SPECIFICATION_NEXT);
             	}
                 break;
             }
@@ -494,15 +652,15 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             if (hasSpec)
             {
             	// invariants (separate those declared in the spec from those declared in the model).
-				final List<String> invariants = config.getAttribute(MODEL_CORRECTNESS_INVARIANTS, new Vector<String>());
+				final List<String> invariants = config.getAttribute(MODEL_CORRECTNESS_INVARIANTS, new ArrayList<String>());
 				writer.addFormulaList(
-						createProperties(writer, model.getSpec(), invariants, ModelWriter.INVARIANT_SCHEME),
-						"INVARIANT", MODEL_CORRECTNESS_INVARIANTS);
+						createProperties(writer, spec, invariants, TLAConstants.Schemes.INVARIANT_SCHEME),
+						TLAConstants.KeyWords.INVARIANT, MODEL_CORRECTNESS_INVARIANTS);
 
 				// properties
-				final List<String> properties = config.getAttribute(MODEL_CORRECTNESS_PROPERTIES, new Vector<String>());
-				writer.addFormulaList(createProperties(writer, model.getSpec(), properties, ModelWriter.PROP_SCHEME),
-						"PROPERTY", MODEL_CORRECTNESS_PROPERTIES);
+				final List<String> properties = config.getAttribute(MODEL_CORRECTNESS_PROPERTIES, new ArrayList<String>());
+				writer.addFormulaList(createProperties(writer, spec, properties, TLAConstants.Schemes.PROP_SCHEME),
+						TLAConstants.KeyWords.PROPERTY, MODEL_CORRECTNESS_PROPERTIES);
             }
 
             monitor.worked(STEP);
@@ -512,7 +670,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
             writer.writeFiles(tlaFile, cfgFile, monitor);
 
             // refresh the model folder
-            modelFolder.refreshLocal(IResource.DEPTH_ONE, new SubProgressMonitor(monitor, STEP));
+            modelFolder.refreshLocal(IResource.DEPTH_ONE, SubMonitor.convert(monitor).split(STEP));
 
         } finally
         {
@@ -539,10 +697,10 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 		
 		// Convert list of strings such as {"1Inv", "0x \in Nat"} into a subset of
 		// checked formulas (prefixed with 1).
-		final List<Formula> checkedFormula = ModelHelper.deserializeFormulaList(properties);
+		final List<Formula> checkedFormula = Formula.deserializeFormulaList(properties);
 
 		// Create the input for the model writer out of all formula...
-		final List<String[]> createFormulaListContent = ModelWriter.createFormulaListContentFormula(checkedFormula,
+		final List<String[]> createFormulaListContent = SpecWriterUtilities.createFormulaListContentFormula(checkedFormula,
 				scheme);
 
 		// Collect those formula that are declared in the spec, not the MC.tla file.
@@ -552,7 +710,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 		// Override each declared formula with its original declaration. This will cause
 		// ModelWriter.addFormulaList to omit it from the MC.tla file and only add it to MC.cfg.
 		declaredFormula.forEach(f -> createFormulaListContent.set(checkedFormula.indexOf(f),
-				new String[] { f.getFormula(), EMPTY_STRING, String.valueOf(checkedFormula.indexOf(f)) }));
+				new String[] { f.getFormula(), TLAConstants.EMPTY_STRING, String.valueOf(checkedFormula.indexOf(f)) }));
 
 		// createFormulaListContent has to be in the same order as checkedFormula.
 		// Otherwise, TLCModelLaunchDataProvider.createError(TLCRegion,
@@ -575,7 +733,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 		for (IFile userModuleOverride : userModuleOverrides) {
 			try {
 				userModuleOverride.copy(targetFolderPath.append(userModuleOverride.getProjectRelativePath()),
-						IResource.DERIVED | IResource.FORCE, new SubProgressMonitor(monitor, ticks));
+						IResource.DERIVED | IResource.FORCE, SubMonitor.convert(monitor).split(ticks));
 			} catch (CoreException e) {
 				// If the file could not be copied, the link is obviously stale
 				// and has to be removed to not create any problems in the
@@ -603,7 +761,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 
         monitor.worked(1);
         // parse the MC file
-        IParseResult parseResult = ToolboxHandle.parseModule(rootModule, new SubProgressMonitor(monitor, 1), false,
+        IParseResult parseResult = ToolboxHandle.parseModule(rootModule, SubMonitor.convert(monitor).split(1), false,
                 false);
         final Vector<TLAMarkerInformationHolder> detectedErrors = parseResult.getDetectedErrors();
         boolean status = !AdapterFactory.isProblemStatus(parseResult.getStatus());
@@ -742,22 +900,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
         // number of workers
         int numberOfWorkers = config.getAttribute(LAUNCH_NUMBER_OF_WORKERS, LAUNCH_NUMBER_OF_WORKERS_DEFAULT);
 
-        // distributed launch (legacy launch configurations pre-dating TLC distributed functionality 
-        // do not have the LAUNCH_DISTRIBUTED attribute. Then, it obviously defaults to distribution turned off.
-        // Trying to lookup a non-existing attribute would cause a runtime exception.)
-        // Then it could also be true or false. The legacy flag showing if "ad hoc" distribution is turned
-        // on or not. Simply map it to "ad hoc" or "off".
-        String cloud = "off";
-        if (config.hasAttribute(LAUNCH_DISTRIBUTED)) {
-        	try {
-        		cloud = config.getAttribute(LAUNCH_DISTRIBUTED, LAUNCH_DISTRIBUTED_DEFAULT);
-        	} catch (CoreException e) {
-        		boolean distributed = config.getAttribute(LAUNCH_DISTRIBUTED, false);
-        		if (distributed) {
-        			cloud = "ad hoc";
-        		}
-        	}
-        }
+        final String cloud = getMode(config);
         
         // TLC job
         Job job = null;
@@ -807,6 +950,16 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 					
 					// The parameters below are the only one currently useful with CloudDistributedTLC
 					final StringBuffer tlcParams = new StringBuffer();
+					
+					if (!launch.getLaunchConfiguration().getAttribute(LAUNCH_MC_MODE, LAUNCH_MC_MODE_DEFAULT)) {
+						tlcParams.append("-simulate");
+			        	tlcParams.append(" ");
+						tlcParams.append("-depth");
+			        	tlcParams.append(" ");
+						final int depth = launch.getLaunchConfiguration().getAttribute(LAUNCH_SIMU_DEPTH, LAUNCH_SIMU_DEPTH_DEFAULT);
+						tlcParams.append(Integer.toString(depth));
+			        	tlcParams.append(" ");
+					}
 					
 			        // fp seed offset (decrease by one to map from [1, 64] interval to [0, 63] array address)
 					if (launch.getLaunchConfiguration().getAttribute(LAUNCH_FP_INDEX_RANDOM, LAUNCH_FP_INDEX_RANDOM_DEFAULT)) {
@@ -881,6 +1034,27 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
         job.addJobChangeListener(tlcJobListener);
         job.schedule();
     }
+
+    private static final Set<String> local = new HashSet<>(Arrays.asList("ad hoc", "off"));
+    
+	private static String getMode(final ILaunchConfiguration config) throws CoreException {
+        // distributed launch (legacy launch configurations pre-dating TLC distributed functionality 
+        // do not have the LAUNCH_DISTRIBUTED attribute. Then, it obviously defaults to distribution turned off.
+        // Trying to lookup a non-existing attribute would cause a runtime exception.)
+        // Then it could also be true or false. The legacy flag showing if "ad hoc" distribution is turned
+        // on or not. Simply map it to "ad hoc" or "off".
+		if (config.hasAttribute(LAUNCH_DISTRIBUTED)) {
+        	try {
+        		return  config.getAttribute(LAUNCH_DISTRIBUTED, LAUNCH_DISTRIBUTED_DEFAULT);
+        	} catch (CoreException e) {
+        		boolean distributed = config.getAttribute(LAUNCH_DISTRIBUTED, false);
+        		if (distributed) {
+        			return "ad hoc";
+        		}
+        	}
+        }
+		return "off";
+	}
     
 	// A DummyProcess instance has to be attached to the corresponding ILaunch
 	// when the Job launched neither creates an IProcess nor IDebugTarget. In
@@ -940,7 +1114,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 	}
 
 	// This opens up a dialog at the end of the job showing the status message
-    class WithStatusJobChangeListener extends SimpleJobChangeListener {
+    class WithStatusJobChangeListener extends JobChangeAdapter {
 
 		private final Model model;
 		private final DummyProcess process;
@@ -998,7 +1172,7 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
     /**
      * listens to the termination of the TLC run 
      */
-    class TLCJobChangeListener extends SimpleJobChangeListener
+    class TLCJobChangeListener extends JobChangeAdapter
     {
         private Model model;
 
@@ -1156,6 +1330,22 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 							}
 						};
 						j.schedule();
+						
+						// Open the ModelEditor on the snapshot. The output/result of the remote
+						// CloudTLC run is *not* reported into Model_1 but into its most recent
+						// snapshots. Without opening the ModelEditor on the snapshot, it appears
+						// as if nothing is happening (unless the TLCConsole happens to be open).
+						final IFile launchFile = snapshot.getLaunchConfiguration().getFile();
+						if (launchFile.exists()) {
+							PlatformUI.getWorkbench().getDisplay().asyncExec(new Runnable() {
+								@Override
+								public void run() {
+									//TODO Refactor constant into a class accessible by this bundle.
+									UIHelper.openEditor("org.lamport.tla.toolbox.tool.tlc.ui.editor.ModelEditor",
+											launchFile);
+								}
+							});
+						}
 					}
 					monitor.done();
 					return Status.OK_STATUS;
@@ -1182,37 +1372,6 @@ public class TLCModelLaunchDelegate extends LaunchConfigurationDelegate implemen
 			refreshJob.schedule();
         }
     }
-
-    /**
-     * A listener writing the job state to the System.out
-     */
-    class SimpleJobChangeListener extends JobChangeAdapter
-    {
-
-        public void done(IJobChangeEvent event)
-        {
-            String jobName = event.getJob().getName();
-            String status = null;
-            if (event.getResult().isOK())
-            {
-                status = "Done";
-            } else
-            {
-                // analyze the cause
-                switch (event.getResult().getSeverity()) {
-                case IStatus.CANCEL:
-                    status = "Cancelled";
-                    break;
-                case IStatus.ERROR:
-                    status = "Error";
-                    break;
-                default:
-                    status = "Unknown";
-                    break;
-                }
-            }
-        }
-    };
 
     /**
      * A simple mutex rule 

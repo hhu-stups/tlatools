@@ -40,9 +40,15 @@ public class OpLambdaValue extends OpValue implements Applicable {
 	this(op, tool, con, state, pstate);
 	this.cm = cm;
   }
+  
+  public OpLambdaValue(OpLambdaValue other, ITool tool) {
+	  this(other.opDef, tool, other.con, other.state, other.pstate);
+  }
 
+  @Override
   public final byte getKind() { return OPLAMBDAVALUE; }
 
+  @Override
   public final int compareTo(Object obj) {
     try {
       Assert.fail("Attempted to compare operator " + Values.ppr(this.toString()) +
@@ -67,6 +73,7 @@ public class OpLambdaValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final boolean member(Value elem) {
     try {
       Assert.fail("Attempted to check if the value:\n" + Values.ppr(elem.toString()) +
@@ -79,6 +86,7 @@ public class OpLambdaValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final boolean isFinite() {
     try {
       Assert.fail("Attempted to check if the operator " + Values.ppr(this.toString()) +
@@ -91,6 +99,7 @@ public class OpLambdaValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final Value apply(Value arg, int control) {
     try {
       throw new WrongInvocationException("Should use the other apply method.");
@@ -101,6 +110,7 @@ public class OpLambdaValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final Value apply(Value[] args, int control) {
     try {
       int alen = this.opDef.getArity();
@@ -122,6 +132,7 @@ public class OpLambdaValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final Value select(Value arg) {
     try {
       throw new WrongInvocationException("Error(TLC): attempted to call OpLambdaValue.select().");
@@ -132,6 +143,7 @@ public class OpLambdaValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept ex) {
     try {
       Assert.fail("Attempted to appy EXCEPT construct to the operator " +
@@ -144,6 +156,7 @@ public class OpLambdaValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept[] exs) {
     try {
       Assert.fail("Attempted to apply EXCEPT construct to the operator " +
@@ -156,6 +169,7 @@ public class OpLambdaValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final Value getDomain() {
     try {
       Assert.fail("Attempted to compute the domain of the operator " +
@@ -168,6 +182,7 @@ public class OpLambdaValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final int size() {
     try {
       Assert.fail("Attempted to compute the number of elements in the operator " +
@@ -181,6 +196,7 @@ public class OpLambdaValue extends OpValue implements Applicable {
   }
 
   /* Should never normalize an operator. */
+  @Override
   public final boolean isNormalized() {
     try {
       throw new WrongInvocationException("Should not normalize an operator.");
@@ -191,6 +207,7 @@ public class OpLambdaValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final Value normalize() {
     try {
       throw new WrongInvocationException("Should not normalize an operator.");
@@ -201,10 +218,13 @@ public class OpLambdaValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final boolean isDefined() { return true; }
 
+  @Override
   public final IValue deepCopy() { return this; }
 
+  @Override
   public final boolean assignable(Value val) {
     try {
       throw new WrongInvocationException("Should not initialize an operator.");
@@ -216,6 +236,7 @@ public class OpLambdaValue extends OpValue implements Applicable {
   }
 
   /* String representation of the value.  */
+  @Override
   public final StringBuffer toString(StringBuffer sb, int offset, boolean ignored) {
     try {
       String opName = this.opDef.getName().toString();

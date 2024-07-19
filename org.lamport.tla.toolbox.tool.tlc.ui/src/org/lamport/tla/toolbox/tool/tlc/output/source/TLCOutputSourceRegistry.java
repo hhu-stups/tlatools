@@ -163,8 +163,7 @@ public class TLCOutputSourceRegistry
             }
             IFile logFile = model.getOutputLogFile(isTraceExploreInstance);
             // log file found
-            if (logFile != null && logFile.exists())
-            {
+			if ((logFile != null) && logFile.exists()) {
                 // initialize the reader and read the content
                 // this will create the parser
                 // the parser will create a source and register in the registry
@@ -174,7 +173,6 @@ public class TLCOutputSourceRegistry
                 source = logFileReader.getSource();
                 source.addTLCOutputListener(listener);
 
-                // read in the data
                 // read in the data
                 final Job job = new WorkspaceJob("Logfile reader...") {
 					public IStatus runInWorkspace(IProgressMonitor monitor) throws CoreException {
@@ -188,8 +186,7 @@ public class TLCOutputSourceRegistry
 						return Status.OK_STATUS;
 					}
 				};
-				job.setProperty(IProgressConstants.PROPERTY_IN_DIALOG, true);
-				job.setPriority(Job.LONG);
+				job.setPriority(Job.SHORT);
 				job.setUser(true);
 				job.schedule();
 
@@ -231,7 +228,14 @@ public class TLCOutputSourceRegistry
     }
 
     /**
-     * Retrieves the data provider for the given configuration
+     * Retrieves the data provider for the given configuration.
+     * 
+     * Architecture TODO: it is unclear what we are gaining by keeping the same instance of a launch data provider
+     * 	attached to an instance of Model for the lifespan of the app (except in the following cases:
+     * 		. the model is deleted
+     * 		. loading existing output from the filesystem for the model
+     * )
+     * 
      * @return a data provider for the current model
      */
     public synchronized TLCModelLaunchDataProvider getProvider(Model model)

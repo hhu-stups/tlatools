@@ -29,10 +29,15 @@ import java.io.IOException;
 
 import tla2sany.semantic.SemanticNode;
 import tlc2.tool.coverage.CostModel;
+import tlc2.value.impl.BoolValue;
+import tlc2.value.impl.IntValue;
+import tlc2.value.impl.ModelValue;
+import tlc2.value.impl.StringValue;
 
 public interface IValue extends Comparable<Object> {
 
 	/* This method compares this with val.  */
+	@Override
 	int compareTo(Object val);
 
 	void write(IValueOutputStream vos) throws IOException;
@@ -47,6 +52,32 @@ public interface IValue extends Comparable<Object> {
 
 	boolean hasSource();
 
+	/* MAK 09/17/2019: Introduced to guarantee that Value instances are
+	 * fully initialized when created by the SpecProcessor (as opposed
+	 * to by workers during state space exploration).
+	 */
+	/**
+	 * Fully initialize this instance which includes:
+	 * - deep normalization
+	 * - conversion and caching iff defined by the sub-class
+	 * 
+	 *  No further mutation of this instance should be required
+	 *  for any evaluation whatsoever.
+	 *  
+	 *  Afterwards, isNormalized below returns true (it does not
+	 *  return true for all sub-classes when only deepNormalized
+	 *  is executed)!
+	 *  
+	 *  see comment in UnionValue#deepNormalize too
+	 */
+	default IValue initialize() {
+		this.deepNormalize();
+		// Execute fingerprint code path to internally trigger convertAndCache iff
+		// defined (0L parameter is not relevant)
+		this.fingerPrint(0L);
+		return this;
+	}
+	
 	/**
 	   * This method normalizes (destructively) the representation of
 	   * the value. It is essential for equality comparison.
@@ -87,5 +118,22 @@ public interface IValue extends Comparable<Object> {
 	String toString();
 
 	String toString(String delim);
+	
+	String toUnquotedString();
+
+	default boolean isAtom() {
+		if (this instanceof ModelValue || this instanceof IntValue || this instanceof StringValue
+				|| this instanceof BoolValue) {
+			return true;
+		}
+		return false;
+	}
+	
+	/**
+	 * @return true if a value mutates as part of normalization or fingerprinting.
+	 */
+	default boolean mutates() {
+		return true;
+	}
 
 }

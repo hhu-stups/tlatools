@@ -41,6 +41,7 @@ import tla2sany.explorer.ExploreNode;
 import tla2sany.explorer.ExplorerVisitor;
 import tla2sany.semantic.ExprNode;
 import tla2sany.semantic.ExprOrOpArgNode;
+import tla2sany.semantic.LetInNode;
 import tla2sany.semantic.OpApplNode;
 import tla2sany.semantic.OpDefNode;
 import tla2sany.semantic.SemanticNode;
@@ -150,8 +151,10 @@ public class CostModelCreator extends ExplorerVisitor {
 
 	private final Deque<CostModelNode> stack = new ArrayDeque<>();
 	private final Map<ExprOrOpArgNode, Subst> substs = new HashMap<>();
-	private final Map<OpApplNode, OpApplNodeWrapper> node2Wrapper = new HashMap<>();
+	private final Map<OpApplNode, Set<OpApplNodeWrapper>> node2Wrapper = new HashMap<>();
 	private final Set<OpDefNode> opDefNodes = new HashSet<>();
+	// Set of OpDefNodes occurring in LetIns and their OpApplNodes.
+	private final Map<ExprNode, ExprNode> letIns = new HashMap<>();
 	// OpAppNode does not implement equals/hashCode which causes problem when added
 	// to sets or maps. E.g. for a test, an OpApplNode instance belonging to
 	// Sequences.tla showed up in coverage output.
@@ -184,6 +187,7 @@ public class CostModelCreator extends ExplorerVisitor {
 		this.substs.clear();
 		this.node2Wrapper.clear();
 		this.opDefNodes.clear();
+		this.letIns.clear();
 		this.stack.clear();
 		this.ctx = Context.Empty;
 		
@@ -214,6 +218,27 @@ public class CostModelCreator extends ExplorerVisitor {
 				oan.setPrimed();
 			}
 			
+			// A (recursive) function definition nested in LetIn:
+			//   LET F[n \in S] == e
+			//   IN F[...]
+			// with e either built from F or not.
+			if (letIns.containsKey(opApplNode)) {
+				// At the visit of the LETIN node in the walk over the semantic graph we stored
+				// the mapping from the LET part to the IN part in this.lets (see LetInNode below).
+				// Here, we add the LET parts(s) to the lets of the IN part if it is found on
+				// the stack (this is more involved because we have to find the OANWrappers and
+				// not just the OANs). 
+				final ExprNode in = letIns.get(opApplNode);
+				for (CostModelNode cmn : stack) {
+					final SemanticNode node = cmn.getNode();
+					if (node == in && cmn instanceof OpApplNodeWrapper) {
+						// addLets instead of addChild because lets can be added multiple times
+						// whereas addChild asserts a child to be added only once.
+						((OpApplNodeWrapper) cmn).addLets(oan);
+					}
+				}
+			}
+			
 			// CONSTANT operators (including definition overrides...)
 			final SymbolNode operator = opApplNode.getOperator();
 			final Object val = tool.lookup(operator);
@@ -231,33 +256,71 @@ public class CostModelCreator extends ExplorerVisitor {
 				final OpDefNode odn = (OpDefNode) operator;
 				if (odn.getInRecursive()) {
 					final OpApplNodeWrapper recursive = (OpApplNodeWrapper) stack.stream()
-							.filter(w -> w.getNode() != null && ((OpApplNode) w.getNode()).getOperator() == odn).findFirst()
-							.orElse(null);
+							.filter(w -> w.getNode() != null && w.getNode() instanceof OpApplNode
+									&& ((OpApplNode) w.getNode()).getOperator() == odn)
+							.findFirst().orElse(null);
 					if (recursive != null) {
 						oan.setRecursive(recursive);
 					}
 				}
 			}
-			
+
 			// Higher-order operators/Operators as arguments (LAMBDA, ...)
-			if (tool != null && operator instanceof OpDefNode && opApplNode.hasOpcode(0)) {
-				// 1) Maintain Context as done by Tool...
+			//
+			// line X: Foo(Op(_), S) == \A s \in S: Op(s)
+			// line ?: ...
+			// line Y: Bar == Foo(LAMBDA e: e..., {1,2,3})
+			//
+			// This is the most involved part of CMC: The task is to make the OANW
+			// corresponding to the RHS of the LAMBDA expression on line Y a child of Op(s)
+			// on line X. However, the graph exploration is DFS which means that we haven't
+			// seen the LAMBDA on line Y when we are at the Op(s) on line X and we've
+			// (mostly) forgotten about Op(s) when we see the LAMBDA. ToolImpl - as part of
+			// its DFS over the semantic graph - passes a context along which gets extended
+			// or *branched*. Here, we cannot pass a Context along the decent but instead
+			// keep a single, global context. 
+			//
+			// The global context does not create a problem with regards to correctness, but
+			// can lead to long context chains for larger specifications. Therefore, only
+			// extend the context when opApplNode.argsContainOpArgNodes() is true, i.e. when
+			// one or more arguments of an operator are also operators (such as a LAMBDA).
+			// Without this safeguard, the time to create the CostModel for the SchedMono
+			// specification took approximately 60 seconds. With the safeguard, it is down
+			// to a second or two.
+			//
+			// To summarize, this is a clutch that has been hacked to work good enough!
+			// 
+			// if-branches 1., 2., and 3. below are evaluated in three distinct
+			// invocation of outer preVisit for different ExploreNodes.
+			if (tool != null && operator instanceof OpDefNode && opApplNode.hasOpcode(0)
+					&& opApplNode.argsContainOpArgNodes()) {
+				// 1) Maintain Context for all OpApplNode iff one or more of its args are of
+				// type OpArgNode. This is more restrictive than Tool.
 				final OpDefNode odn = (OpDefNode) operator;
-				this.ctx = tool.getOpContext(odn, opApplNode.getArgs(), ctx, false);
+				if (odn.hasOpcode(0) && !odn.isStandardModule()) {
+					this.ctx = tool.getOpContext(odn, opApplNode.getArgs(), ctx, false);
+				}
 			}
 			final Object lookup = this.ctx.lookup(opApplNode.getOperator());
 			if (lookup instanceof OpDefNode) {
-				// 2) Context has an entry for the given body. Remember for later.
+				// 2) Context has an entry for the given body where body is 'LAMBDA e: e...' and
+				// oan is 'Op(s)'. Remember for later.
 				final ExprNode body = ((OpDefNode) lookup).getBody();
 				if (body instanceof OpApplNode) {
-					this.node2Wrapper.put((OpApplNode) body, oan);
+					// Design choice:
+					// Might as well store the mapping from body to oan via
+					// body#setToolObject(tla2sany.semantic.FrontEnd.getToolId(), oan) instead of in
+					// node2Wrapper. However, node2Wrapper can be gc'ed after the CostModel has been
+					// created and before state space exploration.
+					this.node2Wrapper.computeIfAbsent((OpApplNode) body, key -> new HashSet<>()).add(oan);
 				}
 			}
 			if (this.node2Wrapper.containsKey(opApplNode)) {
-				// 3) Now its later. Connect w and oan. 
-				final OpApplNodeWrapper w = this.node2Wrapper.get(opApplNode);
-				w.addChild(oan);
+				// 3) Now it's later. Connect w and oan where
+				// w is 'Op(s)' and oan is 'LAMBDA e: e...'
+				this.node2Wrapper.get(opApplNode).forEach(w -> w.addChild(oan));
 			}
+			// End of Higher-order operators/Operators as arguments (LAMBDA, ...) 
 			
 			// Substitutions
 			if (this.substs.containsKey(exploreNode)) {
@@ -274,6 +337,11 @@ public class CostModelCreator extends ExplorerVisitor {
 			final Subst[] substs = sin.getSubsts();
 			for (Subst subst : substs) {
 				this.substs.put(subst.getExpr(), subst);
+			}
+		} else if (exploreNode instanceof LetInNode) {
+			final LetInNode lin = (LetInNode) exploreNode;
+			for (OpDefNode opDefNode : lin.getLets()) {
+				letIns.put(opDefNode.getBody(), lin.getBody());
 			}
 		} else if (exploreNode instanceof OpDefNode) {
 			//TODO Might suffice to just keep RECURSIVE ones.
@@ -325,6 +393,16 @@ public class CostModelCreator extends ExplorerVisitor {
 		for (Action invariant : tool.getInvariants()) {
 			invariant.cm = collector.getCM(invariant, Relation.PROP);
 		}
+		
+        // https://github.com/tlaplus/tlaplus/issues/413#issuecomment-577304602
+        if (Boolean.getBoolean(CostModelCreator.class.getName() + ".implied")) {
+    		for (Action impliedInits : tool.getImpliedInits()) {
+    			impliedInits.cm = collector.getCM(impliedInits, Relation.PROP);
+    		}
+    		for (Action impliedActions : tool.getImpliedActions()) {
+    			impliedActions.cm = collector.getCM(impliedActions, Relation.PROP);
+    		}
+        }
 	}
 	
 	public static void report(final ITool tool, final long startTime) {
@@ -362,8 +440,18 @@ public class CostModelCreator extends ExplorerVisitor {
         for (Action invariant : tool.getInvariants()) {
         	//TODO May need to be ordered similar to next-state actions above.
         	invariant.cm.report();
-		}
+		}	
         
+        // https://github.com/tlaplus/tlaplus/issues/413#issuecomment-577304602
+        if (Boolean.getBoolean(CostModelCreator.class.getName() + ".implied")) {
+    		for (Action impliedInits : tool.getImpliedInits()) {
+    			impliedInits.cm.report();
+    		}
+    		for (Action impliedActions : tool.getImpliedActions()) {
+    			impliedActions.cm.report();
+    		}
+        }
+       
 		// Notify users about the performance overhead related to coverage collection
 		// after N minutes of model checking. The assumption is that a user has little
 		// interest in coverage for a large (long-running) model anyway.  In the future

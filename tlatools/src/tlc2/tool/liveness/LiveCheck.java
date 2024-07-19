@@ -9,28 +9,30 @@ import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import tlc2.TLC;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.tool.Action;
-import tlc2.tool.IStateFunctor;
 import tlc2.tool.ITool;
 import tlc2.tool.ModelChecker;
 import tlc2.tool.StateVec;
 import tlc2.tool.TLCState;
-import tlc2.tool.impl.Tool;
 import tlc2.util.BitVector;
-import tlc2.util.FP64;
 import tlc2.util.IStateWriter;
 import tlc2.util.IStateWriter.Visualization;
 import tlc2.util.NoopStateWriter;
 import tlc2.util.SetOfStates;
-import tlc2.util.statistics.DummyBucketStatistics;
 import tlc2.util.statistics.IBucketStatistics;
 import util.Assert;
-import util.SimpleFilenameToStream;
 
 public class LiveCheck implements ILiveCheck {
 
@@ -215,26 +217,57 @@ public class LiveCheck implements ILiveCheck {
 		final BlockingQueue<ILiveChecker> queue = new ArrayBlockingQueue<ILiveChecker>(checker.length);
 		queue.addAll(Arrays.asList(checker));
 
-		int slen = checker.length;
-		int wNum = Math.min(slen, TLCGlobals.getNumWorkers());
+		
+		/*
+		 * A LiveWorker below can either complete a unit of work a) without finding a
+		 * liveness violation, b) finds a violation, or c) fails to check because of an
+		 * exception/error (such as going out of memory). In case an LW fails to check,
+		 * we still wait for all other LWs to complete. A subset of the LWs might have
+		 * found a violation. In other words, the OOM of an LW has lower precedence than
+		 * a violation found by another LW. However, if any LW fails to check, we terminate
+		 * model checking after all LWs completed.
+		 */
+		final int wNum = TLCGlobals.doSequentialLiveness() ? 1 : Math.min(checker.length, TLCGlobals.getNumWorkers());
+		final ExecutorService pool = Executors.newFixedThreadPool(wNum);
+		// CS is really just a container around the set of Futures returned by the pool. It saves us from
+		// creating a low-level array.
+		final CompletionService<Boolean> completionService = new ExecutorCompletionService<Boolean>(pool);
 
-		if (wNum == 1) {
-			LiveWorker worker = new LiveWorker(tool, 0, 1, this, queue, finalCheck);
-			worker.run();
-		} else {
-			final LiveWorker[] workers = new LiveWorker[wNum];
-			for (int i = 0; i < wNum; i++) {
-				workers[i] = new LiveWorker(tool, i, wNum, this, queue, finalCheck);
-				workers[i].start();
-			}
-			for (int i = 0; i < wNum; i++) {
-				workers[i].join();
+		for (int i = 0; i < wNum; i++) {
+			completionService.submit(new LiveWorker(tool, i, wNum, this, queue, finalCheck));
+		}
+		// Wait for all LWs to complete.
+		pool.shutdown();
+		pool.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS); // wait forever
+
+		// Check if any one of the LWs found a violation (ignore failures for now).
+		ExecutionException ee = null;
+		for (int i = 0; i < wNum; i++) {
+			try {
+				final Future<Boolean> future = completionService.take();
+				if (future.get()) {
+					MP.printMessage(EC.TLC_CHECKING_TEMPORAL_PROPS_END,
+							TLC.convertRuntimeToHumanReadable(System.currentTimeMillis() - startTime));
+					return EC.TLC_TEMPORAL_PROPERTY_VIOLATED;
+				}
+			} catch (final ExecutionException e) {
+				// handled below!
+				ee = e;
 			}
 		}
-
-		if (LiveWorker.hasErrFound()) {
-			MP.printMessage(EC.TLC_CHECKING_TEMPORAL_PROPS_END, TLC.convertRuntimeToHumanReadable(System.currentTimeMillis() - startTime));
-			return EC.TLC_TEMPORAL_PROPERTY_VIOLATED;
+		// Terminate if any one of the LWs failed c)
+		if (ee != null) {
+			final Throwable cause = ee.getCause();
+			if (cause instanceof OutOfMemoryError) {
+				MP.printError(EC.SYSTEM_OUT_OF_MEMORY_LIVENESS, cause);
+			} else if (cause instanceof StackOverflowError) {
+				MP.printError(EC.SYSTEM_STACK_OVERFLOW, cause);
+			} else if (cause != null) {
+				MP.printError(EC.GENERAL, cause);
+			} else {
+				MP.printError(EC.GENERAL, ee);
+			}
+			System.exit(1);
 		}
 		
 		// Reset after checking unless it's the final check:
@@ -742,61 +775,6 @@ public class LiveCheck implements ILiveCheck {
 		 */
 		public AbstractDiskGraph getDiskGraph() {
 			return dgraph;
-		}
-	}
-	
-	// Intended to be used in unit tests only!!! This is not part of the API!!!
-	static class TestHelper {
-		
-		/*
-		 * - EWD840 (with tableau) spec with N = 11 and maxSetSize = 9.000.000 => 12GB nodes file, 46.141.438 distinct states
-		 * - EWD840 (with tableau) spec with N = 12 and maxSetSize = 9.000.000 => 56GB, 201.334.782 dist. states 
-		 */
-		
-		// The Eclipse Launch configuration has to set the working directory
-		// (Arguments tab) to the parent directory of the folder containing the
-		// nodes_* and ptrs_* files. The parent folder has to contain the spec
-		// and config file both named "MC".
-		// metadir is the the name of the folder with the nodes_* and ptrs_*
-		// relative to the parent directory. The directory does *not* need to contain the
-		// backing file of the fingerprint set or the state queue files.
-		public static ILiveCheck recreateFromDisk(final String path) throws Exception {
-			// Don't know with which Polynomial the FP64 has been initialized, but
-			// the default is 0.
-			FP64.Init(0);
-			
-			// Most models won't need this, but let's increase this anyway.
-			TLCGlobals.setBound = 9000000;
-
-			// Re-create the tool to do the init states down below (LiveCheck#init
-			// doesn't really need tool).
-	        final ITool tool = new Tool("", "MC", "MC", new SimpleFilenameToStream());
-	        
-			// Initialize tool's actions explicitly. LiveCheck#printTrace is
-			// going to access the actions and fails with a NPE unless
-			// initialized.
-	        tool.getActions();
-	        
-			final ILiveCheck liveCheck = new LiveCheck(tool, null, path, new DummyBucketStatistics());
-			
-			// Calling recover requires a .chkpt file to be able to re-create the
-			// internal data structures to continue with model checking. However, we
-			// only want to execute liveness checks on the current static disk
-			// graph. Thus, we don't need the .chkpt file.
-			//recover();
-			
-			// After recovery, one has to redo the init states
-			tool.getInitStates(new IStateFunctor() {
-				/* (non-Javadoc)
-				 * @see tlc2.tool.IStateFunctor#addElement(tlc2.tool.TLCState)
-				 */
-				public Object addElement(TLCState state) {
-					liveCheck.addInitState(tool, state, state.fingerPrint());
-					return true;
-				}
-			});
-			
-			return liveCheck; 
 		}
 	}
 }

@@ -7,6 +7,7 @@
 package tlc2.value.impl;
 
 import java.io.IOException;
+import java.util.Map;
 
 import tlc2.tool.FingerprintException;
 import tlc2.tool.coverage.CostModel;
@@ -16,15 +17,18 @@ import tlc2.value.IValue;
 import tlc2.value.IValueInputStream;
 import tlc2.value.IValueOutputStream;
 import tlc2.value.RandomEnumerableValues;
+import tlc2.value.ValueInputStream;
 import tlc2.value.Values;
 import util.Assert;
+import util.UniqueString;
 
+@SuppressWarnings("serial")
 public class SetEnumValue extends EnumerableValue
 implements Enumerable, Reducible {
   public ValueVec elems;         // the elements of the set
   private boolean isNorm;        // normalized?
-public final static SetEnumValue EmptySet = new SetEnumValue(new ValueVec(0), true);
-public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, true);
+public static final SetEnumValue EmptySet = new SetEnumValue(new ValueVec(0), true);
+public static final SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, true);
 
   /* Constructor */
   public SetEnumValue(Value[] elems, boolean isNorm) {
@@ -54,9 +58,29 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
 	  this();
 	  this.cm = cm;
   }
+  
+  // See IValue#isAtom except that this is for sets of atoms.
+  public final boolean isSetOfAtoms() {
+      final int len = this.elems.size();
+      for (int i = 0; i < len; i++) {
+    	  final Value v = this.elems.elementAt(i);
+    	  if (v instanceof SetEnumValue) {
+    		  // Sets of sets of sets... of atoms.
+    		  final SetEnumValue sev = (SetEnumValue) v;
+    		  if (!sev.isSetOfAtoms()) {
+    			  return false;
+    		  }
+    	  } else if (!v.isAtom()) {
+    		  return false;
+    	  }
+      }
+      return true;
+  }
 
+  @Override
   public final byte getKind() { return SETENUMVALUE; }
 
+  @Override
   public final int compareTo(Object obj) {
     try {
       SetEnumValue set = obj instanceof Value ? (SetEnumValue) ((Value)obj).toSetEnum() : null;
@@ -110,6 +134,7 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
     }
   }
 
+  @Override
   public final boolean member(Value elem) {
     try {
       return this.elems.search(elem, this.isNorm);
@@ -120,8 +145,10 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
     }
   }
 
+  @Override
   public final boolean isFinite() { return true; }
 
+  @Override
   public final Value diff(Value val) {
     try {
       int sz = this.elems.size();
@@ -140,6 +167,7 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
     }
   }
 
+  @Override
   public final Value cap(Value val) {
     try {
       int sz = this.elems.size();
@@ -158,6 +186,7 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
     }
   }
 
+  @Override
   public final Value cup(Value set) {
     try {
       int sz = this.elems.size();
@@ -184,6 +213,7 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept ex) {
     try {
       if (ex.idx < ex.path.length) {
@@ -197,6 +227,7 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept[] exs) {
     try {
       if (exs.length != 0) {
@@ -210,6 +241,7 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
     }
   }
 
+  @Override
   public final int size() {
     try {
       this.normalize();
@@ -222,8 +254,10 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
   }
 
   /* This method normalizes (destructively) this set. */
+  @Override
   public final boolean isNormalized() { return this.isNorm; }
 
+  @Override
   public final Value normalize() {
     try {
       if (!this.isNorm) {
@@ -257,6 +291,7 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
 	  return this;
   }
 
+  @Override
   public final boolean isDefined() {
     try {
       boolean defined = true;
@@ -272,8 +307,10 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
     }
   }
 
+  @Override
   public final IValue deepCopy() { return this; }
 
+  @Override
   public final boolean assignable(Value val) {
     try {
       return this.equals(val);
@@ -301,6 +338,7 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
 	}
 
   /* The fingerprint methods */
+  @Override
   public final long fingerPrint(long fp) {
     try {
       this.normalize();
@@ -319,6 +357,7 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
     }
   }
 
+  @Override
   public final IValue permute(IMVPerm perm) {
     try {
       int sz = this.elems.size();
@@ -340,6 +379,7 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
   }
 
   /* The string representation */
+  @Override
   public final StringBuffer toString(StringBuffer sb, int offset, boolean swallow) {
     try {
       // If this SetEnumValue object is created by a union, at least one of
@@ -384,6 +424,7 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
      return this.elems.elementAt(index);
   }
 
+  @Override
   public final ValueEnumeration elements() {
     try {
       return new Enumerator();
@@ -401,8 +442,10 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
       normalize();
     }
 
+    @Override
     public final void reset() { this.index = 0; }
 
+    @Override
     public final Value nextElement() {
     	if (coverage) { cm.incSecondary(); }
       if (this.index < elems.size()) {
@@ -450,6 +493,23 @@ public final static SetEnumValue DummyEnum = new SetEnumValue((ValueVec)null, tr
 		final Value[] elems = new Value[len];
 		for (int i = 0; i < len; i++) {
 			elems[i] = (Value) vos.read();
+		}
+		final Value res = new SetEnumValue(elems, isNorm);
+		vos.assign(res, index);
+		return res;
+	}
+
+	public static IValue createFrom(final ValueInputStream vos, final Map<String, UniqueString> tbl) throws IOException {
+		final int index = vos.getIndex();
+		boolean isNorm = true;
+		int len = vos.readInt();
+		if (len < 0) {
+			len = -len;
+			isNorm = false;
+		}
+		final Value[] elems = new Value[len];
+		for (int i = 0; i < len; i++) {
+			elems[i] = (Value) vos.read(tbl);
 		}
 		final Value res = new SetEnumValue(elems, isNorm);
 		vos.assign(res, index);

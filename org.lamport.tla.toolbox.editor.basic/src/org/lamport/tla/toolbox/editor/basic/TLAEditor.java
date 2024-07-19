@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -31,6 +30,7 @@ import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Path;
 import org.eclipse.e4.core.services.events.IEventBroker;
+import org.eclipse.jface.action.ContributionManager;
 import org.eclipse.jface.action.IAction;
 import org.eclipse.jface.action.IContributionItem;
 import org.eclipse.jface.action.IMenuManager;
@@ -62,7 +62,10 @@ import org.eclipse.jface.viewers.ISelectionProvider;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.widgets.Composite;
+import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.FileDialog;
+import org.eclipse.swt.widgets.Menu;
+import org.eclipse.swt.widgets.MenuItem;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.IEditorInput;
 import org.eclipse.ui.IEditorPart;
@@ -72,12 +75,12 @@ import org.eclipse.ui.IURIEditorInput;
 import org.eclipse.ui.IWorkbenchActionConstants;
 import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.PlatformUI;
-import org.eclipse.ui.actions.ContributionItemFactory;
 import org.eclipse.ui.contexts.IContextActivation;
 import org.eclipse.ui.contexts.IContextService;
 import org.eclipse.ui.editors.text.EditorsUI;
 import org.eclipse.ui.editors.text.TextEditor;
 import org.eclipse.ui.handlers.HandlerUtil;
+import org.eclipse.ui.ide.FileStoreEditorInput;
 import org.eclipse.ui.part.FileEditorInput;
 import org.eclipse.ui.texteditor.ChainedPreferenceStore;
 import org.eclipse.ui.texteditor.IDocumentProvider;
@@ -88,18 +91,19 @@ import org.lamport.tla.toolbox.editor.basic.actions.ToggleCommentAction;
 import org.lamport.tla.toolbox.editor.basic.pcal.IPCalReservedWords;
 import org.lamport.tla.toolbox.editor.basic.proof.IProofFoldCommandIds;
 import org.lamport.tla.toolbox.editor.basic.proof.TLAProofFoldingStructureProvider;
-import org.lamport.tla.toolbox.editor.basic.proof.TLAProofPosition;
 import org.lamport.tla.toolbox.editor.basic.util.EditorUtil;
 import org.lamport.tla.toolbox.editor.basic.util.ElementStateAdapter;
 import org.lamport.tla.toolbox.spec.Spec;
 import org.lamport.tla.toolbox.tool.ToolboxHandle;
 import org.lamport.tla.toolbox.util.ResourceHelper;
-import org.lamport.tla.toolbox.util.StringHelper;
 import org.lamport.tla.toolbox.util.TLAtoPCalMarker;
 import org.lamport.tla.toolbox.util.UIHelper;
 
 import pcal.PCalLocation;
 import pcal.TLAtoPCalMapping;
+import tlc2.output.SpecWriterUtilities;
+import util.StringHelper;
+import util.TLAConstants;
 
 /**
  * Basic editor for TLA+
@@ -129,8 +133,6 @@ public class TLAEditor extends TextEditor
     private Image rootImage = TLAEditorActivator.imageDescriptorFromPlugin(TLAEditorActivator.PLUGIN_ID,
             "/icons/root_file.gif").createImage();
 
-    // currently installed annotations
-    private Annotation[] oldAnnotations;
     // annotation model
     private ProjectionAnnotationModel annotationModel;
     // proof structure provider
@@ -195,8 +197,8 @@ public class TLAEditor extends TextEditor
         }
     }
 
-    protected TLASourceViewerConfiguration getTLASourceViewerConfiguration(IPreferenceStore preferenceStore) {
-    	return new TLASourceViewerConfiguration(preferenceStore, this); 
+    protected TLASourceViewerConfiguration getTLASourceViewerConfiguration(final IPreferenceStore preferenceStore) {
+    	return new TLASourceViewerConfiguration(preferenceStore, this);
     }
     
     /*
@@ -240,16 +242,27 @@ public class TLAEditor extends TextEditor
 
                 for (int i = 0; i < markerChanges.length; i++)
                 {
-                    if (markerChanges[i].getResource().equals(((IFileEditorInput) getEditorInput()).getFile()))
-                    {
-                        UIHelper.runUIAsync(new Runnable() {
-
-                            public void run()
-                            {
-                                refresh();
-                            }
-                        });
-                    }
+                	if (getEditorInput() instanceof IFileEditorInput) {
+                		final IFileEditorInput iFileEditorInput = (IFileEditorInput) getEditorInput();
+                		if (markerChanges[i].getResource().equals(iFileEditorInput.getFile())) {
+                			UIHelper.runUIAsync(new Runnable() {
+                				public void run() {
+                					refresh();
+                				}
+                			});
+                		}
+                	} else if (getEditorInput() instanceof FileStoreEditorInput) {
+						// Leslie reported a ClassCastException triggered by clicking the “Goto
+						// Obligation” button on a failed proof obligation.
+                		final FileStoreEditorInput fsei = (FileStoreEditorInput) getEditorInput();
+                		if (markerChanges[i].getResource().getLocationURI().equals(fsei.getURI())) {
+                			UIHelper.runUIAsync(new Runnable() {
+                				public void run() {
+                					refresh();
+                				}
+                			});
+                		}
+                	}
                 }
             }
         };
@@ -316,26 +329,30 @@ public class TLAEditor extends TextEditor
         return viewer;
     }
 
-    public void createPartControl(Composite parent)
+    @Override
+    public void createPartControl(final Composite parent)
     {
         super.createPartControl(parent);
         /*
-         * Add projection support (e.G. for folding) 
+         * Add projection support (i.e. for folding) 
          */
-        ProjectionViewer viewer = (ProjectionViewer) getSourceViewer();
+        final ProjectionViewer viewer = (ProjectionViewer) getSourceViewer();
         projectionSupport = new ProjectionSupport(viewer, getAnnotationAccess(), getSharedColors());
         projectionSupport.addSummarizableAnnotationType("org.eclipse.ui.workbench.texteditor.error"); //$NON-NLS-1$
         projectionSupport.addSummarizableAnnotationType("org.eclipse.ui.workbench.texteditor.warning"); //$NON-NLS-1$
         projectionSupport.install();
-        viewer.doOperation(ProjectionViewer.TOGGLE);
+        
+		if (viewer.canDoOperation(ProjectionViewer.TOGGLE)) {
+			viewer.doOperation(ProjectionViewer.TOGGLE);
+		}
 
         // model for adding projections (folds)
-        this.annotationModel = viewer.getProjectionAnnotationModel();
+        annotationModel = viewer.getProjectionAnnotationModel();
 
         // this must be instantiated after annotationModel so that it does
         // not call methods that use annotation model when the model is still null
-        this.proofStructureProvider = new TLAProofFoldingStructureProvider(this);
-
+        proofStructureProvider = new TLAProofFoldingStructureProvider(this);
+        
         // refresh the editor in case it should be
         // read only
         refresh();
@@ -407,8 +424,8 @@ public class TLAEditor extends TextEditor
      * We use this to remove unwanted items from the menu
      * that eclipse plug-ins contribute.
      */
-    protected void editorContextMenuAboutToShow(IMenuManager menuManager)
-    {
+    @Override
+	protected void editorContextMenuAboutToShow(final IMenuManager menuManager) {
         super.editorContextMenuAboutToShow(menuManager);
         // The following adds an extra section for the fold commands.
         // First, try to find the additions group.
@@ -423,6 +440,55 @@ public class TLAEditor extends TextEditor
             menuManager.add(new Separator("foldCommands"));
         }
 
+        // It would be nice if we had all of that "Run As", etc nonsense populated by the time we get here,
+        //		but that gets added later, after us.. so, we will do something fairly hacky below.
+        if (menuManager instanceof ContributionManager) {
+        	final ContributionManager cm = (ContributionManager)menuManager;
+        	
+        	removeTopLevelMenuWithDisplayText("Open W&ith", cm);
+        	removeTopLevelMenuWithDisplayText("Sho&w In", cm);
+
+        	if (menuManager instanceof MenuManager) {
+        		
+        	}
+        	final Runnable r = () -> {
+        		final MenuManager mm = (MenuManager)cm;
+        		final ArrayList<Integer> menuCountFerry = new ArrayList<>();
+        		final Display d = PlatformUI.getWorkbench().getDisplay();
+        		
+        		d.syncExec(() -> {
+        			menuCountFerry.clear();
+        			
+        			final Menu m = mm.getMenu();
+        			menuCountFerry.add(Integer.valueOf((m != null) ? m.getItemCount() : 0));
+        		});
+        		while (menuCountFerry.get(0).intValue() == 0) {
+            		try {
+            			Thread.sleep(40);
+            		} catch (final Exception e) { }
+            		
+            		d.syncExec(() -> {
+            			menuCountFerry.clear();
+            			
+            			final Menu m = mm.getMenu();
+            			menuCountFerry.add(Integer.valueOf((m != null) ? m.getItemCount() : 0));
+            		});
+        		}
+        		
+        		PlatformUI.getWorkbench().getDisplay().asyncExec(() -> {
+        			final Menu menu = mm.getMenu();
+        			
+                	removeMenuItemWithDisplayText("&Run As", menu);
+                	removeMenuItemWithDisplayText("&Debug As", menu);
+                	removeMenuItemWithDisplayText("Import SWTBot", menu);
+                	removeMenuItemWithDisplayText("T&eam", menu);
+                	removeMenuItemWithDisplayText("Rep&lace With", menu);
+                	removeMenuItemWithDisplayText("Comp&are With", menu);
+        		});
+        	};
+        	(new Thread(r)).start();
+        }
+        
         /*
          * The following removes unwanted preference items.
          * 
@@ -432,36 +498,45 @@ public class TLAEditor extends TextEditor
          */
         menuManager.remove(ITextEditorActionConstants.SHIFT_RIGHT);
         menuManager.remove(ITextEditorActionConstants.SHIFT_LEFT);
-
-        /*
-         * The following is a bit of a hack to remove
-         * the "Show In" submenu that is contributed by
-         * AbstractDecoratedTextEditor in its implementation
-         * of this method. It is contributed without
-         * an id, so we have to check all items in the menu
-         * to check if a submenu contains an item with
-         * the id viewShowIn. Then we remove this submenu.
-         */
-        IContributionItem[] items = menuManager.getItems();
-        for (int i = 0; i < items.length; i++)
-        {
-            if (items[i] instanceof MenuManager)
-            {
-                MenuManager subMenu = (MenuManager) items[i];
-                if (subMenu.find(ContributionItemFactory.VIEWS_SHOW_IN.getId()) != null)
-                {
-                    menuManager.remove(subMenu);
-                    break;
-                }
-            }
+    }
+    
+    // Were there ever more than one menu with the same display text beginning, this would produce unexpected results.
+    private void removeMenuItemWithDisplayText(final String text, final Menu menu) {
+    	final MenuItem[] items = menu.getItems();
+    	
+    	for (final MenuItem item : items) {
+    		final String menuItemText = item.getText();
+    		
+    		if ((menuItemText != null) && menuItemText.startsWith(text)) {
+    			item.dispose();
+    			
+    			return;
+    		}
+    	}
+    }
+    
+    // Were there ever more than one menu with the same display text beginning, this would produce unexpected results.
+    private void removeTopLevelMenuWithDisplayText(final String text, final ContributionManager cm) {
+        final IContributionItem[] items = cm.getItems();
+    	
+        for (final IContributionItem item : items) {
+        	if (item instanceof MenuManager) {
+        		final MenuManager mm = (MenuManager)item;
+        		final String menuText = mm.getMenuText();
+        		
+        		if ((menuText != null) && menuText.startsWith(text)) {
+        			cm.remove(item);
+        			return;
+        		}
+        	}
         }
-
     }
 
     /*
      * We override this method to add information about who modified the file when. 
      * @see org.eclipse.ui.texteditor.AbstractTextEditor#doSave(org.eclipse.core.runtime.IProgressMonitor)
      */
+    @Override
     public void doSave(IProgressMonitor progressMonitor)
     {
         service.send(PRE_SAVE_EVENT, this);
@@ -473,17 +548,17 @@ public class TLAEditor extends TextEditor
         // Set historyStart to the offset at the start of the
         // modification history section, if there is one. And if there is,
         // we add the modification date and user.
-        int historyStart = text.indexOf(ResourceHelper.modificationHistory);
+        int historyStart = text.indexOf(SpecWriterUtilities.MODIFICATION_HISTORY);
 
         if (historyStart > -1)
         {
 
             // Set newEntryStart to the point at which the new modification
             // information is to be inserted.
-            int newEntryStart = historyStart + ResourceHelper.modificationHistory.length();
+            int newEntryStart = historyStart + SpecWriterUtilities.MODIFICATION_HISTORY.length();
 
             String user = System.getProperty("user.name");
-            String searchString = ResourceHelper.modifiedBy + user;
+            String searchString = SpecWriterUtilities.MODIFIED_BY + user;
             int searchStringLength = searchString.length();
 
             // Need to remove existing modification entry for user
@@ -501,14 +576,14 @@ public class TLAEditor extends TextEditor
             int endOfLine = -1; // initialization needed to make compiler happy.
             label: while (!found)
             {
-                nextEntry = text.indexOf(ResourceHelper.lastModified, nextEntry + 1);
+                nextEntry = text.indexOf(SpecWriterUtilities.LAST_MODIFIED, nextEntry + 1);
                 // It we don't find an entry, we eventually exit by
                 // nextEntry becoming -1.
                 if (nextEntry < 0)
                 {
                     break label;
                 }
-                endOfLine = text.indexOf(StringHelper.newline, nextEntry + 1);
+                endOfLine = text.indexOf(StringHelper.PLATFORM_NEWLINE, nextEntry + 1);
                 if (endOfLine < 0)
                 {
                     endOfLine = text.length();
@@ -539,7 +614,7 @@ public class TLAEditor extends TextEditor
                 {
                     doc.replace(nextEntry, endOfLine - nextEntry, "");
                 }
-                doc.replace(newEntryStart, 0, ResourceHelper.lastModified + (new Date()) + searchString);
+                doc.replace(newEntryStart, 0, SpecWriterUtilities.LAST_MODIFIED + (new Date()) + searchString);
                 
     			// Save the last one to two (depending on boolean "found")
     			// IUndoableOperations created by the previous two doc.replace(...)
@@ -579,40 +654,6 @@ public class TLAEditor extends TextEditor
     }
 
     /**
-     * Update the annotation structure in the editor.
-     * 
-     * This is only currently used by comment
-     * folding and should be removed because it
-     * is incorrect.
-     * 
-     * @param positions
-     * @deprecated
-     */
-    public void updateFoldingStructure(List<Position> positions)
-    {
-    	if (annotationModel == null) {
-    		return;
-    	}
-
-        Annotation[] annotations = new Annotation[positions.size()];
-
-        // this will hold the new annotations along
-        // with their corresponding positions
-        Map<ProjectionAnnotation, Position> newAnnotations = new HashMap<ProjectionAnnotation, Position>();
-
-        for (int i = 0; i < positions.size(); i++)
-        {
-            ProjectionAnnotation annotation = new ProjectionAnnotation();
-            newAnnotations.put(annotation, positions.get(i));
-            annotations[i] = annotation;
-        }
-        // If this method is called too early, then annotationModel
-        // can be null. This should obviously be addressed.
-        this.annotationModel.modifyAnnotations(oldAnnotations, newAnnotations, null);
-        oldAnnotations = annotations;
-    }
-
-    /**
      * Calls {@link ProjectionAnnotationModel#modifyAnnotations(Annotation[], Map, Annotation[])} with the
      * arguments.
      * 
@@ -622,8 +663,8 @@ public class TLAEditor extends TextEditor
      * @param deletions
      * @param additions
      */
-    public void modifyProjectionAnnotations(Annotation[] deletions, Map<ProjectionAnnotation, TLAProofPosition> additions)
-    {
+	public void modifyProjectionAnnotations(final Annotation[] deletions,
+			final Map<? extends ProjectionAnnotation, ? extends Position> additions) {
         this.annotationModel.modifyAnnotations(deletions, additions, null);
     }
     
@@ -786,6 +827,11 @@ public class TLAEditor extends TextEditor
         // tlapmColoring.dispose();
         proofStructureProvider.dispose();
         rootImage.dispose();
+		final TLAReconcilingStrategy reconciler = (TLAReconcilingStrategy) getViewer()
+				.getData(TLAReconcilingStrategy.class.toString());
+		if (reconciler != null) {
+			reconciler.dispose();
+		}
         ResourcesPlugin.getWorkspace().removeResourceChangeListener(moduleFileChangeListener);
         super.dispose();
     }
@@ -817,7 +863,7 @@ public class TLAEditor extends TextEditor
 	 */
 	public TLAtoPCalMapping getTpMapping() {
         final Spec spec = ToolboxHandle.getCurrentSpec();
-        return spec.getTpMapping(getModuleName() + ".tla");
+        return spec.getTpMapping(getModuleName() + TLAConstants.Files.TLA_EXTENSION);
 	}
 	
 	/* (non-Javadoc)
@@ -843,8 +889,11 @@ public class TLAEditor extends TextEditor
 			}
 		}
 		
-		// fall back to original marker if the TLAtoPCalMarker didn't work or no
-		// TLAtoPCalMarker
+		// fall back to original marker if the TLAtoPCalMarker didn't work or no TLAtoPCalMarker
+		//  N.B even though this is marked deprecated, the recommended replacement of: 
+		//					((IGotoMarker)getAdapter(IGotoMarker.class)).gotoMarker(marker);
+		//	causes a stack overflow.
+		//		See: https://github.com/tlaplus/tlaplus/commit/28f6e2cf6328b84027762e828fb2f741b1a25377#r35904992
 		super.gotoMarker(marker);
 	}
 

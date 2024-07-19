@@ -15,7 +15,7 @@ import util.Assert;
  * updates are used for improved performance and reduced
  * allocation.
  */
-public final class StateVec implements IStateFunctor {
+public final class StateVec implements IStateFunctor, INextStateFunctor {
   private TLCState v[];
   private int size;
 
@@ -46,6 +46,10 @@ public final class StateVec implements IStateFunctor {
 
   public final int size() { return this.size; }
 
+  public boolean isEmpty() {
+	return this.size == 0;
+  }
+
   public final void grow(int add) {
     int oldLen = this.v.length;
     if (oldLen >= TLCGlobals.setBound) {
@@ -61,6 +65,13 @@ public final class StateVec implements IStateFunctor {
 
   public final TLCState elementAt(int i) { return this.v[i]; }
 
+  public boolean isLastElement(final TLCState state) {
+	  if (isEmpty()) {
+		  return false;
+	  }
+	  return this.elementAt(size() - 1) == state;
+  }
+  
   public final void clear() {
     this.size = 0;
   }
@@ -74,6 +85,11 @@ public final class StateVec implements IStateFunctor {
     return this;
   }
   
+  @Override
+  public final StateVec addElement(TLCState predecessor, Action action, TLCState state) {
+	  return addElement(state);
+  }
+ 
   public final StateVec addElements(StateVec s1) {
     StateVec s0 = this;
 
@@ -150,4 +166,12 @@ public final class StateVec implements IStateFunctor {
     return sb.toString();
   }
 
+  public final boolean contains(TLCState state) {
+	for (int i = 0; i < size; i++) {
+		if (this.v[i].fingerPrint() == state.fingerPrint()) {
+			return true;
+		}
+	}
+	return false;
+  }
 }

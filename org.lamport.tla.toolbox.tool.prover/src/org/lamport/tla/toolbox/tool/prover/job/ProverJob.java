@@ -47,7 +47,7 @@ import org.lamport.tla.toolbox.tool.prover.ui.output.data.ObligationStatus;
 import org.lamport.tla.toolbox.tool.prover.ui.output.data.ObligationStatusMessage;
 import org.lamport.tla.toolbox.tool.prover.ui.output.data.StepStatusMessage;
 import org.lamport.tla.toolbox.tool.prover.ui.output.data.StepTuple;
-import org.lamport.tla.toolbox.tool.prover.ui.preference.ProverPreferencePage;
+import org.lamport.tla.toolbox.tool.prover.ui.preference.ColorPredicatePreferencePage;
 import org.lamport.tla.toolbox.tool.prover.ui.util.ProverHelper;
 import org.lamport.tla.toolbox.tool.prover.ui.util.TLAPMExecutableLocator;
 import org.lamport.tla.toolbox.tool.prover.ui.view.ObligationsView;
@@ -272,14 +272,14 @@ public class ProverJob extends Job {
          * 
          * Note that color numbers for the preference page are 1-based.
          */
-        colorPredicates = new ColorPredicate[ProverPreferencePage.NUM_STATUS_COLORS];
+        colorPredicates = new ColorPredicate[ColorPredicatePreferencePage.NUM_STATUS_COLORS];
 
         // the preference store containing color predicate preferences
         IPreferenceStore store = ProverUIActivator.getDefault().getPreferenceStore();
         for (int i = 1; i <= colorPredicates.length; i++)
         {
-            String predicate = store.getString(ProverPreferencePage.getColorPredPrefName(i));
-            boolean appliesToLeafOnly = store.getBoolean(ProverPreferencePage.getAppliesToLeafPrefName(i));
+            String predicate = store.getString(ColorPredicatePreferencePage.getColorPredPrefName(i));
+            boolean appliesToLeafOnly = store.getBoolean(ColorPredicatePreferencePage.getAppliesToLeafPrefName(i));
             colorPredicates[i - 1] = new ColorPredicate((appliesToLeafOnly ? "leaf " : "") + predicate);
         }
 
@@ -497,13 +497,13 @@ public class ProverJob extends Job {
                             && proverProcess.getExitValue() != 1)
                     {
                         return new Status(IStatus.ERROR, ProverUIActivator.PLUGIN_ID,
-                                "Error running tlapm. Report a bug with the error code to the developers at https://tlaplus.codeplex.com/workitem/list/basic."
+                                "Error running tlapm. Report a bug with the error code to the developers at https://github.com/tlaplus/tlapm/issues."
                                         + "\n \n Error code: " + proverProcess.getExitValue());
                     }
                 } catch (DebugException e)
                 {
                     return new Status(IStatus.ERROR, ProverUIActivator.PLUGIN_ID,
-                            "Error getting exit code for tlapm process. This is a bug. Report it to the developers at https://tlaplus.codeplex.com/workitem/list/basic");
+                            "Error getting exit code for tlapm process. This is a bug. Report it to the developers at https://github.com/tlaplus/tlapm/issues");
                 }
 
                 // successful termination
@@ -650,6 +650,19 @@ public class ProverJob extends Job {
 
         command.add(tlapmPath.toOSString());
 
+		// Use Windows Subsystem for Linux instead of Cygwin. This is experimental and
+		// a hack.  A user has to enter wsl.exe or C:\Windows\system32\wsl.exe on the
+        // Toolbox's preference page.  The next if block the appends 'tlapm'. 
+        final boolean useWSL = tlapmPath.toOSString().contains("wsl.exe");
+        if (useWSL) {
+			// Assume tlapm is on PATH in the Linux subsystem. With this, prefixing the
+			// command with 'wsl' tells Windows to invoke the binary (tlapm) via WSL. I
+			// expect this to only work with a single WSL distro installed (otherwise, we
+			// probably have to choose a distro). More information and how to install WSL is
+			// at https://docs.microsoft.com/en-us/windows/wsl/wsl2-install.
+    		command.add("tlapm");
+        }
+
         if (toolboxMode)
         {
             command.add("--toolbox");
@@ -721,12 +734,26 @@ public class ProverJob extends Job {
         if (pathList != null) {
             for (int i=0; i < pathList.length; i++) {
                 command.add("-I") ;
-                command.add(pathList[pathList.length - i - 1]) ;
+                if (useWSL) {
+					// 'wslpath' is executed inside the Linux subsystem. It converts an UNC (?) path
+					// such as "C:\\Users\\markus\\Library\\dir\\" to something that can be resolved
+					// in the Linux subsystem. Unfortunately, pathList[n] =
+					// "C:\Users\markus\Library\dir" which is why we replace \\ with \\\\
+					// backslashes.
+    				command.add(String.format("$(wslpath %s)", pathList[pathList.length - i - 1].replace("\\", "\\\\")));
+                } else {
+                    command.add(pathList[pathList.length - i - 1]) ;
+                }
             }
         }
         
-        // why just the last segment?
-        command.add(module.getLocation().toOSString());
+        if (useWSL) {
+        	// See pathList above about wslpath.  This path here is the actual spec to be verified.
+    		command.add(String.format("$(wslpath %s)", module.getLocation().toOSString().replace("\\", "\\\\")));
+        } else {
+            // why just the last segment?
+            command.add(module.getLocation().toOSString());
+        }
      
         // for debugging
         // for (int i=0; i<command.size(); i++) {

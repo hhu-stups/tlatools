@@ -3,12 +3,12 @@ package org.lamport.tla.toolbox.tool.tlc.ui.view;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.Vector;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 import org.eclipse.core.runtime.Assert;
@@ -18,48 +18,42 @@ import org.eclipse.jface.action.Action;
 import org.eclipse.jface.action.ToolBarManager;
 import org.eclipse.jface.dialogs.Dialog;
 import org.eclipse.jface.dialogs.IDialogSettings;
-import org.eclipse.jface.resource.FontRegistry;
 import org.eclipse.jface.resource.ImageDescriptor;
 import org.eclipse.jface.resource.JFaceResources;
 import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.Document;
 import org.eclipse.jface.text.IDocument;
 import org.eclipse.jface.text.source.SourceViewer;
-import org.eclipse.jface.util.IPropertyChangeListener;
-import org.eclipse.jface.viewers.CellLabelProvider;
-import org.eclipse.jface.viewers.ColumnViewerToolTipSupport;
-import org.eclipse.jface.viewers.ILazyTreeContentProvider;
 import org.eclipse.jface.viewers.ISelection;
 import org.eclipse.jface.viewers.ISelectionChangedListener;
 import org.eclipse.jface.viewers.IStructuredSelection;
 import org.eclipse.jface.viewers.SelectionChangedEvent;
+import org.eclipse.jface.viewers.StructuredSelection;
 import org.eclipse.jface.viewers.TreeViewer;
-import org.eclipse.jface.viewers.TreeViewerColumn;
-import org.eclipse.jface.viewers.Viewer;
-import org.eclipse.jface.viewers.ViewerCell;
+import org.eclipse.jface.window.Window;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.SashForm;
 import org.eclipse.swt.custom.StyledText;
-import org.eclipse.swt.events.ControlAdapter;
-import org.eclipse.swt.events.ControlEvent;
+import org.eclipse.swt.dnd.Clipboard;
+import org.eclipse.swt.dnd.TextTransfer;
+import org.eclipse.swt.dnd.Transfer;
+import org.eclipse.swt.events.MouseAdapter;
 import org.eclipse.swt.events.MouseEvent;
 import org.eclipse.swt.events.MouseListener;
-import org.eclipse.swt.events.SelectionAdapter;
 import org.eclipse.swt.events.SelectionEvent;
-import org.eclipse.swt.graphics.Color;
+import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.graphics.Font;
-import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
+import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
+import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Listener;
-import org.eclipse.swt.widgets.ScrollBar;
-import org.eclipse.swt.widgets.Scrollable;
+import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.ToolBar;
 import org.eclipse.swt.widgets.Tree;
-import org.eclipse.swt.widgets.TreeColumn;
 import org.eclipse.ui.ISharedImages;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.forms.widgets.Form;
@@ -68,38 +62,30 @@ import org.eclipse.ui.forms.widgets.Section;
 import org.eclipse.ui.part.ViewPart;
 import org.eclipse.ui.texteditor.ITextEditor;
 import org.lamport.tla.toolbox.Activator;
-import org.lamport.tla.toolbox.tool.tlc.model.Formula;
 import org.lamport.tla.toolbox.tool.tlc.model.Model;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCError;
-import org.lamport.tla.toolbox.tool.tlc.output.data.TLCFcnElementVariableValue;
-import org.lamport.tla.toolbox.tool.tlc.output.data.TLCFunctionVariableValue;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCModelLaunchDataProvider;
-import org.lamport.tla.toolbox.tool.tlc.output.data.TLCMultiVariableValue;
-import org.lamport.tla.toolbox.tool.tlc.output.data.TLCNamedVariableValue;
-import org.lamport.tla.toolbox.tool.tlc.output.data.TLCRecordVariableValue;
-import org.lamport.tla.toolbox.tool.tlc.output.data.TLCSequenceVariableValue;
-import org.lamport.tla.toolbox.tool.tlc.output.data.TLCSetVariableValue;
-import org.lamport.tla.toolbox.tool.tlc.output.data.TLCSimpleVariableValue;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCState;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCVariable;
-import org.lamport.tla.toolbox.tool.tlc.output.data.TLCVariableValue;
 import org.lamport.tla.toolbox.tool.tlc.output.source.TLCOutputSourceRegistry;
 import org.lamport.tla.toolbox.tool.tlc.traceexplorer.TraceExplorerComposite;
 import org.lamport.tla.toolbox.tool.tlc.ui.TLCUIActivator;
+import org.lamport.tla.toolbox.tool.tlc.ui.dialog.ErrorViewTraceFilterDialog;
+import org.lamport.tla.toolbox.tool.tlc.ui.editor.ModelEditor;
 import org.lamport.tla.toolbox.tool.tlc.ui.editor.TLACoverageEditor;
 import org.lamport.tla.toolbox.tool.tlc.ui.preference.ITLCPreferenceConstants;
-import org.lamport.tla.toolbox.tool.tlc.ui.util.RecordToSourceCoupler;
-import org.lamport.tla.toolbox.tool.tlc.ui.util.RecordToSourceCoupler.LoaderTLCState;
 import org.lamport.tla.toolbox.tool.tlc.ui.util.ExpandableSpaceReclaimer;
 import org.lamport.tla.toolbox.tool.tlc.ui.util.FormHelper;
+import org.lamport.tla.toolbox.tool.tlc.ui.util.RecordToSourceCoupler;
 import org.lamport.tla.toolbox.tool.tlc.ui.util.TLCUIHelper;
 import org.lamport.tla.toolbox.tool.tlc.util.ModelHelper;
 import org.lamport.tla.toolbox.util.FontPreferenceChangeListener;
 import org.lamport.tla.toolbox.util.IHelpConstants;
 import org.lamport.tla.toolbox.util.UIHelper;
 
-import tla2sany.st.Location;
+import tlc2.model.Formula;
 import tlc2.output.MP;
+import util.TLAConstants;
 
 /**
  * Error representation view containing the error description and the trace
@@ -111,9 +97,10 @@ public class TLCErrorView extends ViewPart
 {
 	public static final String ID = "toolbox.tool.tlc.view.TLCErrorView";
 
+	static final String JFACE_ERROR_TRACE_ID = ITLCPreferenceConstants.I_TLC_ERROR_TRACE_FONT + "_private";
+
 	private static final SimpleDateFormat sdf = new SimpleDateFormat("MMM dd,yyyy HH:mm:ss");
 	
-	private static final String JFACE_ERROR_TRACE_ID = ITLCPreferenceConstants.I_TLC_ERROR_TRACE_FONT + "_private";
 	private static final String CELL_TEXT_PROTOTYPE = "{|qgyA!#93^<[?";
 
 	private static final String INNER_WEIGHTS_KEY = "INNER_WEIGHTS_KEY";
@@ -121,11 +108,14 @@ public class TLCErrorView extends ViewPart
 	private static final String MID_WEIGHTS_KEY = "MID_WEIGHTS_KEY";
   
 	private static final String SYNCED_TRAVERSAL_KEY = "SYNCED_TRAVERSAL_KEY";
-	
-	private static final String DEFAULT_TOOL_TIP
-		= "Click on a row to see in viewer below.\nDouble-click to go to corresponding action in spec \u2014 "
-			+ "while holding\n   down " + (Platform.getOS().equals(Platform.OS_MACOSX) ? "\u2318" : "CTRL")
-			+ " to go to the original PlusCal code, if present.";
+
+    private static final String NO_VALUE_VIEWER_TEXT
+			= "\u2022 Select a line in Error Trace to show its value here.\n"
+				+ "\u2022 Double-click on a line to go to corresponding action in spec \u2014 "
+				+ "or while holding down " + (Platform.getOS().equals(Platform.OS_MACOSX) ? "\u2318" : "CTRL")
+				+ " to go to the original PlusCal code, if present.\n"
+				+ "\u2022 Click on a variable while holding down ALT to hide the variable from view.\n"
+				+ "\u2022 Right-click on a location row for a context menu.";
 
     /**
      * This is the pattern of an error message resulting from evaluating the constant
@@ -141,7 +131,11 @@ public class TLCErrorView extends ViewPart
 
     private static final IDocument NO_VALUE_DOCUMENT()
     {
-        return new Document("Select line in Error Trace to show its value here.");
+        return new Document(NO_VALUE_VIEWER_TEXT);
+    }
+    
+    private enum FilterType {
+    	NONE, VARIABLES, MODIFIED_VALUES_ALL_FRAMES, MODIFIED_VALUES_MODIFIED_FRAMES;
     }
     
     
@@ -151,47 +145,40 @@ public class TLCErrorView extends ViewPart
     private Form form;
 
     private SourceViewer errorViewer;
-    private TreeViewer variableViewer;
+    private ErrorTraceTreeViewer errorTraceTreeViewer;
     private RecordToSourceCoupler stackTraceActionListener;
     private SyncStackTraversal syncStackTraversalAction;
+    private Button valueReflectsFiltering;
     private SourceViewer valueViewer;
-    private Model model;
+    private ModelEditor modelEditor;
     private TraceExplorerComposite traceExplorerComposite;
     
-    @SuppressWarnings("unused")  // help onto for a nicer object graph
+    private TLCError unfilteredInput;
+    private final HashMap<TLCState, Integer> filteredStateIndexMap;
+    private FilterErrorTrace filterErrorTraceAction;
+    private Set<TLCVariable> currentErrorTraceFilterSet;
+    
+    @SuppressWarnings("unused")  // held onto for a nicer object graph
 	private ExpandableSpaceReclaimer spaceReclaimer;
 
     // listener on changes to the tlc output font preference
     private FontPreferenceChangeListener outputFontChangeListener;
-    // listener on changes to the error trace font preference
-    private final IPropertyChangeListener errorTraceFontChangeListener;
 
 	public TLCErrorView() {
 		numberOfStatesToShow = TLCUIActivator.getDefault().getPreferenceStore()
 				.getInt(ITLCPreferenceConstants.I_TLC_TRACE_MAX_SHOW_ERRORS);
-		
-		errorTraceFontChangeListener = (event) -> {
-			if ((event == null) || event.getProperty().equals(ITLCPreferenceConstants.I_TLC_ERROR_TRACE_FONT)) {
-				final Font f = JFaceResources.getFont(ITLCPreferenceConstants.I_TLC_ERROR_TRACE_FONT);
-				
-				JFaceResources.getFontRegistry().put(JFACE_ERROR_TRACE_ID, f.getFontData());
-
-				if (variableViewer != null) {
-					variableViewer.refresh(true);
-				}
-			}
-		};
-		errorTraceFontChangeListener.propertyChange(null);
-        JFaceResources.getFontRegistry().addListener(errorTraceFontChangeListener);
+        
+        currentErrorTraceFilterSet = new HashSet<>();
+        
+        filteredStateIndexMap = new HashMap<>();
 	}
     
     /**
      * Clears the view
      */
-    public void clear()
-    {
+	public void clear() {
         errorViewer.setDocument(EMPTY_DOCUMENT());
-        setTraceInput(new TLCError());
+        setTraceInput(new TLCError(), true);
         traceExplorerComposite.getTableViewer().setInput(new Vector<Formula>());
         valueViewer.setInput(EMPTY_DOCUMENT());
     }
@@ -260,12 +247,12 @@ public class TLCErrorView extends ViewPart
              * traces because resetting the trace input locks up the toolbox for a few
              * seconds, so it is important to not reset the trace if it is not necessary.
              */
-            TLCError oldTrace = (TLCError) variableViewer.getInput();
-            boolean isNewTrace = trace != null && oldTrace != null && !(trace == oldTrace);
+            final TLCError oldTrace = errorTraceTreeViewer.getCurrentTrace();
+            final boolean isNewTrace = (trace != null) && (oldTrace != null) && !(trace == oldTrace);
             // update the trace information
             if (isNewTrace)
             {
-                this.setTraceInput(trace);
+                this.setTraceInput(trace, true);
             }
             if (model.isSnapshot()) {
             	final String date = sdf.format(model.getSnapshotTimeStamp());
@@ -302,7 +289,8 @@ public class TLCErrorView extends ViewPart
         //
         // int sectionFlags = Section.DESCRIPTION | Section.TITLE_BAR
         // | Section.EXPANDED | Section.TWISTIE;
-        toolkit = new FormToolkit(parent.getDisplay());
+        final Display display = parent.getDisplay();
+		toolkit = new FormToolkit(display);
         form = toolkit.createForm(parent);
         form.setText("");
         toolkit.decorateFormHeading(form);
@@ -355,25 +343,15 @@ public class TLCErrorView extends ViewPart
          */
         final StyledText text = errorViewer.getTextWidget();
         text.addMouseListener(new MouseListener() {
+            public void mouseUp(final MouseEvent e) { }
 
-            public void mouseUp(MouseEvent e)
-            {
-                // TODO Auto-generated method stub
-
-            }
-
-            public void mouseDown(MouseEvent e)
-            {
+			public void mouseDown(final MouseEvent e) {
                 final Set<Class<? extends ITextEditor>> blacklist = new HashSet<>();
                 blacklist.add(TLACoverageEditor.class);
-                TLCUIHelper.openTLCLocationHyperlink(text, e, model, blacklist);
+                TLCUIHelper.openTLCLocationHyperlink(text, e, modelEditor.getModel(), blacklist);
             }
 
-            public void mouseDoubleClick(MouseEvent e)
-            {
-                // TODO Auto-generated method stub
-
-            }
+            public void mouseDoubleClick(final MouseEvent e) { }
         });
 
         /*
@@ -447,7 +425,7 @@ public class TLCErrorView extends ViewPart
 
         sashForm.setLayoutData(gd);
 
-        Tree tree = toolkit.createTree(sashForm, SWT.V_SCROLL | SWT.BORDER | SWT.FULL_SELECTION | SWT.SINGLE
+        Tree tree = toolkit.createTree(sashForm, SWT.V_SCROLL | SWT.BORDER | SWT.FULL_SELECTION | SWT.MULTI
                 | SWT.VIRTUAL);
         tree.setHeaderVisible(true);
         tree.setLinesVisible(true);
@@ -461,13 +439,6 @@ public class TLCErrorView extends ViewPart
         // gd.grabExcessHorizontalSpace = true ;
 
         tree.setLayoutData(gd);
-
-        // Initialize the trace display's resizer.
-        TraceDisplayResizer resizer = new TraceDisplayResizer();
-        resizer.comp = sashForm;
-        resizer.tree = tree;
-        
-        tree.addControlListener(resizer);
         tree.addListener(SWT.MeasureItem, (event) -> {
         	final Font originalFont = event.gc.getFont();
         	
@@ -479,61 +450,43 @@ public class TLCErrorView extends ViewPart
         	event.gc.setFont(originalFont);
         });
 
-        variableViewer = new TreeViewer(tree);
-        final StateContentProvider provider = new StateContentProvider(variableViewer);
-        variableViewer.setUseHashlookup(true);
-		variableViewer.setContentProvider(provider);
-        ColumnViewerToolTipSupport.enableFor(variableViewer);
-        getSite().setSelectionProvider(variableViewer);
-
-        final StateLabelProvider labelProvider = new StateLabelProvider();
-		for (int i = 0; i < StateLabelProvider.COLUMN_TEXTS.length; i++) {
-			final TreeViewerColumn column = new TreeViewerColumn(variableViewer, i);
-			column.getColumn().setText(StateLabelProvider.COLUMN_TEXTS[i]);
-			column.getColumn().setWidth(StateLabelProvider.COLUMN_WIDTH[i]);
-			column.setLabelProvider(labelProvider);
-			resizer.column[i] = column.getColumn(); // set up the resizer.
-			column.getColumn().addSelectionListener(new SelectionAdapter() {
-				public void widgetSelected(final SelectionEvent e) {
-					// reverse the current trace
-					final TLCError error = (TLCError) variableViewer.getInput();
-					error.reverseTrace();
-					// Reset the viewer's selection to the empty selection. With empty
-					// selection, the subsequent refresh call does *not* invalidate the
-					// StateContentProvider's lazy policy.
-					// We know that the user clicked on the tree's column header
-					// and the real selection is of little importance.
-					variableViewer.setSelection(new ISelection() {
-						public boolean isEmpty() {
-							return true;
-						}
-					});
-					variableViewer.refresh(false);
-					
-					// remember the order for next trace shown
-					final IDialogSettings dialogSettings = Activator.getDefault().getDialogSettings();
-					dialogSettings.put(TLCModelLaunchDataProvider.STATESORTORDER,
-							!dialogSettings.getBoolean(TLCModelLaunchDataProvider.STATESORTORDER));
-				}
-			});
-		}
-
-        // I need to add a listener for size changes to column[0] to
-        // detect when the user has tried to resize the individual columns.
-        // The following might work, if I can figure out the real event type
-        // to use.
-        resizer.column[0].addListener(SWT.Resize, resizer);
+        errorTraceTreeViewer = new ErrorTraceTreeViewer(tree, modelEditor);
+        getSite().setSelectionProvider(errorTraceTreeViewer.getTreeViewer());
 
         
         final Set<Class<? extends ITextEditor>> blacklist = new HashSet<>();
         blacklist.add(TLACoverageEditor.class);
-		stackTraceActionListener = new RecordToSourceCoupler(variableViewer, blacklist, this,
+		stackTraceActionListener = new RecordToSourceCoupler(errorTraceTreeViewer.getTreeViewer(), blacklist, this,
 				RecordToSourceCoupler.FocusRetentionPolicy.ARROW_KEY_TRAVERSAL);
-		variableViewer.getTree().addMouseListener(stackTraceActionListener);
-        variableViewer.getTree().addKeyListener(stackTraceActionListener);
-        variableViewer.getTree().addDisposeListener((event) -> {
+		tree.addMouseListener(stackTraceActionListener);
+		tree.addKeyListener(stackTraceActionListener);
+		tree.addDisposeListener((event) -> {
 			final IDialogSettings ids = Activator.getDefault().getDialogSettings();
 			ids.put(SYNCED_TRAVERSAL_KEY, syncStackTraversalAction.isChecked());
+        });
+		tree.addMouseListener(new MouseAdapter() {
+        	@Override
+        	public void mouseUp(final MouseEvent event) {
+        		if ((event.stateMask & SWT.ALT) != 0) {
+        			final TreeViewer treeViewer = errorTraceTreeViewer.getTreeViewer();
+        			final ISelection is = treeViewer.getSelection();
+        			if ((is != null) && !is.isEmpty() && (is instanceof StructuredSelection)) {
+        				final Object selection = ((StructuredSelection)is).getFirstElement();
+        				
+        				if (selection instanceof TLCVariable) {
+        					if (filterErrorTraceAction.isChecked()) {
+        						addVariableFamilyToFiltering((TLCVariable)selection);
+        					} else {
+        						currentErrorTraceFilterSet.clear();
+        						addVariableFamilyToFiltering((TLCVariable)selection);
+								filterErrorTraceAction.setChecked(true);
+        					}
+        					
+        					performVariableViewPopulation(EnumSet.of(FilterType.VARIABLES));
+        				}
+        			}
+        		}
+        	}
         });
         
         // Make it possible to expand and collapse the error trace with the push of a button.
@@ -541,96 +494,77 @@ public class TLCErrorView extends ViewPart
 		final ToolBar toolbar = toolBarManager.createControl(errorTraceSection);
 		final ShiftClickAction action = new ShiftClickAction(
 				"Toggle between expand and collapse all (Shift+Click to restore the default two-level expansion)",
-				TLCUIActivator.getImageDescriptor("icons/elcl16/toggle_expand_state.png")) {
+				TLCUIActivator.getImageDescriptor("icons/elcl16/toggle_expand_state.png"), display) {
 			@Override
 			void runWithKey(final boolean pressed) {
+    			final TreeViewer treeViewer = errorTraceTreeViewer.getTreeViewer();
 				if (pressed) {
 					// expandAll() followed by expandToLevel(2) requires us
 					// to collapse the viewer first.
-					variableViewer.collapseAll();
-					variableViewer.expandToLevel(2);
+					treeViewer.collapseAll();
+					treeViewer.expandToLevel(2);
 				} else {
-					final Object[] expandedElements = variableViewer.getExpandedElements();
+					final Object[] expandedElements = treeViewer.getExpandedElements();
 					if (expandedElements.length == 0) {
-						variableViewer.expandAll();
+						treeViewer.expandAll();
 					} else {
-						variableViewer.collapseAll();
+						treeViewer.collapseAll();
 					}
 				}
 			}
 		};
-		parent.getDisplay().addFilter(SWT.KeyDown, action);
-		parent.getDisplay().addFilter(SWT.KeyUp, action);
+		toolBarManager.add(new ExportErrorTrace2Clipboard(display));
+		filterErrorTraceAction = new FilterErrorTrace();
+		toolBarManager.add(filterErrorTraceAction);
 		toolBarManager.add(action);
 		syncStackTraversalAction = new SyncStackTraversal();
 		toolBarManager.add(syncStackTraversalAction);
 		toolBarManager.update(true);
 		errorTraceSection.setTextClient(toolbar);
-// This is working but now redundant to the buttons on the section (see above).
-// Also ActionClickListener has a keystroke to collapse the viewer.        
-//        // Add a right click context menu to expand and collapse all variables. 
-//		final MenuManager contextMenu = new MenuManager("#ViewerMenu"); //$NON-NLS-1$
-//		contextMenu.setRemoveAllWhenShown(true);
-//		contextMenu.addMenuListener(new IMenuListener() {
-//			@Override
-//			public void menuAboutToShow(IMenuManager mgr) {
-//				mgr.add(new Action("&Collapse All") {
-//					public void run() {
-//						variableViewer.collapseAll();
-//					}
-//				});
-//				mgr.add(new Action("Expand to &default level") {
-//					public void run() {
-//						// expandAll() followed by expandToLevel(2) requires us
-//						// to collapse the viewer first.
-//						variableViewer.collapseAll();
-//						variableViewer.expandToLevel(2);
-//					}
-//				});
-//				mgr.add(new Action("&Expand All") {
-//					public void run() {
-//						variableViewer.expandAll();
-//					}
-//				});
-//			}
-//		});
-//		final Menu menu = contextMenu.createContextMenu(variableViewer.getControl());
-//		variableViewer.getControl().setMenu(menu);
-//
-        variableViewer.addSelectionChangedListener(new ISelectionChangedListener() {
 
-            public void selectionChanged(SelectionChangedEvent event)
-            {
-                if (!((IStructuredSelection) event.getSelection()).isEmpty())
-                {
-                    // Set selection to the selected element (or the
-                    // first if there are multiple
-                    // selections), and show its string representation
-                    // in the value viewer
-                    // (the lower sub-window).
-                    Object selection = ((IStructuredSelection) event.getSelection()).getFirstElement();
-                    if (selection instanceof TLCState)
-                    {
-                        TLCState state = (TLCState) selection;
-                        valueViewer.setDocument(new Document(state.getDescriptionWithTraceExpressions()));
-                    } else
-                    {
-                        valueViewer.setDocument(new Document(selection.toString()));
-                    }
-                } else
-                {
-                    valueViewer.setDocument(NO_VALUE_DOCUMENT());
-                }
-
-            }
+		errorTraceTreeViewer.getTreeViewer().addSelectionChangedListener((event) -> {
+			handleValueViewerUpdate((IStructuredSelection)event.getSelection());
         });
 
+		final Composite valueViewerComposite = new Composite(sashForm, SWT.NONE);
+		final GridLayout gl = new GridLayout(1, false);
+		gl.marginHeight = 0;
+		gl.marginWidth = 0;
+		gl.verticalSpacing = 3;
+		valueViewerComposite.setLayout(gl);
+		gd = new GridData();
+		gd.horizontalAlignment = SWT.LEFT;
+		gd.verticalAlignment = SWT.TOP;
+		gd.grabExcessHorizontalSpace = true;
+		valueViewerComposite.setLayoutData(gd);
+		
+		valueReflectsFiltering = new Button(valueViewerComposite, SWT.CHECK);
+		valueReflectsFiltering.setText("Reflect filtering");
+		valueReflectsFiltering.setSelection(true);
+		valueReflectsFiltering.addSelectionListener(new SelectionListener() {
+			@Override
+			public void widgetSelected(SelectionEvent e) {
+				handleValueViewerUpdate((IStructuredSelection)errorTraceTreeViewer.getTreeViewer().getSelection());
+			}
+			@Override
+			public void widgetDefaultSelected(SelectionEvent e) { }
+		});
+		gd = new GridData();
+		gd.horizontalAlignment = SWT.RIGHT;
+		gd.verticalAlignment = SWT.TOP;
+		gd.exclude = true;
+		valueReflectsFiltering.setLayoutData(gd);
+		valueReflectsFiltering.setVisible(false);
+		
         /* Horizontal scroll bar added by LL on 26 Aug 2009 */
-        valueViewer = FormHelper.createFormsSourceViewer(toolkit, sashForm, SWT.V_SCROLL | SWT.H_SCROLL | SWT.MULTI
-                | SWT.BORDER);
+        valueViewer = FormHelper.createFormsSourceViewer(toolkit, valueViewerComposite,
+        												 (SWT.V_SCROLL | SWT.H_SCROLL | SWT.MULTI | SWT.BORDER));
         valueViewer.setEditable(false);
-
-        gd = new GridData(SWT.LEFT, SWT.TOP, true, false);
+        gd = new GridData();
+        gd.horizontalAlignment = SWT.FILL;
+        gd.grabExcessHorizontalSpace = true;
+        gd.verticalAlignment = SWT.FILL;
+        gd.grabExcessVerticalSpace = true;
         valueViewer.getControl().setLayoutData(gd);
 
  
@@ -696,6 +630,35 @@ public class TLCErrorView extends ViewPart
         TLCUIHelper.setHelp(parent, IHelpConstants.TLC_ERROR_VIEW);
     }
     
+    private void handleValueViewerUpdate(final IStructuredSelection structuredSelection) {
+		if (!structuredSelection.isEmpty()) {
+			// Set selection to the selected element (or the first if there are multiple
+			// selections), and show its string representation in the value viewer (the lower sub-window).
+			final Object selection = structuredSelection.getFirstElement();
+			if (selection instanceof TLCState) {
+				final TLCState state;
+				if ((filteredStateIndexMap.size() != 0) && !valueReflectsFiltering.getSelection()) {
+					final Integer index = filteredStateIndexMap.get(selection);
+					
+					if (index != null) {
+						state = unfilteredInput.getStates(TLCError.Length.ALL).get(index.intValue());
+					} else {
+						TLCUIActivator.getDefault().logWarning("Could not find mapped index for state.");
+						
+						state = (TLCState) selection;
+					}
+				} else {
+					state = (TLCState) selection;
+				}
+				valueViewer.setDocument(new Document(state.getConjunctiveDescription(true)));
+			} else {
+				valueViewer.setDocument(new Document(selection.toString()));
+			}
+		} else {
+			valueViewer.setDocument(NO_VALUE_DOCUMENT());
+		}
+    }
+    
 	private int[] stringToIntArray(final String str) {
 		final String[] strings = str.replace("[", "").replace("]", "").split(", ");
 		int result[] = new int[strings.length];
@@ -711,10 +674,9 @@ public class TLCErrorView extends ViewPart
     }
 
 	public void dispose() {
-		final FontRegistry fr = JFaceResources.getFontRegistry();
-		
-        fr.removeListener(outputFontChangeListener);
-        fr.removeListener(errorTraceFontChangeListener);
+		JFaceResources.getFontRegistry().removeListener(outputFontChangeListener);
+        
+        errorTraceTreeViewer.dispose();
         
         toolkit.dispose();
         
@@ -771,61 +733,54 @@ public class TLCErrorView extends ViewPart
     }
 
 	public void updateErrorView() {
-		updateErrorView(this.model);
+		updateErrorView(modelEditor);
 	}
 
     /**
      * Display the errors in the view, or hides the view if no errors
      * Displays data from the most recent trace explorer run for config
      * iff {@link ModelHelper#isOriginalTraceShown(ILaunchConfiguration)} is false.
-     * 
-     * @param errors
-     *            a list of {@link TLCError}
      */
-    public static void updateErrorView(Model model) {
-    	updateErrorView(model, true);
+    public static void updateErrorView(final ModelEditor associatedModelEditor) {
+    	updateErrorView(associatedModelEditor, true);
     }
 
-    public static void updateErrorView(Model model, boolean openErrorView)
-    {
-        if (model == null)
-        {
-            return;
-        }
-        boolean isTraceExplorerUpdate;
-        isTraceExplorerUpdate = !model.isOriginalTraceShown();
+	public static void updateErrorView(final ModelEditor associatedModelEditor, final boolean openErrorView) {
+		if (associatedModelEditor == null) {
+			return;
+		}
+		final Model model = associatedModelEditor.getModel();
+		final boolean isTraceExplorerUpdate = !model.isOriginalTraceShown();
 
-        TLCModelLaunchDataProvider provider = null;
-        if (isTraceExplorerUpdate)
-        {
-            provider = TLCOutputSourceRegistry.getTraceExploreSourceRegistry().getProvider(model);
-        } else
-        {
-            provider = TLCOutputSourceRegistry.getModelCheckSourceRegistry().getProvider(model);
-        }
+		final TLCModelLaunchDataProvider provider;
+		if (isTraceExplorerUpdate) {
+			provider = TLCOutputSourceRegistry.getTraceExploreSourceRegistry().getProvider(model);
+		} else {
+			provider = TLCOutputSourceRegistry.getModelCheckSourceRegistry().getProvider(model);
+		}
 
-        if (provider == null)
-        {
-            return;
-        }
-        updateErrorView(provider, model, openErrorView);
-    }
+		if (provider == null) {
+			return;
+		}
+		
+		updateErrorView(provider, associatedModelEditor, openErrorView);
+	}
     
-	public static void updateErrorView(final TLCModelLaunchDataProvider provider, final Model model,
-			boolean openErrorView) {
-        TLCErrorView errorView;
-		if (provider.getErrors().size() > 0 && openErrorView == true) {
+	public static void updateErrorView(final TLCModelLaunchDataProvider provider, final ModelEditor associatedModelEditor,
+			final boolean openErrorView) {
+        final TLCErrorView errorView;
+		if ((provider.getErrors().size() > 0) && openErrorView) {
        		errorView = (TLCErrorView) UIHelper.openView(TLCErrorView.ID);
 		} else {
             errorView = (TLCErrorView) UIHelper.findView(TLCErrorView.ID);
         }
+		
 		if (errorView != null) {
-            errorView.model= model;
+			errorView.setModelEditor(associatedModelEditor);
 
-            final List<String> serializedInput = model.getTraceExplorerExpressions();
+            final List<String> serializedInput = associatedModelEditor.getModel().getTraceExplorerExpressions();
             // fill the name and the errors
-			errorView.fill(provider.getModel(), provider.getErrors(),
-					serializedInput);
+			errorView.fill(provider.getModel(), provider.getErrors(), serializedInput);
 
 			if (provider.getErrors().size() == 0) {
                 errorView.hide();
@@ -833,563 +788,22 @@ public class TLCErrorView extends ViewPart
         }
     }
 
-    /**
-     * A control listener for the Provides method for resizing the columns of
-     * the error trace viewer. This is to solve the problem of a bogus
-     * "third column" being displayed when the window is made wider than the two
-     * real columns.
-     * 
-     * There are two listener methods in this class: controlResized - called
-     * when the tree is resized. handleEvent - called when column[0] is resized.
-     * The controlResized command can change the size of column[0], which
-     * triggers the calling of the handleEvent. Experimentation indicates that
-     * this call of handleEvent occurs in the middle of executing the call of
-     * controlResized. The boolean flag inControlResized is used to tell the
-     * handleEvent method whether it was called this way or by the user resizing
-     * the colulmn.
-     * 
-     * Note: I am assuming that the call of handleEvent that happens when
-     * controlResized is resizing column[0] happens during the execution of
-     * column[0].setWidth, and no funny races are possible.
-     * 
-     * Note that all the code here assumes that there are two columns. It needs
-     * to be modified if the number of columns is changed.
-     */
-    static class TraceDisplayResizer extends ControlAdapter implements Listener
-    {
-        double firstColumnPercentageWidth = .5;
-
-        // See comments above for meaning of the following flag.
-        boolean inControlResized = false;
-        Scrollable comp; // The component containing the trace display.
-        TreeColumn[] column = new TreeColumn[StateLabelProvider.COLUMN_TEXTS.length];
-        Tree tree;
-
-        public void controlResized(ControlEvent e)
-        {
-            inControlResized = true;
-
-            int treeWidth = computeMaximumWidthOfAllColumns();
-            int firstColWidth = Math.round(Math.round(firstColumnPercentageWidth * treeWidth));
-            int secondColWidth = treeWidth - firstColWidth;
-            column[0].setWidth(firstColWidth);
-            column[1].setWidth(secondColWidth);
-            inControlResized = false;
-        }
-
-        int count = 0;
-
-        public void handleEvent(Event event)
-        {
-            if (inControlResized)
-            {
-                return;
-            }
-
-            int treeWidth = computeMaximumWidthOfAllColumns();
-            int firstColWidth = column[0].getWidth();
-
-            if (treeWidth == 0)
-            {
-                return;
-            }
-
-            // the percentage that the first column will occupy
-            // until controlResized is called
-            // We do not want the width of either column
-            // to be less than 10% of the total width
-            // of the tree. Currently, the user
-            // can make a column smaller than 10%, but
-            // when controlResized is called, the column
-            // will be enlarged to 10%. It is not very nice
-            // to do the enlarging in this method. It creates
-            // very choppy performance.
-            double tentativefirstColPercentageWidth = (double) firstColWidth / (double) treeWidth;
-            if (tentativefirstColPercentageWidth > .1 && tentativefirstColPercentageWidth < .9)
-            {
-                firstColumnPercentageWidth = (double) firstColWidth / (double) treeWidth;
-
-            } else if (tentativefirstColPercentageWidth <= .1)
-            {
-                firstColumnPercentageWidth = .1;
-            } else
-            {
-                firstColumnPercentageWidth = .9;
-            }
-            firstColWidth = Math.round(Math.round(tentativefirstColPercentageWidth * treeWidth));
-            int secondColWidth = treeWidth - firstColWidth;
-            column[1].setWidth(secondColWidth);
-        }
-
-        /*
-         * Computes the maximum width that columns of the tree can occupy
-         * without having a horizontal scrollbar.
-         * 
-         * This is not equal to the sash form's client area. From the client
-         * area we must subtract the tree's border width. We must also subtract
-         * the width of the grid lines used in the tree times the number of
-         * columns because there is one grid line per column. We must subtract
-         * the width of the vertical scroll bar if it is visible.
-         */
-        private int computeMaximumWidthOfAllColumns()
-        {
-            ScrollBar vBar = tree.getVerticalBar();
-            boolean scrollBarShown = vBar.isVisible();
-            return comp.getClientArea().width - tree.getBorderWidth() - tree.getColumnCount() * tree.getGridLineWidth()
-                    - ((scrollBarShown) ? vBar.getSize().x : 0);
-        }
-
-    }
-
-    /**
-     * Content provider for the tree table
-     */
-    private class StateContentProvider implements ILazyTreeContentProvider {
-       	
-    	private final TreeViewer viewer;
-		private List<TLCState> states = new ArrayList<TLCState>(0);
-
-		public StateContentProvider(TreeViewer viewer) {
-			this.viewer = viewer;
-    	}
-
-		/* (non-Javadoc)
-		 * @see org.eclipse.jface.viewers.IContentProvider#dispose()
-		 */
-		public void dispose() {
-		}
-
-		/* (non-Javadoc)
-		 * @see org.eclipse.jface.viewers.IContentProvider#inputChanged(org.eclipse.jface.viewers.Viewer, java.lang.Object, java.lang.Object)
-		 */
-		public void inputChanged(Viewer viewer, Object oldInput, Object newInput) {
-			// Eagerly cache the list of states as it can be a sublist of the
-			// complete trace. Getting the sublist in the updateElement method
-			// means we obtain it over and over again for each top-level tree
-			// item.
-			if (newInput instanceof TLCError) {
-				this.states = ((TLCError) newInput).getStates();
-			} else if (newInput == null) {
-				this.states = new ArrayList<TLCState>(0);
-			} else {
-				throw new IllegalArgumentException();
-			}
-		}
-
-		/* (non-Javadoc)
-		 * @see org.eclipse.jface.viewers.ILazyTreeContentProvider#updateElement(java.lang.Object, int)
-		 */
-		public void updateElement(Object parent, int viewerIndex) {
-			if (parent instanceof TLCError) {
-				final TLCError error = (TLCError) parent;
-				if (error.isTraceRestricted() && viewerIndex == 0) {
-					// If only a subset of the trace is shown, show a dummy item
-					// at the top which can be double-clicked to load more.
-					viewer.replace(parent, viewerIndex, new RecordToSourceCoupler.LoaderTLCState(viewer,
-							Math.min(numberOfStatesToShow, error.getNumberOfRestrictedTraceStates()), error));
-					return;
-				}
-				// decrease index into states by one if the viewers first element is a dummy item
-				final int statesIndex = viewerIndex - (error.isTraceRestricted() ? 1 : 0);
-				final TLCState child = states.get(statesIndex);
-				// Diffing is supposed to be lazy and thus is done here when
-				// the state is first used by the viewer. The reason why it
-				// has to be lazy is to be able to efficiently handle traces
-				// with hundreds or thousands of states where it would be a
-				// waste to diff all state pairs even if the user is never
-				// going to look at all states anyway.
-				// TODO If ever comes up as a performance problem again, the
-				// nested TLCVariableValues could also be diffed lazily.
-           		if (statesIndex > 0) {
-           			final TLCState predecessor = states.get(statesIndex - 1);
-           			predecessor.diff(child);
-           		}
-				viewer.replace(parent, viewerIndex, child);
-				// Always setHashChildren even if child has no children: This is
-				// a virtual table here meaning that it reduces the number of
-				// table items at the OS level by recycling them (the OS only
-				// creates a many items that fit into the visible area). If an
-				// item showing a regular state, is later recycled by a "back to
-				// state" or "stuttering" indicator (neither has children),
-				// the OS still incorrectly assumes the item has children. This
-				// crashes hard on Linux and results in erratic behavior on
-				// Windows and Mac.
-				viewer.setHasChildren(child, child.getVariablesAsList().size() > 0);
-				// Lazily expand the children
-				if (child.isExpandable()){
-					viewer.expandToLevel(child, 1);
-				}
-			} else if (parent instanceof TLCState) {
-				final TLCState state = (TLCState) parent;
-                if ((state.isStuttering() || state.isBackToState())) {
-					viewer.setChildCount(state, 0);
-                } else {
-                	final List<TLCVariable> variablesAsList = state.getVariablesAsList();
-                	if (variablesAsList.size() > viewerIndex) {
-                		final TLCVariable child = variablesAsList.get(viewerIndex);
-                		viewer.replace(parent, viewerIndex, child);
-        				viewer.setHasChildren(child, child.getChildCount() > 0);
-                	}
-                }
-			} else if (parent instanceof TLCVariable
-					&& ((TLCVariable) parent).getValue() instanceof TLCMultiVariableValue) {
-				final TLCMultiVariableValue multiValue = (TLCMultiVariableValue) ((TLCVariable) parent).getValue();
-				final TLCVariableValue child = multiValue.asList().get(viewerIndex);
-				viewer.replace(parent, viewerIndex, child);
-				viewer.setHasChildren(child, child.getChildCount() > 0);
-			} else if (parent instanceof TLCVariable) {
-				final TLCVariable variable = (TLCVariable) parent;
-				final TLCVariableValue child = variable.getValue();
-				viewer.replace(parent, viewerIndex, child);
-				viewer.setChildCount(child, child.getChildCount());
-			} else if (parent instanceof TLCMultiVariableValue) {
-				final TLCMultiVariableValue multiValue = (TLCMultiVariableValue) parent;
-				final TLCVariableValue child = multiValue.asList().get(viewerIndex);
-				viewer.replace(parent, viewerIndex, child);
-				viewer.setHasChildren(child, child.getChildCount() > 0);
-			} else if (parent instanceof TLCVariableValue
-					&& ((TLCVariableValue) parent).getValue() instanceof TLCMultiVariableValue) {
-				final TLCMultiVariableValue multiValue = (TLCMultiVariableValue) ((TLCVariableValue) parent).getValue();
-				final TLCVariableValue child = multiValue.asList().get(viewerIndex);
-				viewer.replace(parent, viewerIndex, child);
-				viewer.setHasChildren(child, child.getChildCount() > 0);
-			} else {
-				throw new IllegalArgumentException();
-			}
-		}
-		
-		/* (non-Javadoc)
-		 * @see org.eclipse.jface.viewers.ILazyTreeContentProvider#updateChildCount(java.lang.Object, int)
-		 */
-		public void updateChildCount(Object element, int currentChildCount) {
-			if (element instanceof TLCError) {
-				final TLCError error = (TLCError) element;
-				int traceSize = error.getTraceSize();
-				if (traceSize != currentChildCount) {
-					if (error.isTraceRestricted()) {
-						viewer.setChildCount(element, traceSize + 1);
-					} else {
-						viewer.setChildCount(element, traceSize);
-					}
-				}
-			} else if (element instanceof TLCState) {
-				final TLCState state = (TLCState) element;
-				if (((state.isStuttering() || state.isBackToState()) && currentChildCount != 0)) {
-					viewer.setChildCount(element, 0);
-				} else if (currentChildCount != state.getVariablesAsList().size()) {
-					viewer.setChildCount(element, state.getVariablesAsList().size());
-				}
-			} else if (element instanceof TLCVariable) {
-				final TLCVariable variable = (TLCVariable) element;
-				if (currentChildCount != variable.getChildCount()) {
-					viewer.setChildCount(element, variable.getChildCount());
-				}
-			} else if (element instanceof TLCVariableValue) {
-				final TLCVariableValue value = (TLCVariableValue) element;
-				if (currentChildCount != value.getChildCount()) {
-					viewer.setChildCount(element, value.getChildCount());
-				}
-			} else {
-				throw new IllegalArgumentException();
-			}
-		}
-
-		/* (non-Javadoc)
-		 * @see org.eclipse.jface.viewers.ILazyTreeContentProvider#getParent(java.lang.Object)
-		 */
-		public Object getParent(Object element) {
+	public TLCError getTrace() {
+		if (errorTraceTreeViewer == null) {
 			return null;
 		}
-    }
-    
-    /**
-     * Label provider for the tree table. Modified on 30 Aug 2009 by LL to
-     * implement ITableColorProvider instead of IColorProvider. This allows
-     * coloring of individual columns, not just of entire rows.
-     */
-    static class StateLabelProvider extends CellLabelProvider
-    {
-        public static final int NAME = 0;
-        public static final int VALUE = 1;
-
-        public static final int[] COLUMN_WIDTH = { 200, 200 };
-        public static final String[] COLUMN_TEXTS = { "Name", "Value" };
-
-        private final Image stateImage;
-        private final Image varImage;
-        private final Image recordImage;
-        private final Image setImage;
-        private final Image loadMoreImage;
-        
-        public StateLabelProvider()
-        {
-            stateImage = TLCUIActivator.getImageDescriptor("/icons/full/default_co.gif").createImage();
-            varImage = TLCUIActivator.getImageDescriptor("/icons/full/private_co.gif").createImage();
-            recordImage = TLCUIActivator.getImageDescriptor("/icons/full/brkpi_obj.gif").createImage();
-            // setImage = TLCUIActivator.getImageDescriptor("/icons/full/over_co.gif").createImage();
-            setImage = TLCUIActivator.getImageDescriptor("/icons/full/compare_method.gif").createImage();
-            loadMoreImage = TLCUIActivator.getImageDescriptor("/icons/full/add.gif").createImage(); // other candidate is newstream_wiz.gif, nav_go.gif, debugt_obj.gif
-        }
-
-        private Image getColumnImage(Object element, int columnIndex)
-        {
-            if (columnIndex == NAME)
-            {
-            	if (element instanceof LoaderTLCState) {
-            		return loadMoreImage;	
-            	}
-                if (element instanceof TLCState)
-                {
-                    return stateImage;
-                } else if (element instanceof TLCVariable)
-                {
-                    return varImage;
-                } else if (element instanceof TLCNamedVariableValue)
-                {
-                    return recordImage;
-                } else if (element instanceof TLCFcnElementVariableValue)
-                {
-                    return recordImage;
-                }
-                return setImage; // other things appear in unordered collections
-            }
-            return null;
-        }
-
-        private String getColumnText(Object element, int columnIndex)
-        {
-            if (element instanceof TLCState)
-            {
-                TLCState state = (TLCState) element;
-
-                switch (columnIndex) {
-                case NAME:
-                    if (state.isStuttering())
-                    {
-                        return "<Stuttering>";
-                    } else if (state.isBackToState())
-                    {
-                        return "<Back to state " + state.getStateNumber() + ">";
-                    }
-                    return state.getLabel();
-                case VALUE:
-                	if (state instanceof RecordToSourceCoupler.LoaderTLCState) {
-                    	return "";
-                    } else {
-                    	return "State (num = " + state.getStateNumber() + ")";
-                    }
-                    // state.toString();
-                default:
-                    break;
-                }
-            } else if (element instanceof TLCVariable)
-            {
-                TLCVariable var = (TLCVariable) element;
-                switch (columnIndex) {
-                case NAME:
-                    if (var.isTraceExplorerVar())
-                    {
-                        return var.getSingleLineName();
-                    } else
-                    {
-                        return var.getName();
-                    }
-                case VALUE:
-                    return var.getValue().toSimpleString();
-                    // Changed from toString by LL on 30 Aug 2009
-                default:
-                    break;
-                }
-            } else if (element instanceof TLCSetVariableValue || element instanceof TLCSequenceVariableValue
-                    || element instanceof TLCSimpleVariableValue)
-            {
-
-                TLCVariableValue varValue = (TLCVariableValue) element;
-                switch (columnIndex) {
-                case VALUE:
-                    return varValue.toString();
-                case NAME:
-                    return ""; // added by LL on 5 Nov 2009
-                default:
-                    break;
-                }
-            } else if (element instanceof TLCNamedVariableValue)
-            {
-                TLCNamedVariableValue namedValue = (TLCNamedVariableValue) element;
-                switch (columnIndex) {
-                case NAME:
-                    return namedValue.getName();
-                case VALUE:
-                    return ((TLCVariableValue) namedValue.getValue()).toSimpleString();
-                    // Changed from toString by LL on 30 Aug 2009
-                default:
-                    break;
-                }
-            } else if (element instanceof TLCFcnElementVariableValue)
-            {
-                TLCFcnElementVariableValue fcnElementValue = (TLCFcnElementVariableValue) element;
-                switch (columnIndex) {
-                case NAME:
-                    return fcnElementValue.getFrom().toSimpleString();
-                    // Changed from toString by LL on 30 Aug 2009
-                case VALUE:
-                    return ((TLCVariableValue) fcnElementValue.getValue()).toSimpleString();
-                    // Changed from toString by LL on 30 Aug 2009
-                default:
-                    break;
-                }
-            } else if (element instanceof TLCRecordVariableValue)
-            {
-                TLCRecordVariableValue recordValue = (TLCRecordVariableValue) element;
-                switch (columnIndex) {
-                case NAME:
-                    return "";
-                case VALUE:
-                    return recordValue.toSimpleString();
-                default:
-                    break;
-                }
-            } else if (element instanceof TLCFunctionVariableValue)
-            {
-                TLCFunctionVariableValue fcnValue = (TLCFunctionVariableValue) element;
-                switch (columnIndex) {
-                case NAME:
-                    return "";
-                case VALUE:
-                    return fcnValue.toSimpleString();
-                default:
-                    break;
-                }
-            }
-
-            return null;
-        }
-
-		private static final Map<String, Color> LOCATION_COLOR_MAP = new ConcurrentHashMap<String, Color>();
-		//TODO Convert to Toolbox preference once this features proves useful.
-		private static final boolean COLORING_SYSTEM_PROPERTY = Boolean
-				.getBoolean(TLCErrorView.class.getName() + ".coloring");
-
-        /**
-         * The following method sets the background color of a row or column of
-         * the table. It highlights the entire row for an added or deleted item.
-         * For a changed value, only the value is highlighted.
-         */
-		private Color getBackground(Object element, int column) {
-            if (element instanceof TLCVariable) {
-				final TLCVariable var = (TLCVariable) element;
-				if (var.isChanged() && column == VALUE) {
-					return TLCUIActivator.getDefault().getChangedColor();
-				}
-			} else if (element instanceof TLCVariableValue) {
-				final TLCVariableValue value = (TLCVariableValue) element;
-				if (value.isChanged()) {
-					if (column == VALUE) {
-						return TLCUIActivator.getDefault().getChangedColor();
-					}
-				} else if (value.isAdded()) {
-					// Added takes precedence over deleted. E.g. a value can be
-					// added to a set in this state and be removed in the next
-					// state.
-					return TLCUIActivator.getDefault().getAddedColor();
-				} else if (value.isDeleted()) {
-					return TLCUIActivator.getDefault().getDeletedColor();
-				}
-			} else if (COLORING_SYSTEM_PROPERTY && element instanceof TLCState) {
-				// Assign a color to each location to make actions in the error
-				// viewer more easily distinguishable.
-				final TLCState state = (TLCState) element;
-				Location moduleLocation = state.getModuleLocation();
-				if (moduleLocation == null) {
-					return null;
-				}
-				Color c = LOCATION_COLOR_MAP.get(moduleLocation.toString());
-				if (c == null) {
-					int color = SWT.COLOR_WHITE + (2 * LOCATION_COLOR_MAP.size());
-					c = TLCUIActivator.getColor(color);
-					LOCATION_COLOR_MAP.put(state.getModuleLocation().toString(), c);
-				}
-				return c;
-			}
-			return null;
-		}
-
-        private Color getForeground(Object element, int i)
-        {
-            return null;
-        }
-
-		private Font getFont(Object element, int columnIndex) {
-			boolean returnBoldVersion = false;
-			
-			if (element instanceof TLCVariable) {
-				if (((TLCVariable) element).isTraceExplorerVar()) {
-					returnBoldVersion = true;
-				}
-			} else if (element instanceof RecordToSourceCoupler.LoaderTLCState) {
-				returnBoldVersion = true;
-			}
-
-			final FontRegistry fr = JFaceResources.getFontRegistry();
-			return returnBoldVersion ? fr.getBold(JFACE_ERROR_TRACE_ID) : fr.get(JFACE_ERROR_TRACE_ID);
-		}
-
-        /* (non-Javadoc)
-         * @see org.eclipse.jface.viewers.BaseLabelProvider#dispose()
-         */
-        public void dispose()
-        {
-            /*
-             * Remove images
-             */
-            stateImage.dispose();
-            varImage.dispose();
-            recordImage.dispose();
-            setImage.dispose();
-            loadMoreImage.dispose();
-           super.dispose();
-        }
-
-		/* (non-Javadoc)
-		 * @see org.eclipse.jface.viewers.IToolTipProvider#getToolTipText(java.lang.Object)
-		 */
-		public String getToolTipText(Object element) {
-			if (element instanceof LoaderTLCState) {
-				return "Double-click to load more states.\nIf the number of states is large, this might take a few seconds.";
-			}
-			return DEFAULT_TOOL_TIP;
-		}
-
-		/* (non-Javadoc)
-		 * @see org.eclipse.jface.viewers.CellLabelProvider#update(org.eclipse.jface.viewers.ViewerCell)
-		 */
-		public void update(ViewerCell cell) {
-			// labels
-			cell.setText(getColumnText(cell.getElement(), cell.getColumnIndex()));
-			
-			// images
-			cell.setImage(getColumnImage(cell.getElement(), cell.getColumnIndex()));
-			
-			// font
-			cell.setFont(getFont(cell.getElement(), cell.getColumnIndex()));
-			
-			// colors
-			cell.setForeground(getForeground(cell.getElement(), cell.getColumnIndex()));
-			cell.setBackground(getBackground(cell.getElement(), cell.getColumnIndex()));
-		}
-    }
-
-	public TLCError getTrace()
-    {
-        if (variableViewer == null)
-        {
-            return null;
-        }
-        return (TLCError) variableViewer.getInput();
-    }
+		return errorTraceTreeViewer.getCurrentTrace();
+	}
 
 	public Model getModel() {
-		return model;
+		return modelEditor.getModel();
+	}
+	
+	private void setModelEditor(final ModelEditor associatedModelEditor) {
+		modelEditor = associatedModelEditor;
+		if (errorTraceTreeViewer != null) {
+			errorTraceTreeViewer.setModelEditor(associatedModelEditor);
+		}
 	}
 
     private class HelpAction extends Action
@@ -1414,15 +828,19 @@ public class TLCErrorView extends ViewPart
      * 
      * @param states
      */
-    void setTraceInput(TLCError error)
-    {
+	void setTraceInput(final TLCError error, final boolean isNew) {
+		if (isNew) {
+			unfilteredInput = error;
+		}
+		
 		// If itemCount is large (>10.000 items), the underlying OS window
 		// toolkit can be slow. As a possible fix, look into
 		// http://www.eclipse.org/nattable/. For background, read
 		// https://bugs.eclipse.org/bugs/show_bug.cgi?id=129457#c27
     	error.restrictTraceTo(numberOfStatesToShow);
-		variableViewer.getTree().setItemCount(error.getTraceSize() + (error.isTraceRestricted() ? 1 : 0));
-        variableViewer.setInput(error);
+    	final TreeViewer treeViewer = errorTraceTreeViewer.getTreeViewer();
+    	treeViewer.getTree().setItemCount(error.getTraceSize() + (error.isTraceRestricted() ? 1 : 0));
+    	treeViewer.setInput(error);
 		// If the number of states in the trace is sufficiently small, eagerly
 		// expand all root level items (which translates to the states
 		// variables). This causes the TreeViewer to correctly determine the
@@ -1437,7 +855,7 @@ public class TLCErrorView extends ViewPart
         // https://bugs.eclipse.org/bugs/show_bug.cgi?id=266189
         final int level = 1;
         if (error.getTraceSize(level) < 1000) {
-        	variableViewer.expandToLevel(level + 1); // viewer counts root node. 
+        	treeViewer.expandToLevel(level + 1); // viewer counts root node. 
         }
         if (!error.isTraceEmpty())
         {
@@ -1448,12 +866,118 @@ public class TLCErrorView extends ViewPart
         }
     }
 
-	public void setOriginalTraceShown(boolean b) {
-		this.model.setOriginalTraceShown(b);
+	public void setOriginalTraceShown(final boolean b) {
+		modelEditor.getModel().setOriginalTraceShown(b);
 	}
 	
 	TreeViewer getViewer() {
-		return variableViewer;
+		return errorTraceTreeViewer.getTreeViewer();
+	}
+	
+	private void addVariableFamilyToFiltering(final TLCVariable protoVariable) {
+		for (final TLCState state : unfilteredInput.getStates(TLCError.Length.ALL)) {
+			for (final TLCVariable variable : state.getVariablesAsList()) {
+				if (protoVariable.representsTheSameAs(variable)) {
+					currentErrorTraceFilterSet.add(variable);
+				}
+			}
+		}
+	}
+	
+	private void performVariableViewPopulation(final EnumSet<FilterType> filters) {
+        filteredStateIndexMap.clear();
+		if (filters.contains(FilterType.NONE)) {
+			setTraceInput(unfilteredInput, false);
+			final GridData gd = (GridData)valueReflectsFiltering.getLayoutData();
+			gd.exclude = true;
+			valueReflectsFiltering.setLayoutData(gd);
+			valueReflectsFiltering.setVisible(false);
+		} else {
+			final TLCError filtered = unfilteredInput.clone();
+			
+			final GridData gd = (GridData)valueReflectsFiltering.getLayoutData();
+			gd.exclude = false;
+			valueReflectsFiltering.setLayoutData(gd);
+			valueReflectsFiltering.setVisible(true);
+			if (filters.contains(FilterType.VARIABLES) && (currentErrorTraceFilterSet.size() > 0)) {
+				// It would be much nicer (from both a time and space perspective) were there a veto-ing
+				//		ability provided by TableViewer - like "vetoRow(Object element)". Alas, there is not and
+				//		so we do this clone and filter of the input data.
+				int index = 0;
+				for (final TLCState filteredState : filtered.getStates(TLCError.Length.ALL)) {
+					final List<TLCVariable> variables = filteredState.getVariablesAsList();
+					final ArrayList<TLCVariable> removals = new ArrayList<>();
+					
+					for (final TLCVariable variable : variables) {
+						for (final TLCVariable filterVariable : currentErrorTraceFilterSet) {
+							if (filterVariable.representsTheSameAs(variable)) {
+								removals.add(variable);
+								break;
+							}
+						}
+					}
+					
+					variables.removeAll(removals);
+					
+					filteredStateIndexMap.put(filteredState, new Integer(index));
+					index++;
+				}
+			}
+
+			if (filters.contains(FilterType.MODIFIED_VALUES_MODIFIED_FRAMES)) {
+				final ArrayList<TLCState> emptyStates = new ArrayList<>();
+				
+				filteredStateIndexMap.clear();
+				int index = 0;
+				for (final TLCState state : filtered.getStates(TLCError.Length.ALL)) {
+					final List<TLCVariable> variables = state.getVariablesAsList();
+					final ArrayList<TLCVariable> removals = new ArrayList<>();
+					
+					for (final TLCVariable variable : variables) {
+						if (!variable.isChanged()) {
+							removals.add(variable);
+						}
+					}
+					
+					variables.removeAll(removals);
+					if (variables.size() == 0) {
+						emptyStates.add(state);
+					} else {
+						filteredStateIndexMap.put(state, new Integer(index));
+					}
+					
+					index++;
+				}
+				
+				filtered.removeStates(emptyStates);
+			} else if (filters.contains(FilterType.MODIFIED_VALUES_ALL_FRAMES)) {
+				final Set<TLCVariable> changedVariables = new HashSet<>();
+				
+				for (final TLCState state : filtered.getStates(TLCError.Length.ALL)) {
+					final List<TLCVariable> variables = state.getVariablesAsList();
+					
+					for (final TLCVariable variable : variables) {
+						if (variable.isChanged()) {
+							changedVariables.add(variable);
+						}
+					}
+				}
+				
+				filteredStateIndexMap.clear();
+				int index = 0;
+				for (final TLCState filteredState : filtered.getStates(TLCError.Length.ALL)) {
+					final List<TLCVariable> variables = filteredState.getVariablesAsList();
+					
+					variables.retainAll(changedVariables);
+					
+					filteredStateIndexMap.put(filteredState, new Integer(index));
+					index++;
+				}
+			}
+			
+			setTraceInput(filtered, false);
+		}
+		valueReflectsFiltering.getParent().layout(true, true);
 	}
 	
 	
@@ -1485,11 +1009,97 @@ public class TLCErrorView extends ViewPart
 	}
 	
 	
+	private class FilterErrorTrace extends Action {
+		private static final String DEFAULT_TOOL_TIP_TEXT
+					= "Click to select variables and expressions to omit from the trace display; "
+									+ "ALT-click on an individual item below to omit it immediately.";
+		private static final String SELECTED_TOOL_TIP_TEXT = "Click to display all variables and expressions.";
+		
+		FilterErrorTrace() {
+			super("Filter the displayed variables and expressions", AS_CHECK_BOX);
+			
+			final ImageDescriptor id = TLCUIActivator.getImageDescriptor("icons/elcl16/trace_filter.png");
+			setImageDescriptor(id);
+			
+			setToolTipText(DEFAULT_TOOL_TIP_TEXT);
+		}
+		
+	    /**
+	     * {@inheritDoc}
+	     */
+		@Override
+		public void setChecked(final boolean flag) {
+			super.setChecked(flag);
+			
+			setToolTipText(SELECTED_TOOL_TIP_TEXT);
+		}
+		
+	    /**
+	     * {@inheritDoc}
+	     */
+		@Override
+		public void run() {
+			if (isChecked()) {
+				setToolTipText(SELECTED_TOOL_TIP_TEXT);
+			} else {
+				setToolTipText(DEFAULT_TOOL_TIP_TEXT);
+			}
+			
+			final TLCError trace = errorTraceTreeViewer.getCurrentTrace();
+			final List<TLCState> states = trace.getStates();
+			
+			if (states.size() == 0) {
+				return;
+			}
+			
+			if (isChecked()) {
+				final Shell s = PlatformUI.getWorkbench().getDisplay().getActiveShell();
+				final TLCState state = states.get(0);
+				final ErrorViewTraceFilterDialog dialog = new ErrorViewTraceFilterDialog(s, state.getVariablesAsList());
+
+				dialog.setSelection(currentErrorTraceFilterSet);
+				if (dialog.open() == Window.OK) { // (Currently can only ever be Windows.OK)
+					currentErrorTraceFilterSet = dialog.getSelection();
+					
+					final ErrorViewTraceFilterDialog.MutatedFilter mutated = dialog.getMutatedFilterSelection();
+					
+					if (ErrorViewTraceFilterDialog.MutatedFilter.NO_FILTER.equals(mutated)) {
+						performVariableViewPopulation(EnumSet.of(FilterType.VARIABLES));
+					} else {
+						final FilterType filterType;
+						
+						switch (mutated) {
+							case CHANGED_ALL_FRAMES:
+								filterType = FilterType.MODIFIED_VALUES_ALL_FRAMES;
+								break;
+							default:
+								filterType = FilterType.MODIFIED_VALUES_MODIFIED_FRAMES;
+								break;
+						}
+						
+						performVariableViewPopulation(EnumSet.of(FilterType.VARIABLES, filterType));
+					}
+				}
+			} else {
+				performVariableViewPopulation(EnumSet.of(FilterType.NONE));
+			}
+		}
+	}	
+	
+	
 	private static abstract class ShiftClickAction extends Action implements Listener {
 		private boolean holdDown = false;
 
-		public ShiftClickAction(final String text, final ImageDescriptor imageDescriptor) {
+		public ShiftClickAction(final String text, final ImageDescriptor imageDescriptor, final Display display) {
 			super(text, imageDescriptor);
+			display.addFilter(SWT.KeyDown, this);
+			display.addFilter(SWT.KeyUp, this);
+		}
+		
+		public ShiftClickAction(final String text, final int style, final Display display) {
+			super(text, style);
+			display.addFilter(SWT.KeyDown, this);
+			display.addFilter(SWT.KeyUp, this);
 		}
 
 		@Override
@@ -1510,4 +1120,55 @@ public class TLCErrorView extends ViewPart
 			}
 		}
 	}
+	
+	
+	private class ExportErrorTrace2Clipboard extends ShiftClickAction implements ISelectionChangedListener {
+		private static final String DEFAULT_TOOL_TIP_TEXT
+			= "Click to export error-trace to clipboard as\nsequence of records. "
+					+ "Shift-click to \nomit the action's position ("
+					+ TLAConstants.TraceExplore.POSITION + "), \nname, and location.";
+		
+		
+		private final Display display;
+		
+		ExportErrorTrace2Clipboard(final Display display) {
+			super("Export the error-trace to the OS clipboard.", AS_PUSH_BUTTON, display);
+			this.display = display;
+			
+			errorTraceTreeViewer.getTreeViewer().addSelectionChangedListener(this);
+			
+			setImageDescriptor(TLCUIActivator
+					.getImageDescriptor("platform:/plugin/org.eclipse.ui.ide/icons/full/etool16/export_wiz.png"));
+			
+			setToolTipText(DEFAULT_TOOL_TIP_TEXT);
+		}
+		
+		/* Disable export when variables are part of the selection */
+		@Override
+		public void selectionChanged(SelectionChangedEvent event) {
+			// it seems impossible this could ever be null since we treat it as non-null in the constructor.
+			if (errorTraceTreeViewer == null) {
+				this.setEnabled(false);
+			}
+			this.setEnabled(errorTraceTreeViewer.getCurrentTrace().hasTrace());
+		}
+		
+		@Override
+		public void runWithKey(final boolean excludeActionHeader) {
+			// it seems impossible this could ever be null since we treat it as non-null in the constructor.
+			if (errorTraceTreeViewer == null) {
+				return;
+			}
+			final TLCError trace = errorTraceTreeViewer.getCurrentTrace();
+			if (!trace.hasTrace()) {
+				// safeguard in addition to isEnabled 
+				return;
+			}
+
+			final Clipboard clipboard = new Clipboard(display);
+			clipboard.setContents(new Object[] { trace.toSequenceOfRecords(!excludeActionHeader) },
+					new Transfer[] { TextTransfer.getInstance() });
+			clipboard.dispose();
+		}
+	}	
 }

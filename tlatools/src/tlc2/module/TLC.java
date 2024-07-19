@@ -40,6 +40,14 @@ import util.UniqueString;
 
 public class TLC implements ValueConstants
 {
+	private static final UniqueString LEVEL = UniqueString.uniqueStringOf("level");
+	private static final UniqueString DURATION = UniqueString.uniqueStringOf("duration");
+	private static final UniqueString QUEUE = UniqueString.uniqueStringOf("queue");
+	private static final UniqueString DISTINCT = UniqueString.uniqueStringOf("distinct");
+	private static final UniqueString DIAMETER = UniqueString.uniqueStringOf("diameter");
+	private static final UniqueString EXIT = UniqueString.uniqueStringOf("exit");
+	private static final UniqueString PAUSE = UniqueString.uniqueStringOf("pause");
+
 	public static final long serialVersionUID = 20160822L;
 
 	private static final long startTime = System.currentTimeMillis();
@@ -168,7 +176,7 @@ public class TLC implements ValueConstants
 
 	private static final Value TLCGetStringValue(final Value vidx) {
 		final StringValue sv = (StringValue) vidx;
-		if (UniqueString.uniqueStringOf("diameter") == sv.val) {
+		if (DIAMETER == sv.val) {
 			try {
 				return IntValue.gen(TLCGlobals.mainChecker.getProgress());
 			} catch (ArithmeticException e) {
@@ -180,7 +188,7 @@ public class TLC implements ValueConstants
 				// NPE.
 				throw new EvalException(EC.TLC_MODULE_TLCGET_UNDEFINED, String.valueOf(sv.val));
 			}
-		} else if (UniqueString.uniqueStringOf("distinct") == sv.val) {
+		} else if (DISTINCT == sv.val) {
 			try {
 				return IntValue.gen(Math.toIntExact(TLCGlobals.mainChecker.getDistinctStatesGenerated()));
 			} catch (ArithmeticException e) {
@@ -189,7 +197,7 @@ public class TLC implements ValueConstants
 			} catch (NullPointerException npe) {
 				throw new EvalException(EC.TLC_MODULE_TLCGET_UNDEFINED, String.valueOf(sv.val));
 			}
-		} else if (UniqueString.uniqueStringOf("queue") == sv.val) {
+		} else if (QUEUE == sv.val) {
 			try {
 				return IntValue.gen(Math.toIntExact(TLCGlobals.mainChecker.getStateQueueSize()));
 			} catch (ArithmeticException e) {
@@ -198,7 +206,7 @@ public class TLC implements ValueConstants
 			} catch (NullPointerException npe) {
 				throw new EvalException(EC.TLC_MODULE_TLCGET_UNDEFINED, String.valueOf(sv.val));
 			}
-		} else if (UniqueString.uniqueStringOf("duration") == sv.val) {
+		} else if (DURATION == sv.val) {
 			try {
 				final int duration = (int) ((System.currentTimeMillis() - startTime) / 1000L);
 				return IntValue.gen(Math.toIntExact(duration));
@@ -206,7 +214,7 @@ public class TLC implements ValueConstants
 				throw new EvalException(EC.TLC_MODULE_OVERFLOW,
 						Long.toString(((System.currentTimeMillis() - startTime) / 1000L)));
 			}
-		} else if (UniqueString.uniqueStringOf("level") == sv.val) {
+		} else if (LEVEL == sv.val) {
 			// Contrary to "diameter", "level" is not monotonically increasing. "diameter" is
 			// because it calls tlc2.tool.TLCTrace.getLevelForReporting(). "level" is the height
 			// stores as part of the state that is currently explored.
@@ -214,14 +222,15 @@ public class TLC implements ValueConstants
 			if (currentState != null) {
 				return IntValue.gen(currentState.getLevel());
 			} else {
-				if (TLCGlobals.mainChecker == null) {
+				if (TLCGlobals.mainChecker == null && TLCGlobals.simulator == null) {
 					// Be consistent with TLCGet("diameter") when TLCGet("level") appears as
 					// constant substitution.
 					throw new EvalException(EC.TLC_MODULE_TLCGET_UNDEFINED, String.valueOf(sv.val));
 				}
-				// Not an IdThread implies that TLCGet("level") is part of the initial predicate
-				// where the level is 0.
-				return IntValue.gen(0);
+				// Not an IdThread (hence currentState is null) implies that TLCGet("level") is
+				// evaluated as part of the initial predicate where the level - by definition -
+				// is 0 (see TLCState#level).
+				return IntValue.gen(TLCState.INIT_LEVEL - 1);
 			}
 		}
 		throw new EvalException(EC.TLC_MODULE_TLCGET_UNDEFINED, String.valueOf(sv.val));
@@ -249,12 +258,12 @@ public class TLC implements ValueConstants
             }
         } else if (vidx instanceof StringValue) {
         	final StringValue sv = (StringValue) vidx;
-        	if (UniqueString.uniqueStringOf("exit") == sv.val) {
+        	if (EXIT == sv.val) {
         		if (val == BoolValue.ValTrue) {
         			TLCGlobals.mainChecker.stop();
         		}
         		return BoolValue.ValTrue;
-        	} else if (UniqueString.uniqueStringOf("pause") == sv.val) {
+        	} else if (PAUSE == sv.val) {
 				// Provisional TLCSet("pause", TRUE) implementation that suspends BFS model
 				// checking until enter is pressed on system.in.  Either use in spec as:
         		//   TLCSet("pause", guard)

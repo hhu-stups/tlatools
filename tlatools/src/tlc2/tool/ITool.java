@@ -46,10 +46,6 @@ import util.FilenameToStream;
 
 public interface ITool extends TraceApp {
 
-	void setCallStack();
-
-	CallStack getCallStack();
-
 	/**
 	   * This method returns the set of all possible actions of the
 	   * spec, and sets the actions field of this object. In fact, we
@@ -78,6 +74,8 @@ public interface ITool extends TraceApp {
 	   * in the given state.
 	   */
 	StateVec getNextStates(Action action, TLCState state);
+	
+	boolean getNextStates(final INextStateFunctor functor, final TLCState state);
 
 	IValue eval(SemanticNode expr, Context c, TLCState s0);
 
@@ -97,6 +95,8 @@ public interface ITool extends TraceApp {
 
 	/* This method determines if a pair of states satisfy the action constraints. */
 	boolean isInActions(TLCState s1, TLCState s2) throws EvalException;
+
+	boolean hasStateOrActionConstraints();
 
 	/**
 	   * This method determines if an action is enabled in the given state.
@@ -165,6 +165,15 @@ public interface ITool extends TraceApp {
 
 	String[] getImpliedActNames();
 
+	/**
+	 * @return The name of the root module.
+	 */
+	String getRootName();
+	
+	/**
+	 * @return The file name of the root module which might contain the
+	 *         full or relative path information.
+	 */
 	String getRootFile();
 
 	ModuleNode getRootModule();

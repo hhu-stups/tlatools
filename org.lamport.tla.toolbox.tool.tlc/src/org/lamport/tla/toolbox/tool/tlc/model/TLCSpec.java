@@ -27,8 +27,11 @@
 package org.lamport.tla.toolbox.tool.tlc.model;
 
 import java.util.Collection;
+import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import org.eclipse.core.runtime.CoreException;
@@ -37,10 +40,13 @@ import org.eclipse.debug.core.DebugPlugin;
 import org.eclipse.debug.core.ILaunchConfiguration;
 import org.eclipse.debug.core.ILaunchConfigurationType;
 import org.eclipse.debug.core.ILaunchManager;
+import org.lamport.tla.toolbox.spec.Module;
 import org.lamport.tla.toolbox.spec.Spec;
 import org.lamport.tla.toolbox.tool.tlc.launch.TLCModelLaunchDelegate;
 
+import tla2sany.modanalyzer.ParseUnit;
 import tla2sany.modanalyzer.SpecObj;
+import util.TLAConstants;
 
 /**
  * {@link TLCSpec} is the glue between {@link Spec} and {@link Model}. Why do we
@@ -146,7 +152,7 @@ public class TLCSpec extends Spec {
 		
 	private String getModelNameSuggestion(String proposition) {
 		Model model = getModel(proposition);
-		if (model != null || getProject().getFile(proposition + ".tla").exists()) {
+		if (model != null || getProject().getFile(proposition + TLAConstants.Files.TLA_EXTENSION).exists()) {
 			String oldNumber = proposition.substring(proposition.lastIndexOf("_") + 1);
 			int number = Integer.parseInt(oldNumber) + 1;
 			proposition = proposition.substring(0, proposition.lastIndexOf("_") + 1);
@@ -176,5 +182,15 @@ public class TLCSpec extends Spec {
 			return getModelNameSuggestion(model.getName());
 		}
 		return modelName + "_Copy";
+	}
+	
+	public Set<Module> getModulesSANY() {
+		final Set<Module> s = new HashSet<>();
+        Enumeration<String> enumerate = spec.getRootModule().parseUnitContext.keys();
+        while (enumerate.hasMoreElements()) {
+            ParseUnit parseUnit = (ParseUnit) spec.getRootModule().parseUnitContext.get(enumerate.nextElement());
+            s.add(new Module(parseUnit));
+        }
+        return s;
 	}
 }

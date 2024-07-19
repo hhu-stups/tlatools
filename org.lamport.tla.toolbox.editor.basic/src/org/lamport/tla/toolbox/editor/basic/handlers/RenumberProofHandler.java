@@ -22,9 +22,10 @@ import org.eclipse.swt.widgets.Shell;
 import org.lamport.tla.toolbox.Activator;
 import org.lamport.tla.toolbox.editor.basic.TLAEditor;
 import org.lamport.tla.toolbox.editor.basic.util.EditorUtil;
+import org.lamport.tla.toolbox.spec.Spec;
+import org.lamport.tla.toolbox.spec.parser.IParseConstants;
 import org.lamport.tla.toolbox.ui.preference.EditorPreferencePage;
 import org.lamport.tla.toolbox.util.AdapterFactory;
-import org.lamport.tla.toolbox.util.StringHelper;
 import org.lamport.tla.toolbox.util.UIHelper;
 
 import tla2sany.semantic.DefStepNode;
@@ -36,6 +37,7 @@ import tla2sany.semantic.ProofNode;
 import tla2sany.semantic.TheoremNode;
 import tla2sany.semantic.UseOrHideNode;
 import tla2sany.st.Location;
+import util.StringHelper;
 import util.UniqueString;
 
 /**
@@ -398,15 +400,16 @@ public class RenumberProofHandler extends AbstractHandler implements IHandler
         return null;
     }
 
-    /* Disables or enables the command depending on whether the 
-     * cursor is in a step that has a non-leaf proof.  
-     * (non-Javadoc)
-     * @see org.eclipse.core.commands.AbstractHandler#setEnabled(java.lang.Object)
+    /**
+     * Disables or enables the command depending on both whether the cursor is in a step that has a
+     * 	non-leaf proof, and whether the spec has been parsed. (https://github.com/tlaplus/tlaplus/issues/243)
      */
-    public void setEnabled(Object context)
-    {
-        setBaseEnabled(setFields(false));
-    }
+    @Override
+	public void setEnabled(Object context) {
+		final Spec spec = Activator.getSpecManager().getSpecLoaded();
+
+		setBaseEnabled(setFields(false) && (spec.getStatus() == IParseConstants.PARSED));
+	}
 
     /*
      * This method started out as code within execute to set the fields it

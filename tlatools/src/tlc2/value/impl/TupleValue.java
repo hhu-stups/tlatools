@@ -7,6 +7,7 @@
 package tlc2.value.impl;
 
 import java.io.IOException;
+import java.util.Map;
 
 import tlc2.output.EC;
 import tlc2.output.MP;
@@ -19,12 +20,14 @@ import tlc2.value.ITupleValue;
 import tlc2.value.IValue;
 import tlc2.value.IValueInputStream;
 import tlc2.value.IValueOutputStream;
+import tlc2.value.ValueInputStream;
 import tlc2.value.Values;
 import util.Assert;
+import util.UniqueString;
 
 public class TupleValue extends Value implements Applicable, ITupleValue {
   public final Value[] elems;          // the elements of this tuple.
-  public final static TupleValue EmptyTuple = new TupleValue(new Value[0]);
+  public static final TupleValue EmptyTuple = new TupleValue(new Value[0]);
 
   /* Constructor */
   public TupleValue(Value[] elems) { this.elems = elems; }
@@ -45,16 +48,20 @@ public class TupleValue extends Value implements Applicable, ITupleValue {
 	  this.cm = cm;
   }
 
+  @Override
   public IValue getElem(int idx) {
 	  return elems[idx];
   }
   
+  @Override
   public IValue[] getElems() {
 	  return elems;
   }
   
+  @Override
   public final byte getKind() { return TUPLEVALUE; }
 
+  @Override
   public final int compareTo(Object obj) {
     try {
       TupleValue tv = obj instanceof Value ? (TupleValue) ((Value)obj).toTuple() : null;
@@ -100,6 +107,7 @@ public class TupleValue extends Value implements Applicable, ITupleValue {
     }
   }
 
+  @Override
   public final boolean member(Value elem) {
     try {
       Assert.fail("Attempted to check set membership in a tuple value.");
@@ -111,8 +119,10 @@ public class TupleValue extends Value implements Applicable, ITupleValue {
     }
   }
 
+  @Override
   public final boolean isFinite() { return true; }
 
+  @Override
   public final Value apply(Value arg, int control) {
     try {
       if (!(arg instanceof IntValue)) {
@@ -131,6 +141,7 @@ public class TupleValue extends Value implements Applicable, ITupleValue {
     }
   }
 
+  @Override
   public final Value apply(Value[] args, int control) {
     try {
       if (args.length != 1) {
@@ -144,6 +155,7 @@ public class TupleValue extends Value implements Applicable, ITupleValue {
     }
   }
 
+  @Override
   public final Value select(Value arg) {
     try {
       if (!(arg instanceof IntValue)) {
@@ -162,6 +174,7 @@ public class TupleValue extends Value implements Applicable, ITupleValue {
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept ex) {
     try {
       if (ex.idx < ex.path.length) {
@@ -189,6 +202,7 @@ public class TupleValue extends Value implements Applicable, ITupleValue {
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept[] exs) {
     try {
       Value val = this;
@@ -203,6 +217,7 @@ public class TupleValue extends Value implements Applicable, ITupleValue {
     }
   }
 
+  @Override
   public final Value getDomain() {
     try {
       return new IntervalValue(1, this.size());
@@ -213,6 +228,7 @@ public class TupleValue extends Value implements Applicable, ITupleValue {
     }
   }
 
+  @Override
   public final int size() { return this.elems.length; }
 
   @Override
@@ -246,10 +262,13 @@ public class TupleValue extends Value implements Applicable, ITupleValue {
 	}
 
   /* The normalization of the value. */
+  @Override
   public final boolean isNormalized() { return true; }
 
+  @Override
   public final Value normalize() { /*nop*/return this; }
 
+  @Override
   public final boolean isDefined() {
     try {
       boolean defined = true;
@@ -264,6 +283,7 @@ public class TupleValue extends Value implements Applicable, ITupleValue {
     }
   }
 
+  @Override
   public final IValue deepCopy() {
     try {
     	Value[] vals = new Value[this.elems.length];
@@ -278,6 +298,7 @@ public class TupleValue extends Value implements Applicable, ITupleValue {
     }
   }
 
+  @Override
   public final boolean assignable(Value val) {
     try {
       boolean canAssign = ((val instanceof TupleValue) &&
@@ -311,6 +332,7 @@ public class TupleValue extends Value implements Applicable, ITupleValue {
 	}
 
   /* The fingerprint method: tuples are functions. */
+  @Override
   public final long fingerPrint(long fp) {
     try {
       int len = this.elems.length;
@@ -329,6 +351,7 @@ public class TupleValue extends Value implements Applicable, ITupleValue {
     }
   }
 
+  @Override
   public final IValue permute(IMVPerm perm) {
     try {
     	Value[] vals = new Value[this.elems.length];
@@ -349,6 +372,7 @@ public class TupleValue extends Value implements Applicable, ITupleValue {
   }
 
   /* The string representation of this value. */
+  @Override
   public final StringBuffer toString(StringBuffer sb, int offset, boolean swallow) {
     try {
       sb.append("<<");
@@ -375,6 +399,18 @@ public class TupleValue extends Value implements Applicable, ITupleValue {
 		final Value[] elems = new Value[len];
 		for (int i = 0; i < len; i++) {
 			elems[i] = (Value) vos.read();
+		}
+		final Value res = new TupleValue(elems);
+		vos.assign(res, index);
+		return res;
+	}
+
+	public static IValue createFrom(final ValueInputStream vos, final Map<String, UniqueString> tbl) throws IOException {
+		final int index = vos.getIndex();
+		final int len = vos.readNat();
+		final Value[] elems = new Value[len];
+		for (int i = 0; i < len; i++) {
+			elems[i] = (Value) vos.read(tbl);
 		}
 		final Value res = new TupleValue(elems);
 		vos.assign(res, index);

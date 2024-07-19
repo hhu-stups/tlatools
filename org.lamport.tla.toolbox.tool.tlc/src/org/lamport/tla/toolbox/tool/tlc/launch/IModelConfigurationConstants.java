@@ -3,8 +3,7 @@ package org.lamport.tla.toolbox.tool.tlc.launch;
 /**
  * @author Simon Zambrovski
  */
-public interface IModelConfigurationConstants extends IConfigurationConstants
-{
+public interface IModelConfigurationConstants extends IConfigurationConstants {
     /**
      * Comments
      */
@@ -89,20 +88,9 @@ public interface IModelConfigurationConstants extends IConfigurationConstants
      */
     public static final String MODEL_EXPRESSION_EVAL = "modelExpressionEval";
     /**
-     * Conjunction of variable values in the initial state of a trace
-     * Should only include spec variables, not trace expression variables.
+     * Extra modules to extended by TE.tla.
      */
-    public static final String TRACE_EXPLORE_INIT = "traceExploreInit";
-    /**
-     * Disjunction of actions used for trace exploration without the trace
-     * expression variables.
-     */
-    public static final String TRACE_EXPLORE_NEXT = "traceExploreNext";
-    /**
-     * expressions to be evaluated at each state of the trace
-     * when the trace explorer is run
-     */
-    public static final String TRACE_EXPLORE_EXPRESSIONS = "traceExploreExpressions";
+    public static final String TRACE_EXPLORE_EXTENDS = "traceExploreExtends";
     
     /**
      * a bitwise OR'd value representing which of the closeable tabs should be open on a model editor opening
@@ -115,5 +103,18 @@ public interface IModelConfigurationConstants extends IConfigurationConstants
 	public static final int EDITOR_OPEN_TAB_NONE = 0;
 	public static final int EDITOR_OPEN_TAB_ADVANCED_MODEL = 1 << 1;
 	public static final int EDITOR_OPEN_TAB_ADVANCED_TLC = 1 << 2;
-
+	public static final int EDITOR_OPEN_TAB_RESULTS = 1 << 3;
+    
+    /**
+     * an integer representing the model version - we'll probably use YYYYMMDD
+     */
+    public static final String MODEL_VERSION = "modelVersion";
+    
+    /**
+     * values to use with the {@link #MODEL_VERSION} attribute
+     */
+    public static final int VERSION_160 = 20190710;
+    // this value needn't be cemented before release, as long as kept consistently increasing during development
+    public static final int VERSION_161 = 20191005;
+    
 }

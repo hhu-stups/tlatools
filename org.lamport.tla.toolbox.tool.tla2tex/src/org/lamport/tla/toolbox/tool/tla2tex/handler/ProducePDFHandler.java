@@ -13,8 +13,13 @@ import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.preference.IPreferenceStore;
+import org.eclipse.jface.preference.PreferenceDialog;
+import org.eclipse.swt.SWT;
+import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.IEditorInput;
 import org.eclipse.ui.IFileEditorInput;
+import org.eclipse.ui.PlatformUI;
+import org.eclipse.ui.dialogs.PreferencesUtil;
 import org.lamport.tla.toolbox.tool.tla2tex.TLA2TeXActivator;
 import org.lamport.tla.toolbox.tool.tla2tex.preference.ITLA2TeXPreferenceConstants;
 import org.lamport.tla.toolbox.ui.handler.SaveDirtyEditorAbstractHandler;
@@ -42,27 +47,30 @@ public class ProducePDFHandler extends SaveDirtyEditorAbstractHandler {
 	 * org.eclipse.core.commands.AbstractHandler#execute(org.eclipse.core.commands
 	 * .ExecutionEvent)
 	 */
-	public Object execute(ExecutionEvent event) {
+	public Object execute(final ExecutionEvent event) {
 		if (!saveDirtyEditor(event)) {
 			return null;
 		}
 
-		boolean useEmbeddedViewer = TLA2TeXActivator.getDefault()
-				.getPreferenceStore()
-				.getBoolean(ITLA2TeXPreferenceConstants.EMBEDDED_VIEWER);
+		final IPreferenceStore preferenceStore = TLA2TeXActivator.getDefault().getPreferenceStore();
+		final boolean useEmbeddedViewer = preferenceStore.getBoolean(ITLA2TeXPreferenceConstants.EMBEDDED_VIEWER);
+		final boolean osHandlesPDF = preferenceStore.getBoolean(ITLA2TeXPreferenceConstants.HAVE_OS_OPEN_PDF);
 		
-		IEditorInput editorInput = activeEditor.getEditorInput();
+		final IEditorInput editorInput = activeEditor.getEditorInput();
 		if (editorInput instanceof IFileEditorInput) {
-			final IResource fileToTranslate = ((IFileEditorInput) editorInput)
-					.getFile();
-			if (fileToTranslate != null
-					&& ResourceHelper.isModule(fileToTranslate)) {
-				if (useEmbeddedViewer) {
-					runPDFJob(new EmbeddedPDFViewerRunnable(this, activeEditor.getSite(), fileToTranslate),
-							fileToTranslate);
+			final IResource fileToTranslate = ((IFileEditorInput) editorInput).getFile();
+			if ((fileToTranslate != null) && ResourceHelper.isModule(fileToTranslate)) {
+				final AbstractPDFViewerRunnable pdfViewer;
+				
+				if (osHandlesPDF) {
+					pdfViewer = new OperatingSystemPDFRunnable(this, activeEditor.getSite(), fileToTranslate);
+				} else if (useEmbeddedViewer) {
+					pdfViewer = new EmbeddedPDFViewerRunnable(this, activeEditor.getSite(), fileToTranslate);
 				} else {
-					runPDFJob(new StandalonePDFViewerRunnable(this, activeEditor.getSite(), fileToTranslate), fileToTranslate);
+					pdfViewer = new StandalonePDFViewerRunnable(this, activeEditor.getSite(), fileToTranslate);
 				}
+				
+				runPDFJob(pdfViewer, fileToTranslate);
 			}
 		}
 
@@ -88,18 +96,12 @@ public class ProducePDFHandler extends SaveDirtyEditorAbstractHandler {
 	 * @param tlaEditorAndPDFViewer
 	 * @param fileToTranslate
 	 */
-	void runPDFJob(final AbstractPDFViewerRunnable runnable, 
-			final IResource fileToTranslate) {
+	void runPDFJob(final AbstractPDFViewerRunnable runnable, final IResource fileToTranslate) {
 		Job tla2TexJob = new WorkspaceJob("Produce PDF") {
-
 			public IStatus runInWorkspace(final IProgressMonitor monitor) {
-
 				try {
-
-					Vector<String> tla2texArgs = new Vector<String>();
-
-					IPreferenceStore preferenceStore = TLA2TeXActivator
-							.getDefault().getPreferenceStore();
+					final Vector<String> tla2texArgs = new Vector<String>();
+					final IPreferenceStore preferenceStore = TLA2TeXActivator.getDefault().getPreferenceStore();
 
 					if (preferenceStore
 							.getBoolean(ITLA2TeXPreferenceConstants.SHADE_COMMENTS)) {
@@ -175,55 +177,44 @@ public class ProducePDFHandler extends SaveDirtyEditorAbstractHandler {
 						// to the user.
 						UIHelper.runUISync(runnable);
 					} else {
-						UIHelper.runUISync(new Runnable() {
-
-							public void run() {
-								MessageDialog
-										.openError(UIHelper.getShellProvider()
-												.getShell(),
-												"PDF file not found",
-												"Could not locate a pdf file for the module.");
-							}
-						});
+						final Runnable r = () -> {
+							MessageDialog.openError(UIHelper.getShellProvider().getShell(), "PDF file not found",
+									"Could not locate a pdf file for the module.");
+						};
+						
+						UIHelper.runUIAsync(r);
 					}
-				} catch (final TLA2TexException e) {
-					TLA2TeXActivator.getDefault()
-							.logError(
-									"Error while producing pdf file: "
-											+ e.getMessage(), e);
-					UIHelper.runUISync(new Runnable() {
-
-						public void run() {
-							MessageDialog.openError(UIHelper.getShellProvider()
-									.getShell(), "PDF Production Error", e
-									.getMessage());
-						}
-					});
-
-				} catch (final CoreException e) {
-					TLA2TeXActivator.getDefault()
-					.logError(
-							"Error while producing pdf file: "
-									+ e.getMessage(), e);
-					UIHelper.runUISync(new Runnable() {
-
-						public void run() {
-							MessageDialog.openError(UIHelper.getShellProvider()
-									.getShell(), "PDF Production Error", e
-									.getMessage());
-						}
-					});
-				} finally {
-
+				} catch (final TLA2TexException | CoreException e) {
+					handleJobException(e);
 				}
 				return Status.OK_STATUS;
 			}
-
 		};
 
 		// setUser(false) to not popup a modal dialog on each PDF generation.
 		tla2TexJob.setUser(false);
 		tla2TexJob.setPriority(Job.LONG);
 		tla2TexJob.schedule();
+	}
+	
+	private void handleJobException(final Exception e) {
+		TLA2TeXActivator.getDefault().logError("Error while producing pdf file: " + e.getMessage(), e);
+
+		final Runnable r = () -> {
+			final Shell s = PlatformUI.getWorkbench().getDisplay().getActiveShell();
+			final int response = MessageDialog.open(MessageDialog.ERROR, s, "PDF Production Problem",
+					"The following error was encountered while attempting to generate the PDF - perhaps you "
+						+ "have not set a full path to pdflatex in the preferences?\n\n" + e.getMessage(),
+					SWT.NONE, "Open Preferences", "Ok");
+			
+			if (response == 0) {
+				final PreferenceDialog dialog = PreferencesUtil.createPreferenceDialogOn(s, 
+						"toolbox.tool.tla2tex.preference.TLA2TeXPreferencePage",
+						new String[] { "toolbox.tool.tla2tex.preference.TLA2TeXPreferencePage" }, null);
+				dialog.open();
+			}
+		};
+		
+		UIHelper.runUIAsync(r);
 	}
 }

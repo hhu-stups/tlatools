@@ -5,7 +5,7 @@
  *   expands definitions from the instantiated module by replacing the parameter by
  *   the text of the INSTANCE statement.  The problem is manifest in a bad argument
  *   passed to substInNodeToInstanceSub, and that manifestation is explained in comments
- *   starting around line 5333.  (Search for "22 March 2019".)  There are also comments containing 
+ *   starting around line 5342.  (Search for "22 March 2019".)  There are also comments containing 
  *   and explaining an unsuccessful attempt to fix the problem.
  * 
  * CHANGE MADE BY LL on 18 March 2019
@@ -17,6 +17,16 @@
  *   the error.  I left a couple of NewDecompose... in comments that seemed to accompany
  *   commented-out code from that file.
  *     
+ * BUG DISCOVERED in August 2019 
+ *   If a definition in an instantiated module contains an expression like 2 ++ 2
+ *   and the command expands that definition, it produces an expansion that might
+ *   contain the expression 2 I!++ 2 which is illegal, instead of the correct
+ *   expansion I++(2, 2).  This may be difficult to fix.  However, it shouldn't
+ *   be hard to fix what will probably be the most common case:  If the expression
+ *   is 2 + 2, where + is the operator imported from the Standard Module Integers or
+ *   Naturals, and that same + is imported into the current module, then I!+ is
+ *   equivalent to +, so the current 2 I!+ 2 can be changed to 2 + 2.
+ * 
  * IN MIDDLE OF
  * Fixing bug on line 428 of Test.tla.  Will try the approach of adding
  * a global Renaming to the decomposition state to keep track of all renaming in
@@ -524,7 +534,6 @@ import org.lamport.tla.toolbox.spec.parser.ModuleParserLauncher;
 import org.lamport.tla.toolbox.spec.parser.ParseResult;
 import org.lamport.tla.toolbox.util.HelpButton;
 import org.lamport.tla.toolbox.util.ResourceHelper;
-import org.lamport.tla.toolbox.util.StringHelper;
 import org.lamport.tla.toolbox.util.StringSet;
 import org.lamport.tla.toolbox.util.UIHelper;
 
@@ -552,6 +561,8 @@ import tla2sany.semantic.SubstInNode;
 import tla2sany.semantic.SymbolNode;
 import tla2sany.semantic.TheoremNode;
 import tla2sany.st.Location;
+import util.StringHelper;
+import util.TLAConstants;
 import util.UniqueString;
 
 public class DecomposeProofHandler extends AbstractHandler implements
@@ -1951,6 +1962,16 @@ public class DecomposeProofHandler extends AbstractHandler implements
         UIHelper.runUISync(runnable);
         return null;
     }
+
+    /**
+     * Enabled state is based upon whether the spec has been parsed. (https://github.com/tlaplus/tlaplus/issues/243)
+     */
+    @Override
+	public void setEnabled(Object context) {
+		final Spec spec = Activator.getSpecManager().getSpecLoaded();
+
+		setBaseEnabled(spec.getStatus() == IParseConstants.PARSED);
+	}
 
     /**
      * The Runnable class extension for running the realExecute() method.
@@ -8550,7 +8571,7 @@ public class DecomposeProofHandler extends AbstractHandler implements
                 try {
                     if (references[i].isDirty()
                             && references[i].getEditorInput().getName()
-                                    .endsWith(".tla")) {
+                                    .endsWith(TLAConstants.Files.TLA_EXTENSION)) {
                         dirtyEditors.add(references[i]);
                     }
                 } catch (PartInitException e) {

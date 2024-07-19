@@ -12,6 +12,7 @@ import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.output.OutputCollector;
 import tlc2.tool.coverage.CostModelCreator;
+import tlc2.tool.impl.FastTool;
 import tlc2.tool.liveness.AddAndCheckLiveCheck;
 import tlc2.tool.liveness.ILiveCheck;
 import tlc2.tool.liveness.LiveCheck;
@@ -103,6 +104,9 @@ public abstract class AbstractChecker
         	if (tool.hasSymmetry()) {
         		// raise warning...
 				MP.printWarning(EC.TLC_FEATURE_UNSUPPORTED_LIVENESS_SYMMETRY);
+        	}
+        	if (tool.hasStateOrActionConstraints()) {
+				MP.printWarning(EC.TLC_FEATURE_LIVENESS_CONSTRAINTS);
         	}
             // Initialization for liveness checking:
             report("initializing liveness checking");

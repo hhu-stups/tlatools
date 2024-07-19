@@ -8,6 +8,7 @@ package tlc2.value.impl;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Map;
 
 import tlc2.tool.EvalControl;
 import tlc2.tool.FingerprintException;
@@ -18,8 +19,10 @@ import tlc2.value.IMVPerm;
 import tlc2.value.IValue;
 import tlc2.value.IValueInputStream;
 import tlc2.value.IValueOutputStream;
+import tlc2.value.ValueInputStream;
 import tlc2.value.Values;
 import util.Assert;
+import util.TLAConstants;
 import util.UniqueString;
 
 public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
@@ -28,7 +31,7 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
   public final Value[] values;
   private boolean isNorm;
   private int[] indexTbl;  // speed up function application
-  public final static Value EmptyFcn = new FcnRcdValue(new Value[0], new Value[0], true);
+  public static final Value EmptyFcn = new FcnRcdValue(new Value[0], new Value[0], true);
 
   /* Constructor */
   public FcnRcdValue(Value[] domain, Value[] values, boolean isNorm) {
@@ -74,6 +77,7 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
 	  this.cm = cm;
   }
 
+  @Override
   public final byte getKind() { return FCNRCDVALUE; }
 
   /* We create an index only when the domain is not very small. */
@@ -115,6 +119,7 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
     }
   }
 
+  @Override
   public final int compareTo(Object obj) {
     try {
 
@@ -281,6 +286,7 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
     }
   }
 
+  @Override
   public final boolean member(Value elem) {
     try {
       Assert.fail("Attempted to check if the value:\n" + Values.ppr(elem.toString()) +
@@ -293,8 +299,10 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
     }
   }
 
+  @Override
   public final boolean isFinite() { return true; }
 
+  @Override
   public final Value apply(Value arg, int control) {
     try {
     	Value result = this.select(arg);
@@ -312,6 +320,7 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
   }
 
   /* This one does not seem to be needed anymore.  */
+  @Override
   public final Value apply(Value[] args, int control) {
     try {
       return this.apply(new TupleValue(args), EvalControl.Clear);
@@ -322,6 +331,7 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
     }
   }
 
+  @Override
   public final Value select(Value arg) {
     try {
 
@@ -410,6 +420,7 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept ex) {
     try {
 
@@ -460,6 +471,7 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept[] exs) {
     try {
       Value res = this;
@@ -474,6 +486,7 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
     }
   }
 
+  @Override
   public final Value getDomain() {
     try {
       if (this.intv != null) {
@@ -500,6 +513,7 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
 	  }
   }
   
+  @Override
   public final int size() {
     try {
       this.normalize();
@@ -509,6 +523,16 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
       if (hasSource()) { throw FingerprintException.getNewHead(this, e); }
       else { throw e; }
     }
+  }
+  
+  /**
+   * {@link #size()} first normalizes, destructively, this instance; for inspections on the size without normalization
+   * 	use this method.
+   * 
+   * @return
+   */
+  public int nonNormalizedSize() {
+	  return values.length;
   }
 
   @Override
@@ -555,9 +579,11 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
 	}
   
   /* Return true iff this function is in normal form. */
+  @Override
   public final boolean isNormalized() { return this.isNorm; }
 
   /* This method normalizes (destructively) this function. */
+  @Override
   public final Value normalize() {
     try {
 
@@ -620,6 +646,7 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
 	    }
   }
 
+  @Override
   public final boolean isDefined() {
     try {
 
@@ -641,6 +668,7 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
     }
   }
 
+  @Override
   public final IValue deepCopy() {
     try {
     	Value[] vals = new Value[this.values.length];
@@ -655,6 +683,7 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
     }
   }
 
+  @Override
   public final boolean assignable(Value val) {
     try {
       boolean canAssign = ((val instanceof FcnRcdValue) &&
@@ -702,6 +731,7 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
 	}
 
   /* The fingerprint method.  */
+  @Override
   public final long fingerPrint(long fp) {
     try {
       this.normalize();
@@ -729,6 +759,7 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
     }
   }
 
+  @Override
   public final IValue permute(IMVPerm perm) {
     try {
 
@@ -815,6 +846,7 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
   }
 
   /* The string representation of the value.  */
+  @Override
   public final StringBuffer toString(StringBuffer sb, int offset, boolean swallow) {
     try {
 
@@ -824,12 +856,12 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
       }
       else if (this.isRcd()) {
         sb.append("[");
-        sb.append(((StringValue)this.domain[0]).val + " |-> ");
+        sb.append(((StringValue)this.domain[0]).val + TLAConstants.RECORD_ARROW);
         sb = this.values[0].toString(sb, offset, swallow);
 
         for (int i = 1; i < len; i++) {
           sb.append(", ");
-          sb.append(((StringValue)this.domain[i]).val + " |-> ");
+          sb.append(((StringValue)this.domain[i]).val + TLAConstants.RECORD_ARROW);
           sb = this.values[i].toString(sb, offset, swallow);
         }
         sb.append("]");
@@ -887,6 +919,32 @@ public class FcnRcdValue extends Value implements Applicable, IFcnRcdValue {
 			for (int i = 0; i < len; i++) {
 				dvals[i] = (Value) vos.read();
 				rvals[i] = (Value) vos.read();
+			}
+			res = new FcnRcdValue(dvals, rvals, (info == 1));
+		}
+		vos.assign(res, index);
+		return res;
+	}
+
+	public static IValue createFrom(final ValueInputStream vos, final Map<String, UniqueString> tbl) throws IOException {
+		final int index = vos.getIndex();
+		final int len = vos.readNat();
+		final int info = vos.readByte();
+		Value res;
+		final Value[] rvals = new Value[len];
+		if (info == 0) {
+			final int low = vos.readInt();
+			final int high = vos.readInt();
+			for (int i = 0; i < len; i++) {
+				rvals[i] = (Value) vos.read(tbl);
+			}
+			final IntervalValue intv = new IntervalValue(low, high);
+			res = new FcnRcdValue(intv, rvals);
+		} else {
+			final Value[] dvals = new Value[len];
+			for (int i = 0; i < len; i++) {
+				dvals[i] = (Value) vos.read(tbl);
+				rvals[i] = (Value) vos.read(tbl);
 			}
 			res = new FcnRcdValue(dvals, rvals, (info == 1));
 		}

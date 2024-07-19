@@ -15,7 +15,7 @@ public class StateWriter implements IStateWriter
 {
     protected final PrintWriter writer;
     protected int stateNum;
-	private String fname;
+    protected String fname;
 
     public StateWriter(String fname) throws IOException
     {
@@ -62,14 +62,14 @@ public class StateWriter implements IStateWriter
     public synchronized void writeState(final TLCState state, final TLCState successor, final boolean successorStateIsNew)
     {
     	if (successorStateIsNew) {
-    		this.writeState(state);
+    		this.writeState(successor);
     	}
     }
 
     public synchronized void writeState(final TLCState state, final TLCState successor, final boolean successorStateIsNew, Action action)
     {
     	if (successorStateIsNew) {
-    		this.writeState(state);
+    		this.writeState(successor);
     	}
     }
     
@@ -78,7 +78,7 @@ public class StateWriter implements IStateWriter
      */
     public void writeState(TLCState state, TLCState successor, final boolean successorStateIsNew, final Visualization visualization) {
     	if (successorStateIsNew) {
-    		this.writeState(state);
+    		this.writeState(successor);
     	}
     }
     
@@ -107,5 +107,10 @@ public class StateWriter implements IStateWriter
     	if (successorStateIsNew) {
     		this.writeState(state);
     	}
+	}
+
+	@Override
+	public void snapshot() throws IOException {
+		// No-op unless DotStateWriter.
 	}
 }

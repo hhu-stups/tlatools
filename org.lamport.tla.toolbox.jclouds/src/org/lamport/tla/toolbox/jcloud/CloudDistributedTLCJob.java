@@ -32,10 +32,12 @@ import static org.jclouds.compute.predicates.NodePredicates.inGroup;
 import static org.jclouds.scriptbuilder.domain.Statements.exec;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Map;
@@ -82,8 +84,11 @@ import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+import com.google.common.io.ByteStreams;
 import com.google.common.io.Files;
 import com.google.inject.AbstractModule;
+
+import util.TLAConstants;
 
 /*
  * TODO
@@ -110,6 +115,7 @@ public class CloudDistributedTLCJob extends Job {
 	private final Properties props;
 	private final CloudTLCInstanceParameters params;
 	private boolean isCLI = false;
+	// Azul VM comes with JFR support. This can thus be safely activated.
 	private boolean doJfr = false;
 
 	public CloudDistributedTLCJob(String aName, File aModelFolder,
@@ -179,6 +185,10 @@ public class CloudDistributedTLCJob extends Job {
 
 			// Create compute environment in the cloud and inject an ssh
 			// implementation. ssh is our means of communicating with the node.
+			// In order to debug jclouds on the command-line or from the Toolbox:
+			// a) Make sure command-line also uses SLF4JLogginModule by hacking the build.
+			// b) Append -Dorg.slf4j.simpleLogger.defaultLogLevel=debug to toolbox/toolbox.ini
+			// c) Delete toolbox/plugins/slf4j.nop_1.7.25.jar to make sure slf4j.simple gets loaded.
 			final Iterable<AbstractModule> modules = ImmutableSet.<AbstractModule>of(new SshjSshClientModule(),
 					isCLI ? new ConsoleLoggingModule() : new SLF4JLoggingModule());
 
@@ -243,7 +253,13 @@ public class CloudDistributedTLCJob extends Job {
 				return Status.CANCEL_STATUS;
 			}
 
-			final String tlcMasterCommand = " sudo shutdown -c && rm -rf /mnt/tlc/* && " // Cancel and remove any pending shutdown and leftovers from previous runs.
+			final String tlcMasterCommand = " sudo shutdown -c && " // Cancel a pending shutdown.
+					// In case the provision step didn't run (e.g. because we run a custom VM image), /mnt/tlc does not
+					// exist because it is on ephemeral storage. For the subsequent commands to work, create it and make
+					// it writeable.
+					+ "sudo mkdir -p /mnt/tlc && sudo chmod 777 /mnt/tlc/ && "
+					// Remove any leftovers from previous runs.
+					+ "rm -rf /mnt/tlc/* && "
 					+ "cd /mnt/tlc/ && "
 					// Decompress tla2tools.pack.gz
 					+ "unpack200 /tmp/tla2tools.pack.gz /tmp/tla2tools.jar"
@@ -279,9 +295,18 @@ public class CloudDistributedTLCJob extends Job {
 						+ "-Dcom.sun.management.jmxremote.authenticate=false "
 						// TLC tuning options
 						+ params.getJavaSystemProperties() + " "
-						+ "-jar /tmp/tla2tools.jar " 
+						+ "-jar /tmp/tla2tools.jar "
+						// Explicitly tell TLC to create states/ on ephemeral storage. This is redundant
+						// because we cd into /mnt/tlc above, but when the command is manually executed,
+						// this might not be the case (related to java.io.tmpdir).
+						+ "-metadir /mnt/tlc/ "
 						+ params.getTLCParameters()
-						+ " && "
+						// Unless TLC's exit value is 1 or 255 (see EC.java),
+						// run the shutdown sequence. In other words, ignore
+						// all non-zero exit values because the represent 
+						// regular termination in which case we can safely
+						// terminate the cloud instance.
+						+ " ; [[ $? -ne 255 && $? -ne 1 ]] && "
 					// Let the machine power down immediately after
 					// finishing model checking to cut costs. However,
 					// do not shut down (hence "&&") when TLC finished
@@ -393,18 +418,19 @@ public class CloudDistributedTLCJob extends Job {
 			// not necessarily require an email to be sent).
 			final ExecChannel execChannel = sshClient.execChannel(
 					// Wait for the java process to start before tail'ing its MC.out file below.
-					// This obviously open the door to blocking indefinitely if the java/TLC process
+					// This obviously opens the door to blocking indefinitely if the java/TLC process
 					// terminates before until starts.
 					"until pids=$(pgrep -f \"^java .* -jar /tmp/tla2tools.jar\"); do sleep 1; done"
 					+ " && "
 					// Guarantee the MC.out file exists in case the java process has not written to
 					// it yet. Otherwise tail might terminate immediately. touch is idempotent and
 					// thus does not fail when MC.out already exists.
-					+ "touch /mnt/tlc/MC.out"
+					+ "touch /mnt/tlc/" + TLAConstants.Files.MODEL_CHECK_OUTPUT_FILE
 					+ " && "
 					// Read the MC.out file and remain attached for as long as there is a TLC/java
 					// process.
-					+ "tail -q -f -n +1 /mnt/tlc/MC.out --pid $(pgrep -f \"^java .* -jar /tmp/tla2tools.jar\")");
+					+ "tail -q -f -n +1 /mnt/tlc/" + TLAConstants.Files.MODEL_CHECK_OUTPUT_FILE
+					+ " --pid $(pgrep -f \"^java .* -jar /tmp/tla2tools.jar\")");
 			
 			// Communicate result to user
 			monitor.done();
@@ -524,6 +550,13 @@ public class CloudDistributedTLCJob extends Job {
 			if (isCLI) {
 				templateOptions.tags(Arrays.asList("CLI"));
 			}
+			
+			// Overriding login password to be able to login to the cloud instance if
+			// jclouds bootstrapping fails. This is the instances initial root password set
+			// by the cloud provider that jclouds makes the first connection with to
+			// subsequently set up ssh keys... If the setup of ssh keys fails for whatever
+			// reason, this password is the only way to login into the instance.
+			//templateOptions.overrideLoginPassword("8nwc3+r897NR98as37cr589234598");
 			params.mungeTemplateOptions(templateOptions);
 			
             final TemplateBuilder templateBuilder = compute.templateBuilder();
@@ -542,6 +575,11 @@ public class CloudDistributedTLCJob extends Job {
 				return createNodesInGroup;
 			}
 
+			if (!params.isVanillaVMImage()) {
+				// A non-vanilla image is needs no provisioning.
+				return createNodesInGroup;
+			}
+			
 			// Install custom tailored jmx2munin to monitor the TLC process. Can
 			// either monitor standalone tlc2.TLC or TLCServer.
 			monitor.subTask("Provisioning TLC environment on all node(s)");
@@ -636,9 +674,12 @@ public class CloudDistributedTLCJob extends Job {
 							// instance.
 							+ " && "
 							+ "mkdir -p /mnt/tlc/ && chmod 777 /mnt/tlc/ && "
-							+ "ln -s /mnt/tlc/MC.out /var/www/html/MC.out && "
-							+ "ln -s /mnt/tlc/MC.out /var/www/html/MC.txt && " // Microsoft IE and Edge fail to show line breaks correctly unless ".txt" extension.
-							+ "ln -s /mnt/tlc/MC.err /var/www/html/MC.err && "
+							+ "ln -s /mnt/tlc/" + TLAConstants.Files.MODEL_CHECK_OUTPUT_FILE
+									+ " /var/www/html/" + TLAConstants.Files.MODEL_CHECK_OUTPUT_FILE + " && "
+							+ "ln -s /mnt/tlc/" + TLAConstants.Files.MODEL_CHECK_OUTPUT_FILE
+									+ " /var/www/html/MC.txt && " // Microsoft IE and Edge fail to show line breaks correctly unless ".txt" extension.
+							+ "ln -s /mnt/tlc/" + TLAConstants.Files.MODEL_CHECK_ERROR_FILE
+									+ " /var/www/html/" + TLAConstants.Files.MODEL_CHECK_ERROR_FILE + " && "
 							+ "ln -s /mnt/tlc/tlc.jfr /var/www/html/tlc.jfr"),
 					new TemplateOptions().runAsRoot(true).wrapInInitScript(
 							false));			
@@ -740,6 +781,23 @@ public class CloudDistributedTLCJob extends Job {
 		@Override
 	    public InputStream getOutput() {
 			return this.output;
+		}
+		
+		@Override
+		public void getJavaFlightRecording() throws IOException {
+			// Get Java Flight Recording from remote machine and save if to a local file in
+			// the current working directory. We call "cat" because sftclient#get fails with
+			// the old net.schmizz.sshj and an update to the newer com.hierynomus seems 
+			// awful lot of work.
+			final ExecChannel channel = sshClient.execChannel("cat /mnt/tlc/tlc.jfr");
+			final InputStream output = channel.getOutput();
+			final String cwd = Paths.get(".").toAbsolutePath().normalize().toString() + File.separator;
+			final File jfr = new File(cwd + "tlc-" + System.currentTimeMillis() + ".jfr");
+			ByteStreams.copy(output, new FileOutputStream(jfr));
+			if (jfr.length() == 0) {
+				System.err.println("Received empty Java Flight recording. Not creating tlc.jfr file");
+				jfr.delete();
+			}
 		}
 		
 		public void killTLC() {

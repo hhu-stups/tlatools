@@ -3,6 +3,8 @@ package org.lamport.tla.toolbox.editor.basic.tla;
 import java.util.Arrays;
 import java.util.HashSet;
 
+import util.TLAConstants;
+
 /**
  * TLA+ Reserved words
 
@@ -18,8 +20,8 @@ public interface ITLAReserveredWords
     public final static String BY           = "BY";    
     public final static String CASE 		= "CASE";
     public final static String CHOOSE 		= "CHOOSE";
-    public final static String CONSTANT		= "CONSTANT";
-    public final static String CONSTANTS	= "CONSTANTS";
+    public final static String CONSTANT		= TLAConstants.KeyWords.CONSTANT;
+    public final static String CONSTANTS	= TLAConstants.KeyWords.CONSTANTS;
     public final static String COROLLARY    = "COROLLARY";  // Added 16 July 2012 by LL
     public final static String DEF          = "DEF";
     public final static String DEFINE       = "DEFINE";
@@ -61,8 +63,8 @@ public interface ITLAReserveredWords
     public final static String UNCHANGED 	= "UNCHANGED";
     public final static String UNION 		= "UNION";
     public final static String USE          = "USE";
-    public final static String VARIABLE 	= "VARIABLE";
-    public final static String VARIABLES 	= "VARIABLES";
+    public final static String VARIABLE 	= TLAConstants.KeyWords.VARIABLE;
+    public final static String VARIABLES 	= VARIABLE + "S";
     public final static String WF_ 			= "WF_";
     public final static String WITH 		= "WITH";
     public final static String WITNESS      = "WITNESS";
@@ -194,6 +196,6 @@ public interface ITLAReserveredWords
         FALSE
     };
     
-    public final static HashSet ALL_WORDS_SET = new HashSet(Arrays.asList(ALL_WORDS_ARRAY));
+    public final static HashSet<String> ALL_WORDS_SET = new HashSet<>(Arrays.asList(ALL_WORDS_ARRAY));
     
 }

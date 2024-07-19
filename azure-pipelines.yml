@@ -3,6 +3,12 @@
 # Add steps that analyze code, save build artifacts, deploy, and more:
 # https://docs.microsoft.com/azure/devops/pipelines/languages/java
 
+## https://docs.microsoft.com/en-us/azure/devops/pipelines/caching/?view=azure-devops#can-i-clear-a-cache
+variables:
+  MAVEN_CACHE_FOLDER: $(Pipeline.Workspace)/.m2/repository
+  MAVEN_OPTS: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)'
+
+
 jobs:
 
 - job: Linux
@@ -29,7 +35,7 @@ jobs:
   timeoutInMinutes: 0
 
   pool:
-    vmImage: 'vs2017-win2016'
+    vmImage: 'windows-2019'
 
   steps:
   - task: Maven@3
@@ -49,13 +55,13 @@ jobs:
   timeoutInMinutes: 0
 
   pool:
-    vmImage: 'macOS-10.13'
+    vmImage: 'macOS-10.14'
 
   steps:
   - task: Maven@3
     inputs:
       mavenPomFile: 'pom.xml'
-      mavenOptions: '-Xmx3072m -Dmaven.test.skip=true -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn'
+      mavenOptions: '-Xmx3072m -Dtest.skip=true -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn'
       options: '-fae -B'
       javaHomeOption: 'JDKVersion'
       jdkVersionOption: '1.11'

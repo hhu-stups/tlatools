@@ -15,7 +15,7 @@ public class ValueVec implements Cloneable, Serializable {
   private Value [] elementData;
   private int elementCount;
          
-  static private final Value [] empty = new Value [0];
+  private static final Value [] empty = new Value [0];
 
   public ValueVec() { this(10); }
 
@@ -73,6 +73,7 @@ public class ValueVec implements Cloneable, Serializable {
 
   public final int capacity() { return elementData.length; }
 
+  @Override
   public final Object clone() {
     ValueVec v = new ValueVec(this.elementData.length);
 	

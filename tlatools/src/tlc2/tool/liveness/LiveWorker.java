@@ -21,7 +21,6 @@ import tlc2.output.StatePrinter;
 import tlc2.tool.EvalException;
 import tlc2.tool.ITool;
 import tlc2.tool.TLCStateInfo;
-import tlc2.util.IdThread;
 import tlc2.util.IntStack;
 import tlc2.util.LongVec;
 import tlc2.util.MemIntQueue;
@@ -39,7 +38,7 @@ import tlc2.util.statistics.IBucketStatistics;
  * <li>In case of a violation, reconstructs and prints the error trace.</li>
  * </ul>
  */
-public class LiveWorker extends IdThread {
+public class LiveWorker implements Callable<Boolean> {
 
 	/**
 	 * A marker that is pushed onto the dfsStack during SCC depth-first-search
@@ -68,24 +67,30 @@ public class LiveWorker extends IdThread {
 
 	private final ITool tool;
 
+	private final int id;
+
 	public LiveWorker(final ITool tool, int id, int numWorkers, final ILiveCheck liveCheck, final BlockingQueue<ILiveChecker> queue, final boolean finalCheck) {
-		super(id);
+		this.id = id;
 		this.tool = tool;
 		this.numWorkers = numWorkers;
 		this.liveCheck = liveCheck;
 		this.queue = queue;
 		this.isFinalCheck = finalCheck;
-		
-		// Set the name to something more indicative than "Thread-4711".
-		this.setName("TLCLiveWorkerThread-" + String.format("%03d", id));
 	}
 
 	/**
 	 * Returns true iff an error has already been found.
 	 */
-	public static boolean hasErrFound() {
+	private static boolean hasErrFound() {
 		synchronized (workerLock) {
 			return (errFoundByThread != -1);
+		}
+	}
+
+	// True iff this LiveWorker found a liveness violation.zs
+	private static boolean hasErrFound(final int id) {
+		synchronized (workerLock) {
+			return (errFoundByThread == id);
 		}
 	}
 
@@ -99,9 +104,9 @@ public class LiveWorker extends IdThread {
 	private/* static synchronized */boolean setErrFound() {
 		synchronized (workerLock) {
 			if (errFoundByThread == -1) {
-				errFoundByThread = this.myGetId(); // GetId();
+				errFoundByThread = this.id; // GetId();
 				return true;
-			} else if (errFoundByThread == this.myGetId()) { // (* GetId()) {
+			} else if (errFoundByThread == this.id) { // (* GetId()) {
 				return true;
 			}
 			return false;
@@ -197,18 +202,28 @@ public class LiveWorker extends IdThread {
 		final int slen = this.oos.getCheckState().length;
 		final int alen = this.oos.getCheckAction().length;
 		
-		// Tarjan's stack
-		// Append thread id to name for unique disk files during concurrent SCC search 
-		final IntStack dfsStack = getStack(liveCheck.getMetaDir(), "dfs" + this.myGetId());
 		
-		// comStack is only being added to during the deep first search. It is passed
-		// to the checkComponent method while in DFS though. Note that the nodes pushed
-		// onto comStack don't necessarily form a strongly connected component (see
-		// comment above this.checkComponent(...) below for more details).
-		//
-		// See tlc2.tool.liveness.LiveWorker.DetailedFormatter.toString(MemIntStack)
-		// which is useful during debugging.
-		final IntStack comStack = getStack(liveCheck.getMetaDir(), "com" + this.myGetId());
+		// Synchronize all LiveWorker instances to consistently read free
+		// memory. This method is only called during initialization of SCC
+		// search, thus synchronization should not cause significant thread
+		// contention. We want a single LW to successfully allocate both
+		// dfsStack *and* comStack.
+		final IntStack dfsStack;
+		final IntStack comStack;
+		synchronized (LiveWorker.class) {
+			// Tarjan's stack
+			// Append thread id to name for unique disk files during concurrent SCC search
+			dfsStack = getStack(liveCheck.getMetaDir(), "dfs" + this.id);
+			
+			// comStack is only being added to during the deep first search. It is passed
+			// to the checkComponent method while in DFS though. Note that the nodes pushed
+			// onto comStack don't necessarily form a strongly connected component (see
+			// comment above this.checkComponent(...) below for more details).
+			//
+			// See tlc2.tool.liveness.LiveWorker.DetailedFormatter.toString(MemIntStack)
+			// which is useful during debugging.
+			comStack = getStack(liveCheck.getMetaDir(), "com" + this.id);
+		}
 
 		// Generate the SCCs and check if they contain a "bad" cycle.
 		while (nodeQueue.size() > 0) {
@@ -457,16 +472,12 @@ public class LiveWorker extends IdThread {
 	}
 
 	private IntStack getStack(final String metaDir, final String name) throws IOException {
-		// Synchronize all LiveWorker instances to consistently read free
-		// memory. This method is only called during initialization of SCC
-		// search, thus synchronization should not cause significant thread
-		// contention.
-		synchronized (LiveWorker.class) {
-			// It is unlikely that the stacks will fit into memory if the
-			// size of the behavior graph is larger relative to the available
-			// memory. Also take the total number of simultaneously running
-			// workers into account that have to share the available memory
-			// among each other.
+		// It is unlikely that the stacks will fit into memory if the
+		// size of the behavior graph is larger relative to the available
+		// memory. Also take the total number of simultaneously running
+		// workers into account that have to share the available memory
+		// among each other.
+		try {
 			final double freeMemoryInBytes = (Runtime.getRuntime().freeMemory() / (numWorkers * 1d));
 			final long graphSizeInBytes = this.dg.getSizeOnDisk();
 			final double ratio = graphSizeInBytes / freeMemoryInBytes;
@@ -485,6 +496,17 @@ public class LiveWorker extends IdThread {
 			// If the disk graph as a whole fits into memory, do not use a
 			// disk-backed SynchronousDiskIntStack.
 			return new MemIntStack(metaDir, name);
+		} catch (final OutOfMemoryError oom) {
+			System.gc();
+			// If the allocation above failed, be more conservative. If it fails to
+			// allocate even 16mb, TLC will subsequently terminate with a message about insufficient
+			// memory. 
+			final SynchronousDiskIntStack sdis = new SynchronousDiskIntStack(metaDir, name,
+					SynchronousDiskIntStack.BufSize / 2);
+			MP.printWarning(EC.GENERAL,
+					"Liveness checking will be extremely slow because TLC is running low on memory.\n"
+							+ "Try allocating more memory to the Java pool (heap) in future TLC runs.");
+			return sdis;
 		}
 	}
 
@@ -1212,49 +1234,39 @@ public class LiveWorker extends IdThread {
 		return curNode;
 	}
 
-	/* (non-Javadoc)
-	 * @see java.lang.Thread#run()
-	 */
-	public final void run() {
-		try {
-			while (true) {
-				// Use poll() to get the next checker from the queue or null if
-				// there is none. Do *not* block when there are no more checkers
-				// available. Nobody is going to add new checkers to the queue.
-				final ILiveChecker checker = queue.poll();
-				if (checker == null || hasErrFound()) {
-					// Another thread has either found an error (violation of a
-					// liveness property) OR there is no more work (checker) to
-					// be done.
-					break;
-				}
-
-				this.oos = checker.getSolution();
-				this.dg = checker.getDiskGraph();
-				this.dg.createCache();
-				PossibleErrorModel[] pems = this.oos.getPems();
-				for (int i = 0; i < pems.length; i++) {
-					if (!hasErrFound()) {
-						this.pem = pems[i];
-						this.checkSccs(tool);
-					}
-				}
-				this.dg.destroyCache();
-				// Record the size of the disk graph at the time its checked. This
-				// information is later used to decide if it it makes sense to
-				// run the next check on the larger but still *partial* graph.
-				this.dg.recordSize();
-				// If assertions are on (e.g. during unit testing) make sure
-				// that the disk graph's invariants hold.
-				assert this.dg.checkInvariants(oos.getCheckState().length, oos.getCheckAction().length);
+	public final Boolean call() throws IOException, InterruptedException, ExecutionException {
+		while (true) {
+			// Use poll() to get the next checker from the queue or null if
+			// there is none. Do *not* block when there are no more checkers
+			// available. Nobody is going to add new checkers to the queue.
+			final ILiveChecker checker = queue.poll();
+			if (checker == null || hasErrFound()) {
+				// Another thread has either found an error (violation of a
+				// liveness property) OR there is no more work (checker) to
+				// be done.
+				break;
 			}
-		} catch (Exception e) {
-			MP.printError(EC.GENERAL, "checking liveness", e); // LL changed
-			// call 7 April
-			// 2012
-			// Assert.printStack(e);
-			return;
+
+			this.oos = checker.getSolution();
+			this.dg = checker.getDiskGraph();
+			this.dg.createCache();
+			PossibleErrorModel[] pems = this.oos.getPems();
+			for (int i = 0; i < pems.length; i++) {
+				if (!hasErrFound()) {
+					this.pem = pems[i];
+					this.checkSccs(tool);
+				}
+			}
+			this.dg.destroyCache();
+			// Record the size of the disk graph at the time its checked. This
+			// information is later used to decide if it it makes sense to
+			// run the next check on the larger but still *partial* graph.
+			this.dg.recordSize();
+			// If assertions are on (e.g. during unit testing) make sure
+			// that the disk graph's invariants hold.
+			assert this.dg.checkInvariants(oos.getCheckState().length, oos.getCheckAction().length);
 		}
+		return hasErrFound(this.id);
 	}
 
 	public String toDotViz(final long state, final int tidx, TableauNodePtrTable tnpt) throws IOException {

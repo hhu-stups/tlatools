@@ -15,16 +15,17 @@ public interface Enumerable extends IValue {
 		 * The normalized order is the order of elements when a Value gets
 		 * fingerprinted (@see {@link Value#fingerPrint(long)}.
 		 */
-		NORMALIZED;
-	}
+		NORMALIZED
+    }
 	
-  public int size();
-  public boolean member(Value elem);
+  @Override
+  int size();
+  boolean member(Value elem);
   /**
    * Semantics or Enumerable#elements(Ordering#UNDEFINED) 
    */
-  public ValueEnumeration elements();
-  public ValueEnumeration elements(final Ordering ordering);
+  ValueEnumeration elements();
+  ValueEnumeration elements(final Ordering ordering);
   /**
    * Returns a {@link ValueEnumeration} which returns k 
    * {@link IValue}s of all {@link IValue}s returned by 
@@ -32,8 +33,8 @@ public interface Enumerable extends IValue {
    * a randomly chosen subset of all {@link IValue} members of
    * this {@link Enumerable}.
    */
-  public ValueEnumeration elements(final int k);
-  public EnumerableValue getRandomSubset(final int k);
-  public Value isSubsetEq(Value other);
+  ValueEnumeration elements(final int k);
+  EnumerableValue getRandomSubset(final int k);
+  Value isSubsetEq(Value other);
 }
 

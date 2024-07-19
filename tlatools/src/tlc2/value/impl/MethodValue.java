@@ -6,6 +6,8 @@
 
 package tlc2.value.impl;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.reflect.InvocationTargetException;
@@ -25,22 +27,28 @@ import util.Assert.TLCRuntimeException;
 import util.WrongInvocationException;
 
 public class MethodValue extends OpValue implements Applicable {
+
+	public static Value get(final Method md) {
+		return get(md, 0);
+	}
 	
-	public static MethodValue get(final Method md) {
-		final MethodValue mv = new MethodValue(md);
+	public static Value get(final Method md, int minLevel) {
+		final MethodValue mv = new MethodValue(md, minLevel);
 		// Eagerly evaluate the constant operator if possible (zero arity) to only
 		// evaluate once at startup and not during state exploration.
 		final int acnt = md.getParameterTypes().length;
     	final boolean isConstant = (acnt == 0) && Modifier.isFinal(md.getModifiers());
-    	return isConstant ? (MethodValue) mv.apply(Tool.EmptyArgs, EvalControl.Clear) : mv;
+    	return isConstant ? mv.apply(Tool.EmptyArgs, EvalControl.Clear) : mv;
 	}
 	
   private final MethodHandle mh;
   private final Method md;
+  private final int minLevel;
 
   /* Constructor */
-	private MethodValue(final Method md) {
+	private MethodValue(final Method md, final int minLevel) {
 		this.md = md;
+		this.minLevel = minLevel;
 		try {
 			final int parameterCount = this.md.getParameterCount();
 			if (parameterCount > 0) {
@@ -61,8 +69,17 @@ public class MethodValue extends OpValue implements Applicable {
 		}
 	}
 
+  @Override
   public final byte getKind() { return METHODVALUE; }
 
+  @Override
+  public final IValue initialize() {
+	  this.deepNormalize();
+	  // Do not call fingerprint as a MethodValue has no fingerprint.
+	  return this;
+  }
+  
+  @Override
   public final int compareTo(Object obj) {
     try {
       Assert.fail("Attempted to compare operator " + this.toString() +
@@ -87,6 +104,7 @@ public class MethodValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final boolean member(Value elem) {
     try {
       Assert.fail("Attempted to check if the value:\n" + elem == null ? "null" : Values.ppr(elem.toString()) +
@@ -99,6 +117,7 @@ public class MethodValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final boolean isFinite() {
     try {
       Assert.fail("Attempted to check if the operator " + this.toString() +
@@ -111,6 +130,7 @@ public class MethodValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final Value apply(Value arg, int control) {
     try {
       throw new WrongInvocationException("It is a TLC bug: Should use the other apply method.");
@@ -121,6 +141,7 @@ public class MethodValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final Value apply(Value[] args, int control) {
     try {
       Value res = null;
@@ -144,7 +165,15 @@ public class MethodValue extends OpValue implements Applicable {
         	  throw (EvalException) e;
           } else
           {
-              Assert.fail(EC.TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE, new String[]{this.md.toString(), e.getMessage()});
+              String message = e.getMessage();
+              if (message == null) {
+				  // Try to pass some information along (i.e. the full stack-trace) in cases where
+				  // message is null.
+		          final StringWriter sw = new StringWriter();
+            	  e.printStackTrace(new PrintWriter(sw));
+            	  message = sw.toString();
+              }
+			Assert.fail(EC.TLC_MODULE_VALUE_JAVA_METHOD_OVERRIDE, new String[]{this.md.toString(), message});
           }
       }
       return res;
@@ -155,6 +184,7 @@ public class MethodValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final Value select(Value arg) {
     try {
       throw new WrongInvocationException("It is a TLC bug: Attempted to call MethodValue.select().");
@@ -165,6 +195,7 @@ public class MethodValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept ex) {
     try {
       Assert.fail("Attempted to appy EXCEPT construct to the operator " +
@@ -177,6 +208,7 @@ public class MethodValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept[] exs) {
     try {
       Assert.fail("Attempted to apply EXCEPT construct to the operator " +
@@ -189,6 +221,7 @@ public class MethodValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final Value getDomain() {
     try {
       Assert.fail("Attempted to compute the domain of the operator " +
@@ -201,6 +234,7 @@ public class MethodValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final int size() {
     try {
       Assert.fail("Attempted to compute the number of elements in the operator " +
@@ -214,6 +248,7 @@ public class MethodValue extends OpValue implements Applicable {
   }
 
   /* Should never normalize an operator. */
+  @Override
   public final boolean isNormalized() {
     try {
       throw new WrongInvocationException("It is a TLC bug: Attempted to normalize an operator.");
@@ -224,6 +259,7 @@ public class MethodValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final Value normalize() {
     try {
       throw new WrongInvocationException("It is a TLC bug: Attempted to normalize an operator.");
@@ -234,10 +270,13 @@ public class MethodValue extends OpValue implements Applicable {
     }
   }
 
+  @Override
   public final boolean isDefined() { return true; }
 
+  @Override
   public final IValue deepCopy() { return this; }
 
+  @Override
   public final boolean assignable(Value val) {
     try {
       throw new WrongInvocationException("It is a TLC bug: Attempted to initialize an operator.");
@@ -249,6 +288,7 @@ public class MethodValue extends OpValue implements Applicable {
   }
 
   /* String representation of the value.  */
+  @Override
   public final StringBuffer toString(StringBuffer sb, int offset, boolean ignored) {
     try {
       return sb.append("<Java Method: " + this.md + ">");
@@ -258,5 +298,8 @@ public class MethodValue extends OpValue implements Applicable {
       else { throw e; }
     }
   }
-
+  
+  public final int getMinLevel() {
+	  return minLevel;
+  }
 }

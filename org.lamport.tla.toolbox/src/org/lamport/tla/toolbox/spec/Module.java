@@ -27,11 +27,19 @@
 package org.lamport.tla.toolbox.spec;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 import org.eclipse.core.resources.IResource;
 
+import tla2sany.modanalyzer.ParseUnit;
 import tla2sany.semantic.ModuleNode;
 import tlc2.module.BuiltInModuleHelper;
+import util.FilenameToStream.TLAFile;
+import util.NamedInputStream;
+import util.TLAConstants;
 
 /**
  * Representation of a module
@@ -44,13 +52,17 @@ public class Module
     private boolean isRoot = false;
 	private IResource resource;
 
-    public Module(String absoluteFilename)
+	private final ParseUnit parseUnit;
+
+    public Module(ParseUnit parseUnit)
     {
-        file = new File(absoluteFilename);
+        this.file = new File(parseUnit.getNis().sourceFile().getAbsolutePath());
+        this.parseUnit = parseUnit;
     }
 
     public Module(IResource resource) {
-    	this(resource.getLocation().toOSString());
+    	this.file = new File(resource.getLocation().toOSString());
+    	this.parseUnit = null;
     	this.resource = resource;
 	}
 
@@ -96,9 +108,10 @@ public class Module
     public String getModuleName()
     {
         String filename = file.getName();
-        if (filename.toLowerCase().indexOf(".tla") != -1)
+        final int tlaSuffixIndex = filename.toLowerCase().indexOf(TLAConstants.Files.TLA_EXTENSION);
+        if (tlaSuffixIndex != -1)
         {
-            filename = filename.substring(0, filename.indexOf(".tla"));
+            filename = filename.substring(0, tlaSuffixIndex);
         }
         return filename;
     }
@@ -124,17 +137,26 @@ public class Module
         this.node = node;
     }
 
-    /**
-     * Determines if current module is a standard module <br>
-     * TODO Fishy method. improve/unify it
-     * 
-     * @return true iff the absolute path of the module contains BuiltInModuleHelper.STANDARD_MODULES value
-     */
-    public boolean isStandardModule()
-    {
+    public boolean isStandardModule() {
+    	if (this.node != null) {
+    		// As standard module such as FiniteSets, ... are considered library modules.
+    		return this.node.isStandardModule();
+    	}
+    	// TODO Fishy method; improve/unify!
         return (getAbsolutePath().indexOf(BuiltInModuleHelper.STANDARD_MODULES) != -1);
     }
-
+    
+    /**
+	 * Determines if current module has been loaded from the library path, i.e. it
+	 * is a standard module or part of a module archive such as CommuinityModules.
+	 */
+    public boolean isLibraryModule()
+    {
+    	if (this.parseUnit != null && parseUnit.isLibraryModule()) {
+    		return true;
+    	}
+    	return isStandardModule();
+    }
     
     public boolean isRoot()
     {
@@ -145,4 +167,20 @@ public class Module
     {
         this.isRoot = isRoot;
     }
+
+	public void copyTo(final Path dst) throws IOException {
+		Files.copy(file.toPath(), dst.resolve(file.getName()), StandardCopyOption.REPLACE_EXISTING);
+
+		// Attempt to copy corresponding TLC module override (.class file) if any for this Module. 
+		if (this.parseUnit != null) {
+			final NamedInputStream nis = this.parseUnit.getNis();
+			if (nis != null && nis.sourceFile() instanceof TLAFile) {
+				final TLAFile tlaFile = (TLAFile) nis.sourceFile();
+				final File moduleOverride = tlaFile.getModuleOverride();
+				if (moduleOverride != null) {
+					Files.copy(moduleOverride.toPath(), dst.resolve(moduleOverride.getName()), StandardCopyOption.REPLACE_EXISTING);
+				}
+			}
+		}
+	}
 }

@@ -67,7 +67,8 @@ public class AzureARMCloudTLCInstanceParameters extends AzureCloudTLCInstancePar
 	@Override
 	public String getImageId() {
 		// With azure-cli v2 (based on Python) extract name from 'az vm image list --all --publisher Canonical'.
-		return System.getProperty("azure.image", "eastus/Canonical/UbuntuServer/18.04-LTS");	}
+		return System.getProperty("azure.image", "eastus/Canonical/UbuntuServer/18.04-LTS");
+	}
 
 	/* (non-Javadoc)
 	 * @see org.lamport.tla.toolbox.jcloud.CloudTLCInstanceParameters#getHardwareId()
@@ -75,7 +76,10 @@ public class AzureARMCloudTLCInstanceParameters extends AzureCloudTLCInstancePar
 	@Override
 	public String getHardwareId() {
 		// STANDARD_D14: 16 cores, 112GB
-		return System.getProperty("azure.instanceType", "eastus/Standard_D14");
+		// Find more with: 'az vm list-sizes -l eastus'
+		return System.getProperty("azure.instanceType", getRegion() + "/Standard_D14");
+//		return System.getProperty("azure.instanceType", getRegion() + "/Standard_L8s_v2");
+//		return System.getProperty("azure.instanceType", getRegion() + "/Standard_L80s_v2");
 	}
 
 	/* (non-Javadoc)
@@ -225,8 +229,10 @@ public class AzureARMCloudTLCInstanceParameters extends AzureCloudTLCInstancePar
 				+ "Type=oneshot\\n"
 				+ "RemainAfterExit=true\\n"
 				+ "ExecStart=/bin/true\\n"
-				// Great, this is much simpler compared to 589e6fc82ce182b0c49c4c1fb63bc0aae711cf5f
-				+ "ExecStop=/usr/bin/az group delete --name %s -y\\n"
+				// Great, this is much simpler compared to 589e6fc82ce182b0c49c4c1fb63bc0aae711cf5f.
+				// Do not delete the instance if /tmp/NoAZ... marker exist. Create this file to
+				// skip deletion once e.g. when creating an image.
+				+ "ExecStop=/usr/bin/test -e /tmp/NoAZDelete.txt || /usr/bin/az group delete --name %s -y\\n"
 				+ "[Install]\\n"
 				+ "WantedBy=multi-user.target\\n\" | sudo tee /lib/systemd/system/delete-on-shutdown.service"
 				+ " && systemctl enable delete-on-shutdown" // restart delete-on-shutdown service after a reboot.

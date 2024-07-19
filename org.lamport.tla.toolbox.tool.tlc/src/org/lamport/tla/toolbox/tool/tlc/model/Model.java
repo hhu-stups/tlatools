@@ -29,12 +29,15 @@ package org.lamport.tla.toolbox.tool.tlc.model;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -42,10 +45,12 @@ import java.util.Vector;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.filefilter.DirectoryFileFilter;
 import org.apache.commons.io.filefilter.NotFileFilter;
+import org.eclipse.core.filesystem.IFileStore;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IFolder;
 import org.eclipse.core.resources.IMarker;
@@ -72,10 +77,12 @@ import org.eclipse.debug.core.ILaunchConfiguration;
 import org.eclipse.debug.core.ILaunchConfigurationType;
 import org.eclipse.debug.core.ILaunchConfigurationWorkingCopy;
 import org.eclipse.debug.core.ILaunchManager;
+import org.eclipse.debug.internal.core.LaunchConfiguration;
 import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.FindReplaceDocumentAdapter;
 import org.eclipse.jface.text.IDocument;
 import org.eclipse.jface.text.IRegion;
+import org.eclipse.swt.widgets.Display;
 import org.eclipse.ui.editors.text.FileDocumentProvider;
 import org.eclipse.ui.part.FileEditorInput;
 import org.lamport.tla.toolbox.spec.Spec;
@@ -85,17 +92,18 @@ import org.lamport.tla.toolbox.tool.tlc.launch.IConfigurationConstants;
 import org.lamport.tla.toolbox.tool.tlc.launch.IConfigurationDefaults;
 import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationConstants;
 import org.lamport.tla.toolbox.tool.tlc.launch.TLCModelLaunchDelegate;
-import org.lamport.tla.toolbox.tool.tlc.model.Model.StateChangeListener.ChangeEvent;
-import org.lamport.tla.toolbox.tool.tlc.model.Model.StateChangeListener.ChangeEvent.State;
-import org.lamport.tla.toolbox.tool.tlc.traceexplorer.SimpleTLCState;
 import org.lamport.tla.toolbox.tool.tlc.util.ModelHelper;
 import org.lamport.tla.toolbox.util.ResourceHelper;
 
+import tlc2.model.Formula;
+import tlc2.model.MCState;
 import tlc2.output.MP;
+import util.TLAConstants;
 
 /**
  * This class represents a Toolbox Model that can be executed by TLC.
  */
+@SuppressWarnings("restriction")		// org.eclipse.debug.internal.core.LaunchConfiguration discouraged
 public class Model implements IModelConfigurationConstants, IAdaptable {
 	/**
      * Marker indicating an error in the model
@@ -119,6 +127,8 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
      */
     private static final String TRACE_EXPLORER_MARKER = "org.lamport.tla.toolbox.tlc.traceExplorerMarker";
 
+    private static final Collection<Model> EMPTY_MODEL_SET = Collections.unmodifiableList(new ArrayList<>());
+    
     public static final String SPEC_MODEL_DELIM = "___";
 
 	static String sanitizeName(String aModelName) {
@@ -145,57 +155,8 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	public static String fullyQualifiedNameFromSpecNameAndModelName(final String specName, final String modelName) {
 		return specName + SPEC_MODEL_DELIM + modelName;
 	}
-	       
-	/**
-	 * A {@link StateChangeListener} is notified when the running state of the model
-	 * changes. There is no guarantee as to which thread is being used to send the
-	 * notification. A {@link StateChangeListener} has subscribe and unsubscribe
-	 * via {@link Model#add(StateChangeListener)} and {@link Model#remove(StateChangeListener)}.
-	 */
-	public static class StateChangeListener {
 
-		public static class ChangeEvent {
-
-			public enum State {
-				RUNNING, NOT_RUNNING, DELETED, REMOTE_RUNNING, REMOTE_NOT_RUNNING;
-				
-				public boolean in(State ... states) {
-					for (State state : states) {
-						if (state == this) {
-							return true;
-						}
-					}
-					return false;
-				}
-			}
-
-			private final State state;
-			private final Model model;
-
-			private ChangeEvent(Model model, State state) {
-				this.model = model;
-				this.state = state;
-			}
-
-			public State getState() {
-				return state;
-			}
-
-			public Model getModel() {
-				return model;
-			}
-		}
-
-		/**
-		 * @return true iff the listener should be unsubscribed from receiving future
-		 *         events after it handled the event.
-		 */
-		public boolean handleChange(ChangeEvent event) {
-			return false;
-		}
-	}
-
-	private final Set<StateChangeListener> listeners = new CopyOnWriteArraySet<StateChangeListener>();
+	private final Set<AbstractModelStateChangeListener> listeners = new CopyOnWriteArraySet<AbstractModelStateChangeListener>();
 	private TLCSpec spec;
 	private ILaunchConfiguration launchConfig;
 
@@ -229,16 +190,16 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		this.launchConfig = launchConfig;
 	}
 	
-	public boolean add(StateChangeListener stateChangeListener) {
-		return this.listeners.add(stateChangeListener);
+	public boolean add(final AbstractModelStateChangeListener stateChangeListener) {
+		return listeners.add(stateChangeListener);
 	}
 
-	public boolean remove(StateChangeListener stateChangeListener) {
-		return this.listeners.remove(stateChangeListener);
+	public boolean remove(final AbstractModelStateChangeListener stateChangeListener) {
+		return listeners.remove(stateChangeListener);
 	}
 
-	private void notifyListener(final StateChangeListener.ChangeEvent event) {
-		for (StateChangeListener scl : listeners) {
+	private void notifyListener(final AbstractModelStateChangeListener.ChangeEvent event) {
+		for (AbstractModelStateChangeListener scl : listeners) {
 			if (scl.handleChange(event)) {
 				// Listener wants to be deregistered as a listener.
 				listeners.remove(scl);
@@ -252,7 +213,8 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 			Assert.isTrue(launchName.contains(SPEC_MODEL_DELIM));
 			
 			final Spec spec = ToolboxHandle.getSpecByName(launchName.split(SPEC_MODEL_DELIM)[0]);
-			Assert.isNotNull(spec, "Failed to lookup spec with name " + launchName.split(SPEC_MODEL_DELIM)[0]);
+			Assert.isNotNull(spec, "Failed to lookup spec with name " + launchName.split(SPEC_MODEL_DELIM)[0]
+										+ " (" + launchName + ")");
 			
 			this.spec = spec.getAdapter(TLCSpec.class);
 		}
@@ -342,7 +304,7 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		this.spec = null;
 		
 		for (Model snapshot : snapshots) {
-			snapshot.specRename(newSpec);;
+			snapshot.specRename(newSpec);
 		}
 	}
 
@@ -356,9 +318,31 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 			copy.setContainer(newSpec.getProject());
 			final ILaunchConfiguration renamed = copy.doSave();
 
+			final IFileStore ifs = ((LaunchConfiguration)launchConfig).getFileStore();
+			
+			// delete the copy of the old model in the new toolbox directory
+			if (ifs != null) {
+				final IPath newToolboxName = renamed.getFile().getFullPath().removeLastSegments(1);
+				final URI u = ifs.toURI();
+				final File oldLaunchConfigFile = new File(u);
+				final File grandParentDirectory = oldLaunchConfigFile.getParentFile().getParentFile();
+				final String newToolboxDirectoryName = newToolboxName.toString() + ResourceHelper.TOOLBOX_DIRECTORY_SUFFIX;
+				final File fileToDelete = Paths.get(grandParentDirectory.getAbsolutePath(),
+													newToolboxDirectoryName,
+													oldLaunchConfigFile.getName()).toFile();
+				
+				if (!fileToDelete.delete()) {
+					TLCActivator.logInfo("Could not delete old launch file [" + fileToDelete.getAbsolutePath()
+											+ "] - will attempt on app exit, which is better than nothing.");
+					fileToDelete.deleteOnExit();
+				}
+			} else {
+				TLCActivator.logInfo("Could not get filestore for the original launch config; this is problematic.");
+			}
+
 			// delete the old model
-			this.launchConfig.delete();
-			this.launchConfig = renamed;
+			launchConfig.delete();
+			launchConfig = renamed;
 		} catch (CoreException e) {
 			TLCActivator.logError("Error renaming model.", e);
 		}
@@ -403,7 +387,9 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 			// running now.
 			recover();
 		}
-		notifyListener(new StateChangeListener.ChangeEvent(this, isRunning ? State.RUNNING : State.NOT_RUNNING));
+		notifyListener(new AbstractModelStateChangeListener.ChangeEvent(this, 
+				isRunning ? AbstractModelStateChangeListener.State.RUNNING
+						  : AbstractModelStateChangeListener.State.NOT_RUNNING));
 	}
 
     /**
@@ -444,7 +430,9 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 
 	public void setRunningRemotely(boolean isRunning) {
 		this.isRunningRemotely = isRunning;
-		notifyListener(new StateChangeListener.ChangeEvent(this, isRunning ? State.REMOTE_RUNNING : State.REMOTE_NOT_RUNNING));
+		notifyListener(new AbstractModelStateChangeListener.ChangeEvent(this,
+				isRunning ? AbstractModelStateChangeListener.State.REMOTE_RUNNING
+						  : AbstractModelStateChangeListener.State.REMOTE_NOT_RUNNING));
 	}
 
 	/*
@@ -468,6 +456,11 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	}
 	
 	public Collection<Model> getSnapshots() {
+		if (isSnapshot()) {
+			// Snapshots do not have snapshots
+			return EMPTY_MODEL_SET;
+		}
+		
 		return getSpec().getModels(Pattern.quote(getName()) + SNAPSHOT_REGEXP, true).values();
 	}
 
@@ -548,7 +541,9 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	private void pruneOldestSnapshots() throws CoreException {
 		// Sort model by snapshot timestamp and remove oldest ones.
 		final int snapshotKeepCount = TLCActivator.getDefault().getPreferenceStore().getInt(TLCActivator.I_TLC_SNAPSHOT_KEEP_COUNT);
-		final List<Model> snapshotModels = new ArrayList<>(getSnapshots());
+		// Filter out running snapshots such as remotely running ones (CloudTLC).
+		final List<Model> snapshotModels = new ArrayList<>(getSnapshots().stream()
+				.filter(m -> !m.isRunning() && !m.isRunningRemotely()).collect(Collectors.toList()));
 		if (snapshotModels.size() > snapshotKeepCount) {
 		    final int pruneCount = snapshotModels.size() - snapshotKeepCount;
 		    Collections.sort(snapshotModels, new Comparator<Model>() {
@@ -754,7 +749,7 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 			model.delete(SubMonitor.convert(monitor));
 		}
 		
-		notifyListener(new ChangeEvent(this, State.DELETED));
+		notifyListener(new AbstractModelStateChangeListener.ChangeEvent(this, AbstractModelStateChangeListener.State.DELETED));
 		
 		final IResource[] members;
 
@@ -844,7 +839,7 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	 * @return a file handle or <code>null</code>
 	 */
 	public IFile getTLAFile() {
-		return getFile(ModelHelper.FILE_TLA);
+		return getFile(TLAConstants.Files.MODEL_CHECK_TLA_FILE);
 	}
 
 	/**
@@ -875,7 +870,7 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		if (getTraceExplorerOutput) {
 			return getFile(ModelHelper.TE_FILE_OUT);
 		} else {
-			return getFile(ModelHelper.FILE_OUT);
+			return getFile(TLAConstants.Files.MODEL_CHECK_OUTPUT_FILE);
 		}
 	}
 
@@ -936,7 +931,7 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
         	targetFolder.refreshLocal(IFolder.DEPTH_INFINITE, monitor);
         	
         	// Import MC.out
-        	IFile mcOutFile = targetFolder.getFile(ModelHelper.FILE_OUT);
+        	IFile mcOutFile = targetFolder.getFile(TLAConstants.Files.MODEL_CHECK_OUTPUT_FILE);
         	if (mcOutFile.exists()) {
         		mcOutFile.delete(true, monitor);
         	}
@@ -958,7 +953,7 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		return getSpec().getProject().getFolder(getName());
 	}
 
-    private static final String CHECKPOINT_STATES = ModelHelper.MC_MODEL_NAME + ".st.chkpt";
+    private static final String CHECKPOINT_STATES = TLAConstants.Files.MODEL_CHECK_FILE_BASENAME + ".st.chkpt";
     private static final String CHECKPOINT_QUEUE = "queue.chkpt";
     private static final String CHECKPOINT_VARS = "vars.chkpt";
 
@@ -1038,15 +1033,12 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
         return result;
     }
 
-    private static final String CR = "\n";
-    private static final String SPACE = " ";
-
     /**
      * Returns a possibly empty List of {@link SimpleTLCState} that represents
      * the error trace produced by the most recent run of TLC on config, if an error
      * trace was produced.
      */
-    public List<SimpleTLCState> getErrorTrace()
+    public List<MCState> getErrorTrace()
     {
         /*
          * Use a file editor input and file document provider to gain access to the
@@ -1062,17 +1054,14 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
             FindReplaceDocumentAdapter logFileSearcher = new FindReplaceDocumentAdapter(logFileDocument);
 
             // the regular expression for searching for the start tag for state print outs
-            String regExStartTag = MP.DELIM + MP.STARTMSG + "[0-9]{4}" + MP.COLON + MP.STATE + SPACE + MP.DELIM + CR;
+            String regExStartTag = MP.DELIM + MP.STARTMSG + "[0-9]{4}" + MP.COLON + MP.STATE + MP.SPACE + MP.DELIM + MP.CR;
             // the regular expression for searching for the end tag for state print outs
-            String regExEndTag = MP.DELIM + MP.ENDMSG + "[0-9]{4}" + SPACE + MP.DELIM;
+            String regExEndTag = MP.DELIM + MP.ENDMSG + "[0-9]{4}" + MP.SPACE + MP.DELIM;
 
             IRegion startTagRegion = logFileSearcher.find(0, regExStartTag, true, true, false, true);
 
-            // vector of SimpleTLCStates
-            Vector<SimpleTLCState> trace = new Vector<SimpleTLCState>();
-
-            while (startTagRegion != null)
-            {
+            final ArrayList<MCState> trace = new ArrayList<>();
+			while (startTagRegion != null) {
                 IRegion endTagRegion = logFileSearcher.find(startTagRegion.getOffset() + startTagRegion.getLength(),
                         regExEndTag, true, true, false, true);
 
@@ -1083,7 +1072,7 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
                     // string from which the state can be parsed
                     String stateInputString = logFileDocument.get(stateInputStart, stateInputLength);
 
-                    trace.add(SimpleTLCState.parseSimpleTLCState(stateInputString));
+                    trace.add(MCState.parseState(stateInputString));
 
                 } else
                 {
@@ -1115,7 +1104,7 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
             logFileDocumentProvider.disconnect(logFileEditorInput);
         }
 
-        return new Vector<SimpleTLCState>();
+        return new Vector<MCState>();
     }
     
     /**
@@ -1137,10 +1126,28 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
     	return fullyQualifiedNameFromSpecNameAndModelName(getSpec().getName(), getName());
     }
 
+	public void setTraceExplorerExtends(final Set<String> modules) {
+        try {
+        	getWorkingCopy().setAttribute(IModelConfigurationConstants.TRACE_EXPLORE_EXTENDS, modules);
+		} catch (CoreException shouldNotHappen) {
+			TLCActivator.logError(shouldNotHappen.getMessage(), shouldNotHappen);
+		}
+	}
+	
+	public Set<String> getTraceExplorerExtends() {
+		final Set<String> defaultValue = new HashSet<String>();
+		try {
+			return this.launchConfig.getAttribute(IModelConfigurationConstants.TRACE_EXPLORE_EXTENDS, defaultValue);
+		} catch (CoreException shouldNotHappen) {
+			TLCActivator.logError(shouldNotHappen.getMessage(), shouldNotHappen);
+			return defaultValue;
+		}
+	}
+
 	public List<String> getTraceExplorerExpressions() {
 		final Vector<String> defaultValue = new Vector<String>();
 		try {
-			return this.launchConfig.getAttribute(IModelConfigurationConstants.TRACE_EXPLORE_EXPRESSIONS, defaultValue);
+			return this.launchConfig.getAttribute(TLAConstants.TraceExplore.TRACE_EXPLORE_EXPRESSIONS, defaultValue);
 		} catch (CoreException shouldNotHappen) {
 			TLCActivator.logError(shouldNotHappen.getMessage(), shouldNotHappen);
 			return defaultValue;
@@ -1149,7 +1156,7 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 
 	public List<Formula> getTraceExplorerExpressionsAsFormula() {
 		final List<String> traceExplorerExpressions = getTraceExplorerExpressions();
-		return ModelHelper.deserializeFormulaList(traceExplorerExpressions);
+		return Formula.deserializeFormulaList(traceExplorerExpressions);
 	}
 	
 	public Map<String, Formula> getNamedTraceExplorerExpressionsAsFormula() {
@@ -1168,12 +1175,28 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		// into a working copy, which is synced on save. Thus, make sure never
 		// to write to different copies concurrently.
         try {
-        	getWorkingCopy().setAttribute(IModelConfigurationConstants.TRACE_EXPLORE_EXPRESSIONS, serializedInput);
+        	getWorkingCopy().setAttribute(TLAConstants.TraceExplore.TRACE_EXPLORE_EXPRESSIONS, serializedInput);
 		} catch (CoreException shouldNotHappen) {
 			TLCActivator.logError(shouldNotHappen.getMessage(), shouldNotHappen);
 		}
 	}
 	
+	public void setModelVersion(final int version) {
+        try {
+        	getWorkingCopy().setAttribute(IModelConfigurationConstants.MODEL_VERSION, version);
+		} catch (CoreException shouldNotHappen) {
+			TLCActivator.logError(shouldNotHappen.getMessage(), shouldNotHappen);
+		}
+	}
+	
+	public int getModelVersion() {
+        try {
+			return getWorkingCopy().getAttribute(IModelConfigurationConstants.MODEL_VERSION, 0);
+		} catch (CoreException shouldNotHappen) {
+			return -1;
+		}
+	}
+
 	public void setOpenTabsValue(final int value) {
         try {
         	getWorkingCopy().setAttribute(IModelConfigurationConstants.EDITOR_OPEN_TABS, value);
@@ -1208,8 +1231,15 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 	}
 
 	public Model save(final IProgressMonitor monitor) {
+    	// Uncomment the following for development time forced restoration of all closeable tabs.
+//    	setOpenTabsValue((1 << 1) | (1 << 2) | (1 << 3));
+		setModelVersion(IModelConfigurationConstants.VERSION_161);
+		
 		if (this.workingCopy != null) {
-			//TODO This is a workspace operation and thus should be decoupled from the UI thread.
+			if (Thread.currentThread().equals(Display.getDefault().getThread())) {
+				TLCActivator.logInfo("Model save is occurring on the SWT thread, this should be addressed.");
+			}
+
 			try {
 				this.launchConfig = this.workingCopy.doSave();
 				// Null the temporary working copy . Save effectively merges the
@@ -1313,40 +1343,22 @@ public class Model implements IModelConfigurationConstants, IAdaptable {
 		}
 	}
 	
-	// TLC's coverage implementation (see tlc2.tool.coverage.CostModelCreator) only
-	// supports two modes: Off and On. However, we consider On too much information
-	// for novice users who are (likely) only interested in identifying spec errors
-	// that leave a subset of actions permanently disabled. The Toolbox therefore
-	// adds a third mode "Action" which filters TLC's output for All. This obviously
-	// means that the overhead of collecting coverage in Action and On mode is
-	// identical.  This shouldn't matter however as novice users don't create large
-	// specs anyway and the Toolbox warns users when a large spec has been
-	// configured with coverage.
-	// (see org.lamport.tla.toolbox.tool.tlc.output.data.CoverageUINotification)
-	// Alternatively, tlc2.tool.coverage.ActionWrapper.report() could be changed to
-	// omit the report of its children (line 126) to effectively create the Action
-	// mode at the TLC layer. I decided against it though, because I didn't want to
-	// extend the -coverage TLC parameter.
-	public enum Coverage {
-		OFF, ACTION, ON;
-	}
-	
-	public Coverage setCoverage(final Coverage c) {
+	public ModelCoverage setCoverage(final ModelCoverage c) {
 		setAttribute(LAUNCH_COVERAGE, c.ordinal());
 		return c;
 	}
 	
-	public Coverage getCoverage() {
+	public ModelCoverage getCoverage() {
 		try {
 			final int ordinal = getAttribute(LAUNCH_COVERAGE, IConfigurationDefaults.LAUNCH_COVERAGE_DEFAULT);
-			return Coverage.values()[ordinal];
+			return ModelCoverage.values()[ordinal];
 		} catch (DebugException legacyException) {
 			// Occurs for old models where the type wasn't int but bool.
 		} catch (CoreException shouldNotHappen) {
 			// We log the exceptions on setAttribute but expose exceptions with getAttribute %-)
 			TLCActivator.logError(shouldNotHappen.getMessage(), shouldNotHappen);
 		}
-		return Coverage.ACTION;
+		return ModelCoverage.ACTION;
 	}
 	
 	/* IAdaptable */

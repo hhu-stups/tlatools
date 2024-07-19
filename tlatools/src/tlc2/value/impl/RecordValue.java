@@ -9,25 +9,30 @@ package tlc2.value.impl;
 import java.io.EOFException;
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Map;
 
+import tla2sany.semantic.OpDeclNode;
 import tlc2.output.EC;
 import tlc2.output.MP;
 import tlc2.tool.FingerprintException;
+import tlc2.tool.TLCState;
 import tlc2.tool.coverage.CostModel;
 import tlc2.util.FP64;
 import tlc2.value.IMVPerm;
 import tlc2.value.IValue;
 import tlc2.value.IValueInputStream;
 import tlc2.value.IValueOutputStream;
+import tlc2.value.ValueInputStream;
 import tlc2.value.Values;
 import util.Assert;
+import util.TLAConstants;
 import util.UniqueString;
 
 public class RecordValue extends Value implements Applicable {
   public final UniqueString[] names;   // the field names
   public final Value[] values;         // the field values
   private boolean isNorm;
-public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], new Value[0], true);
+public static final RecordValue EmptyRcd = new RecordValue(new UniqueString[0], new Value[0], true);
 
   /* Constructor */
   public RecordValue(UniqueString[] names, Value[] values, boolean isNorm) {
@@ -40,9 +45,33 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
 	  this(names, values, isNorm);
 	  this.cm = cm;
   }
+  
+  public RecordValue(UniqueString name, Value v, boolean isNorm) {
+	  this(new UniqueString[] {name}, new Value[] {v}, isNorm);
+  }
+  
+  public RecordValue(UniqueString name, Value v) {
+	  this(new UniqueString[] {name}, new Value[] {v}, false);
+  }
 
+  public RecordValue(final TLCState state) {
+		final OpDeclNode[] vars = state.getVars();
+		
+		this.names = new UniqueString[vars.length];
+		this.values = new Value[vars.length];
+
+		for (int i = 0; i < vars.length; i++) {
+			this.names[i] = vars[i].getName();
+			this.values[i] = (Value) state.lookup(this.names[i]); 
+		}
+
+		this.isNorm = false;
+  }
+
+  @Override
   public final byte getKind() { return RECORDVALUE; }
 
+  @Override
   public final int compareTo(Object obj) {
     try {
       RecordValue rcd = obj instanceof Value ? (RecordValue) ((Value)obj).toRcd() : null;
@@ -97,6 +126,7 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
     }
   }
 
+  @Override
   public final boolean member(Value elem) {
     try {
       Assert.fail("Attempted to check if element:\n" + Values.ppr(elem.toString()) +
@@ -109,8 +139,10 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
     }
   }
 
+  @Override
   public final boolean isFinite() { return true; }
 
+  @Override
   public final Value takeExcept(ValueExcept ex) {
     try {
       if (ex.idx < ex.path.length) {
@@ -149,6 +181,7 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
     }
   }
 
+  @Override
   public final Value takeExcept(ValueExcept[] exs) {
     try {
       Value res = this;
@@ -184,6 +217,7 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
         return new FcnRcdValue(dom, this.values, this.isNormalized(), cm);
 	}
 
+  @Override
   public final int size() {
     try {
       return this.names.length;
@@ -194,6 +228,7 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
     }
   }
 
+  @Override
   public final Value apply(Value arg, int control) {
     try {
       if (!(arg instanceof StringValue)) {
@@ -217,6 +252,7 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
     }
   }
 
+  @Override
   public final Value apply(Value[] args, int control) {
     try {
       if (args.length != 1) {
@@ -231,6 +267,7 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
   }
 
   /* This method returns the named component of the record. */
+  @Override
   public final Value select(Value arg) {
     try {
       if (!(arg instanceof StringValue)) {
@@ -252,6 +289,7 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
     }
   }
 
+  @Override
   public final Value getDomain() {
     try {
     	Value[] dElems = new Value[this.names.length];
@@ -287,8 +325,10 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
     }
   }
 
+  @Override
   public final boolean isNormalized() { return this.isNorm; }
 
+  @Override
   public final Value normalize() {
     try {
       if (!this.isNorm) {
@@ -347,6 +387,7 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
 	    }
   }
 
+  @Override
   public final boolean isDefined() {
     try {
       boolean defined = true;
@@ -361,6 +402,7 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
     }
   }
 
+  @Override
   public final IValue deepCopy() {
     try {
     	Value[] vals = new Value[this.values.length];
@@ -382,6 +424,7 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
     }
   }
 
+  @Override
   public final boolean assignable(Value val) {
     try {
       boolean canAssign = ((val instanceof RecordValue) &&
@@ -425,6 +468,7 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
 	}
 
   /* The fingerprint methods.  */
+  @Override
   public final long fingerPrint(long fp) {
     try {
       this.normalize();
@@ -446,6 +490,7 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
     }
   }
 
+  @Override
   public final IValue permute(IMVPerm perm) {
     try {
       this.normalize();
@@ -468,18 +513,19 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
   }
 
   /* The string representation */
+  @Override
   public final StringBuffer toString(StringBuffer sb, int offset, boolean swallow) {
     try {
       int len = this.names.length;
 
       sb.append("[");
       if (len > 0) {
-        sb.append(this.names[0] + " |-> ");
+        sb.append(this.names[0] + TLAConstants.RECORD_ARROW);
         sb = this.values[0].toString(sb, offset, swallow);
       }
       for (int i = 1; i < len; i++) {
         sb.append(", ");
-        sb.append(this.names[i] + " |-> ");
+        sb.append(this.names[i] + TLAConstants.RECORD_ARROW);
         sb = this.values[i].toString(sb, offset, swallow);
       }
       return sb.append("]");
@@ -511,6 +557,33 @@ public final static RecordValue EmptyRcd = new RecordValue(new UniqueString[0], 
 				vos.assign(names[i], index1);
 			}
 			vals[i] = (Value) vos.read();
+		}
+		final Value res = new RecordValue(names, vals, isNorm);
+		vos.assign(res, index);
+		return res;
+	}
+
+	public static IValue createFrom(final ValueInputStream vos, final Map<String, UniqueString> tbl) throws EOFException, IOException {
+		final int index = vos.getIndex();
+		boolean isNorm = true;
+		int len = vos.readInt();
+		if (len < 0) {
+			len = -len;
+			isNorm = false;
+		}
+		final UniqueString[] names = new UniqueString[len];
+		final Value[] vals = new Value[len];
+		for (int i = 0; i < len; i++) {
+			final byte kind1 = vos.readByte();
+			if (kind1 == DUMMYVALUE) {
+				final int index1 = vos.readNat();
+				names[i] = vos.getValue(index1);
+			} else {
+				final int index1 = vos.getIndex();
+				names[i] = UniqueString.read(vos.getInputStream(), tbl);
+				vos.assign(names[i], index1);
+			}
+			vals[i] = (Value) vos.read(tbl);
 		}
 		final Value res = new RecordValue(names, vals, isNorm);
 		vos.assign(res, index);

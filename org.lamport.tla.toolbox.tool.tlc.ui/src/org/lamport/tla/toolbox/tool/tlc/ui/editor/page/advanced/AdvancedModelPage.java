@@ -27,11 +27,10 @@ import org.eclipse.ui.forms.widgets.TableWrapData;
 import org.eclipse.ui.forms.widgets.TableWrapLayout;
 import org.lamport.tla.toolbox.tool.ToolboxHandle;
 import org.lamport.tla.toolbox.tool.tlc.launch.IModelConfigurationConstants;
-import org.lamport.tla.toolbox.tool.tlc.model.Assignment;
-import org.lamport.tla.toolbox.tool.tlc.model.TypedSet;
 import org.lamport.tla.toolbox.tool.tlc.ui.editor.DataBindingManager;
 import org.lamport.tla.toolbox.tool.tlc.ui.editor.ModelEditor;
 import org.lamport.tla.toolbox.tool.tlc.ui.editor.page.BasicFormPage;
+import org.lamport.tla.toolbox.tool.tlc.ui.editor.page.MainModelPage;
 import org.lamport.tla.toolbox.tool.tlc.ui.editor.part.ValidateableOverridesSectionPart;
 import org.lamport.tla.toolbox.tool.tlc.ui.editor.part.ValidateableSectionPart;
 import org.lamport.tla.toolbox.tool.tlc.ui.util.DirtyMarkingListener;
@@ -42,6 +41,8 @@ import org.lamport.tla.toolbox.util.UIHelper;
 
 import tla2sany.modanalyzer.SpecObj;
 import tla2sany.semantic.OpDefNode;
+import tlc2.model.Assignment;
+import tlc2.model.TypedSet;
 
 /**
  * Where we are sticking "advanced" model options, not including those related to TLC execution.
@@ -287,6 +288,26 @@ public class AdvancedModelPage extends BasicFormPage implements Closeable {
                 }
             }
         }
+        
+		final MainModelPage mmp = (MainModelPage) getModelEditor().getFormPage(MainModelPage.ID);
+		if (mmp.hasLivenessProperty()) {
+			if (!FormHelper.trimTrailingSpaces(constraintSource.getDocument().get()).isEmpty()) {
+				modelEditor.addErrorMessage("constraintSource", "Declaring state constraints during liveness checking is dangerous: "
+								+ "Please read\nsection 14.3.5 on page 247 of Specifying Systems (https://lamport.azurewebsites.net/tla/book.html)"
+								+ "\nand the optionally discussion at https://discuss.tlapl.us/msg00994.html for more details.",
+						this.getId(), IMessageProvider.INFORMATION,
+						UIHelper.getWidget(dm.getAttributeControl(MODEL_PARAMETER_CONSTRAINT)));
+				expandSection(dm.getSectionForAttribute(MODEL_PARAMETER_CONSTRAINT));
+			}
+			if (!FormHelper.trimTrailingSpaces(actionConstraintSource.getDocument().get()).isEmpty()) {
+				modelEditor.addErrorMessage("actionConstraintSource", "Declaring action constraints during liveness checking is dangerous: "
+						+ "Please read\nsection 14.3.5 on page 247 of Specifying Systems (https://lamport.azurewebsites.net/tla/book.html)"
+						+ "\nand optionally the discussion at https://discuss.tlapl.us/msg00994.html for more details.",
+					this.getId(), IMessageProvider.INFORMATION,
+						UIHelper.getWidget(dm.getAttributeControl(MODEL_PARAMETER_ACTION_CONSTRAINT)));
+				expandSection(dm.getSectionForAttribute(MODEL_PARAMETER_ACTION_CONSTRAINT));
+			}
+		}
 
         mm.setAutoUpdate(true);
         
@@ -486,5 +507,12 @@ public class AdvancedModelPage extends BasicFormPage implements Closeable {
 	public void close() throws IOException {
 		final int openTabState = getModel().getOpenTabsValue();
 		getModelEditor().updateOpenTabsState(openTabState & ~IModelConfigurationConstants.EDITOR_OPEN_TAB_ADVANCED_MODEL);
+		
+        final DataBindingManager dm = getDataBindingManager();
+        dm.unbindSectionAndAttribute(MODEL_PARAMETER_ACTION_CONSTRAINT);
+        dm.unbindSectionAndAttribute(MODEL_PARAMETER_CONSTRAINT);
+        dm.unbindSectionAndAttribute(MODEL_PARAMETER_DEFINITIONS);
+        dm.unbindSectionAndAttribute(MODEL_PARAMETER_MODEL_VALUES);
+        dm.unbindSectionAndAttribute(MODEL_PARAMETER_NEW_DEFINITIONS);
 	}
 }

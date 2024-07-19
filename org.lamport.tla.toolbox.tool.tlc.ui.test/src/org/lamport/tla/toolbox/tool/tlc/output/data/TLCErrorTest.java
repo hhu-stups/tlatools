@@ -33,9 +33,11 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.Test;
-import org.lamport.tla.toolbox.tool.tlc.launch.TraceExpressionInformationHolder;
-import org.lamport.tla.toolbox.tool.tlc.model.Formula;
 import org.lamport.tla.toolbox.tool.tlc.output.data.TLCError.Order;
+
+import tlc2.model.Formula;
+import tlc2.model.TraceExpressionInformationHolder;
+import util.TLAConstants;
 
 public class TLCErrorTest {
 	
@@ -102,7 +104,7 @@ public class TLCErrorTest {
 		assertEquals(mcInitState.getVariableCount(1) + 2, teInitState.getVariableCount(1));
 		final Map<String, TLCVariable> teInitDiff = teInitState.getDiff(mcInitState);
 		assertEquals(2, teInitDiff.size());
-		assertEquals(teInitDiff.get("_TEPosition").toString(), "1");
+		assertEquals(teInitDiff.get(TLAConstants.TraceExplore.POSITION).toString(), "1");
 		assertEquals(teInitDiff.get("store = <<>>").toString(), "TRUE");
 
 		final TLCState teNextState = teStates.get(next);
@@ -112,13 +114,13 @@ public class TLCErrorTest {
 		assertEquals(mcNextState.getVariableCount(1) + 2, teNextState.getVariableCount(1));
 		final Map<String, TLCVariable> teNextDiff = teNextState.getDiff(mcNextState);
 		assertEquals(2, teNextDiff.size());
-		assertEquals(teNextDiff.get("_TEPosition").toString(), "2");
+		assertEquals(teNextDiff.get(TLAConstants.TraceExplore.POSITION).toString(), "2");
 		assertEquals(teNextDiff.get("store = <<>>").toString(), "FALSE");
 	}
 
 	private static final Hashtable<String, TraceExpressionInformationHolder> getTraceExpressionDataTable() {
 		final Hashtable<String, TraceExpressionInformationHolder> hashtable = new Hashtable<String, TraceExpressionInformationHolder>();
-		hashtable.put("__trace_var_155717784845014000", new TraceExpressionInformationHolder("_TEPosition", null, "__trace_var_155717784845014000"));
+		hashtable.put("__trace_var_155717784845014000", new TraceExpressionInformationHolder(TLAConstants.TraceExplore.POSITION, null, "__trace_var_155717784845014000"));
 
 		final TraceExpressionInformationHolder value = new TraceExpressionInformationHolder("store = <<>>", null, "__trace_var_155717784845012000");
 		value.setLevel(1);

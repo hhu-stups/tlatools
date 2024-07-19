@@ -20,10 +20,12 @@ import tlc2.tool.TLCStateInfo;
 import tlc2.tool.WorkerException;
 import tlc2.tool.fp.FPSet;
 import tlc2.tool.fp.FPSetConfiguration;
-import tlc2.tool.impl.Tool;
+import tlc2.tool.impl.CallStackTool;
+import tlc2.tool.impl.FastTool;
 import tlc2.util.FP64;
 import util.FileUtil;
 import util.FilenameToStream;
+import util.TLAConstants;
 import util.ToolIO;
 import util.UniqueString;
 
@@ -65,7 +67,7 @@ public class TLCApp extends DistApp {
 		
 		this.checkDeadlock = deadlock.booleanValue();
 		this.preprocess = true;
-		this.tool = new Tool(specDir, specFile, configFile, fts);
+		this.tool = new FastTool(specDir, specFile, configFile, fts);
 
 		this.impliedInits = this.tool.getImpliedInits();
 		this.invariants = this.tool.getInvariants();
@@ -259,16 +261,14 @@ public class TLCApp extends DistApp {
 	 * @see tlc2.tool.distributed.DistApp#setCallStack()
 	 */
 	public final void setCallStack() {
-		this.tool.setCallStack();
+		this.tool = new CallStackTool(this.tool);
 	}
 
 	/* (non-Javadoc)
 	 * @see tlc2.tool.distributed.DistApp#printCallStack()
 	 */
 	public final String printCallStack() {
-		// SZ Jul 10, 2009: check if this is ok
-		// changed the method signature
-		return this.tool.getCallStack().toString();
+		return this.tool.toString();
 	}
 
 	@SuppressWarnings("deprecation")
@@ -287,9 +287,9 @@ public class TLCApp extends DistApp {
 				index++;
 				if (index < args.length) {
 					configFile = args[index];
-					int len = configFile.length();
-					if (configFile.startsWith(".cfg", len - 4)) {
-						configFile = configFile.substring(0, len - 4);
+					if (configFile.endsWith(TLAConstants.Files.CONFIG_EXTENSION)) {
+						configFile = configFile.substring(0,
+								(configFile.length() - TLAConstants.Files.CONFIG_EXTENSION.length()));
 					}
 					index++;
 				} else {
@@ -494,9 +494,8 @@ public class TLCApp extends DistApp {
 					return null;
 				}
 				specFile = args[index++];
-				int len = specFile.length();
-				if (specFile.startsWith(".tla", len - 4)) {
-					specFile = specFile.substring(0, len - 4);
+				if (specFile.endsWith(TLAConstants.Files.TLA_EXTENSION)) {
+					specFile = specFile.substring(0, (specFile.length() - TLAConstants.Files.TLA_EXTENSION.length()));
 				}
 			}
 		}
@@ -511,8 +510,8 @@ public class TLCApp extends DistApp {
 				TLCGlobals.chkptDuration = 0; // never use checkpoints with distributed TLC (highly inefficient)
 				FP64.Init(fpIndex);
 				FilenameToStream resolver = new InJarFilenameToStream(ModelInJar.PATH);
-				return new TLCApp("MC", "MC", deadlock, fromChkpt,
-						fpSetConfig, resolver);
+				return new TLCApp(TLAConstants.Files.MODEL_CHECK_FILE_BASENAME, TLAConstants.Files.MODEL_CHECK_FILE_BASENAME,
+						deadlock, fromChkpt, fpSetConfig, resolver);
 			}
 			
 			printErrorMsg("Error: Missing input TLA+ module.");

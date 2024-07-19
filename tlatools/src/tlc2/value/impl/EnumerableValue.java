@@ -34,6 +34,7 @@ import tlc2.value.RandomEnumerableValues;
 
 public abstract class EnumerableValue extends Value implements Enumerable {
 
+  @Override
   public Value isSubsetEq(Value other) {
     try {
       final ValueEnumeration Enum = this.elements();
@@ -78,6 +79,7 @@ public abstract class EnumerableValue extends Value implements Enumerable {
 		return elements();
 	}
 	
+	@Override
 	public ValueEnumeration elements(final int k) {
 		// The generic implementation collects all n elements of the actual Enumerable
 		// into the temporary variable values. The SubSetEnumerator then randomly
@@ -119,7 +121,7 @@ public abstract class EnumerableValue extends Value implements Enumerable {
 			//
 			// x has to be co-prime to n. Since n might or might not be a prime number
 			// - it depends on the actual size of the set - we simply set x to
-			// be a prime number. The prime x has to be larger than n tough, since n is
+			// be a prime number. The prime x has to be larger than n though, since n is
 			// bound by Integer.MAX_VALUE, we simply choose the Mersenne prime
 			// Integer.MAX_VALUE
 			// for x and accept that we fail if n = Integer.MAX_VALUE. To minimize
@@ -138,6 +140,7 @@ public abstract class EnumerableValue extends Value implements Enumerable {
 			}
 		}
 
+		@Override
 		public void reset() {
 			i = 0;
 		}
@@ -162,6 +165,7 @@ public abstract class EnumerableValue extends Value implements Enumerable {
 			return index;
 		}
 
+		@Override
 		public abstract Value nextElement();
 	}
 }
