@@ -502,6 +502,9 @@ public abstract class Tool
           if (alen == 0) {
             if (val instanceof MethodValue) {
               bval = ((MethodValue)val).apply(EmptyArgs, EvalControl.Init);
+            } else if (val instanceof EvaluatingValue) {
+              // Allow EvaluatingValue overwrites to have zero arity.
+              bval = ((EvaluatingValue) val).eval(this, args, c, ps, TLCState.Empty, EvalControl.Init, cm);
             }
           }
           else {
@@ -749,10 +752,14 @@ public abstract class Tool
    */
   @Override
   public final StateVec getNextStates(Action action, TLCState state) {
+	  return getNextStates(action, action.con, state);
+  }
+  
+  public final StateVec getNextStates(final Action action, final Context ctx, final TLCState state) {
     ActionItemList acts = ActionItemList.Empty;
     TLCState s1 = TLCState.Empty.createEmpty();
     StateVec nss = new StateVec(0);
-    this.getNextStates(action, action.pred, acts, action.con, state, s1, nss, action.cm);
+    this.getNextStates(action, action.pred, acts, ctx, state, s1, nss, action.cm);
     if (coverage) { action.cm.incInvocations(nss.size()); }
     return nss;
   }
@@ -1645,10 +1652,6 @@ public abstract class Tool
             	  res = ((EvaluatingValue) val).eval(this, args, c, s0, s1, control, cm);
               }
             }
-            else if (val instanceof Evaluator) {
-            	  Evaluator evaluator = (Evaluator) val;
-            	  res = evaluator.eval(this, args, c, s0, s1, control, cm);
-            } 
             else {
               if (val instanceof OpValue) {
             	  res = ((OpValue) val).eval(this, args, c, s0, s1, control, cm);
@@ -2620,6 +2623,8 @@ public abstract class Tool
             if (val instanceof MethodValue)
             {
               bval = ((MethodValue) val).apply(EmptyArgs, EvalControl.Clear); // EvalControl.Clear is ignored by MethodValuea#apply
+            } else if (val instanceof EvaluatingValue) {
+              bval = ((EvaluatingValue) val).eval(this, args, c, s0, s1, EvalControl.Enabled, cm);
             }
           } else
           {

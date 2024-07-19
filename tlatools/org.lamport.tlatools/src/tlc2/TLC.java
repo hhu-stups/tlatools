@@ -747,7 +747,9 @@ public class TLC {
                 {
                     try
                     {
-                        int num = Integer.parseInt(args[index]);
+                        int num = args[index].strip().toLowerCase().equals("auto")
+                                ? Runtime.getRuntime().availableProcessors()
+                                : Integer.parseInt(args[index]);
                         if (num < 1)
                         {
                             printErrorMsg("Error: at least one worker required.");
@@ -757,12 +759,12 @@ public class TLC {
                         index++;
                     } catch (Exception e)
                     {
-                        printErrorMsg("Error: worker number required. But encountered " + args[index]);
+                        printErrorMsg("Error: worker number or 'auto' required. But encountered " + args[index]);
                         return false;
                     }
                 } else
                 {
-                    printErrorMsg("Error: expect an integer for -workers option.");
+                    printErrorMsg("Error: expect an integer or 'auto' for -workers option.");
                     return false;
                 }
             } else if (args[index].equals("-dfid"))
@@ -812,7 +814,7 @@ public class TLC {
                     }
                 } else
                 {
-                    printErrorMsg("Error: expect an integer for -workers option.");
+                    printErrorMsg("Error: expect an integer for -fp option.");
                     return false;
                 }
             } else if (args[index].equals("-fpmem"))
@@ -1061,7 +1063,8 @@ public class TLC {
 				printStartupBanner(isBFS() ? EC.TLC_MODE_MC : EC.TLC_MODE_MC_DFS, getModelCheckingRuntime(fpIndex, fpSetConfiguration));
 				
             	// model checking
-		        final FastTool tool = new FastTool(mainFile, configFile, resolver);
+                final FastTool tool = new FastTool(mainFile, configFile, resolver);
+                deadlock = deadlock && tool.getModelConfig().getCheckDeadlock();
                 if (isBFS())
                 {
 					TLCGlobals.mainChecker = new ModelChecker(tool, metadir, stateWriter, deadlock, fromChkpt,
@@ -1373,8 +1376,11 @@ public class TLC {
 														"interval between the collection of coverage information;\n"
     														+ "if not specified, no coverage will be collected", true));
     	sharedArguments.add(new UsageGenerator.Argument("-deadlock",
-														"if specified DO NOT CHECK FOR DEADLOCK; default\n"
-															+ "behavior is to check for deadlock", true));
+														"if specified DO NOT CHECK FOR DEADLOCK. Setting the flag is\n"
+															+ "the same as setting CHECK_DEADLOCK to FALSE in config\n"
+															+ "file. When -deadlock is specified, config entry is\n"
+															+ "ignored; default behavior is to check for deadlocks",
+														true));
     	sharedArguments.add(new UsageGenerator.Argument("-difftrace",
 														"show only the differences between successive states when\n"
 															+ "printing trace information; defaults to printing\n"
@@ -1434,7 +1440,9 @@ public class TLC {
 														"an absolute path to a file in which to log user output (for\n"
     														+ "example, that which is produced by Print)", true));
     	sharedArguments.add(new UsageGenerator.Argument("-workers", "num",
-														"the number of TLC worker threads; defaults to 1", true));
+														"the number of TLC worker threads; defaults to 1. Use 'auto'\n"
+    														+ "to automatically select the number of threads based on the\n"
+    														+ "number of available cores.", true));
     	
     	sharedArguments.add(new UsageGenerator.Argument("SPEC", null));
     	
