@@ -30,6 +30,7 @@ import tla2sany.semantic.SymbolNode;
 import tla2sany.semantic.ThmOrAssumpDefNode;
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.output.OutputCollector;
 import tlc2.tool.Action;
 import tlc2.tool.BuiltInOPs;
 import tlc2.tool.EvalControl;
@@ -3097,6 +3098,31 @@ public abstract class Tool
     return ((BoolValue)val).val;
   }
 
+  @Override
+  public final int checkAssumptions() {
+      final ExprNode[] assumps = getAssumptions();
+      final boolean[] isAxiom = getAssumptionIsAxiom();
+      int assumptionsError = EC.NO_ERROR;
+      for (int i = 0; i < assumps.length; i++)
+      {
+          try
+          {
+              if ((!isAxiom[i]) && !isValid(assumps[i]))
+              {
+                  OutputCollector.addViolatedAssumption(assumps[i]);
+                  assumptionsError = MP.printError(EC.TLC_ASSUMPTION_FALSE, assumps[i].toString());
+              }
+          } catch (final Exception e)
+          {
+              // Assert.printStack(e);
+              OutputCollector.addViolatedAssumption(assumps[i]);
+              assumptionsError = MP.printError(EC.TLC_ASSUMPTION_EVALUATION_ERROR,
+                      new String[] { assumps[i].toString(), e.getMessage() });
+          }
+      }
+      return assumptionsError;
+  }
+  
     /* Reconstruct the initial state whose fingerprint is fp. */
 	@Override
 	public final TLCStateInfo getState(final long fp) {

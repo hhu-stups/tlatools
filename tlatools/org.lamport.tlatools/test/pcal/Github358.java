@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017 Microsoft Research. All rights reserved. 
+ * Copyright (c) 2020 Microsoft Research. All rights reserved. 
  *
  * The MIT License (MIT)
  * 
@@ -23,57 +23,29 @@
  * Contributors:
  *   Markus Alexander Kuppe - initial API and implementation
  ******************************************************************************/
-package util;
+package pcal;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
-import java.io.PipedOutputStream;
-import java.io.PrintStream;
-import java.util.ArrayList;
-import java.util.List;
+import org.junit.Test;
 
-public class TestPrintStream extends PrintStream {
+import tlc2.tool.CommonTestCase;
+import util.ToolIO;
 
-	private final StringBuffer buf = new StringBuffer();
-	private final List<String> strings = new ArrayList<String>();
+public class Github358 extends PCalTest {
 	
-	public TestPrintStream() {
-        super(new PipedOutputStream());
-	}
-
-	/* (non-Javadoc)
-	 * @see java.io.PrintStream#println(java.lang.String)
-	 */
-	public void println(String x) {
-		strings.add(x);
-		buf.append(x + "\n");
-		System.out.println(x);
-		super.println(x);
-	}
-	
-	public void assertEmpty() {
-		assertTrue(this.strings.isEmpty());
-	}
-	
-	public void assertContains(final String seq) {
-		assertTrue(buf.toString().contains(seq));
-	}
-	
-	public void assertSubstring(String substring) {
-		for (String string : strings) {
-			if (string.contains(substring)) {
-				return;
-			}
-		}
-		fail("Substring not found");
-	}
-	
-	public void assertNoSubstring(String substring) {
-		for (String string : strings) {
-			if (string.contains(substring)) {
-				fail("Substring not found");
-			}
-		}
+	@Test
+	public void test() {
+		assertEquals(trans.STATUS_EXIT_WITH_ERRORS,
+				trans.runMe(new String[] {"-nocfg", CommonTestCase.BASE_PATH + "Github358.tla"}));
+		
+		final String[] messages = ToolIO.getAllMessages();
+		assertTrue(messages.length == 1);
+		
+		final String msg = messages[0];
+		assertEquals("Unrecoverable error:\n" + 
+				" -- Expected \":=\" but found \"skip\"\n" + 
+				"    line 5, column 7.", msg.trim());
 	}
 }

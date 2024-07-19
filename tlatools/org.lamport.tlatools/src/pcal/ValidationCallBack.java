@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017 Microsoft Research. All rights reserved. 
+ * Copyright (c) 2020 Microsoft Research. All rights reserved. 
  *
  * The MIT License (MIT)
  * 
@@ -23,57 +23,27 @@
  * Contributors:
  *   Markus Alexander Kuppe - initial API and implementation
  ******************************************************************************/
-package util;
+package pcal;
 
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+public interface ValidationCallBack {
 
-import java.io.PipedOutputStream;
-import java.io.PrintStream;
-import java.util.ArrayList;
-import java.util.List;
-
-public class TestPrintStream extends PrintStream {
-
-	private final StringBuffer buf = new StringBuffer();
-	private final List<String> strings = new ArrayList<String>();
-	
-	public TestPrintStream() {
-        super(new PipedOutputStream());
+	public enum Generate {
+		NOT_NOW, IGNORE, DO_IT;
 	}
 
-	/* (non-Javadoc)
-	 * @see java.io.PrintStream#println(java.lang.String)
-	 */
-	public void println(String x) {
-		strings.add(x);
-		buf.append(x + "\n");
-		System.out.println(x);
-		super.println(x);
-	}
-	
-	public void assertEmpty() {
-		assertTrue(this.strings.isEmpty());
-	}
-	
-	public void assertContains(final String seq) {
-		assertTrue(buf.toString().contains(seq));
-	}
-	
-	public void assertSubstring(String substring) {
-		for (String string : strings) {
-			if (string.contains(substring)) {
-				return;
-			}
+	public class Noop implements ValidationCallBack {
+		@Override
+		public boolean shouldCancel() {
+			return false;
 		}
-		fail("Substring not found");
-	}
-	
-	public void assertNoSubstring(String substring) {
-		for (String string : strings) {
-			if (string.contains(substring)) {
-				fail("Substring not found");
-			}
+
+		@Override
+		public Generate shouldGenerate() {
+			return Generate.NOT_NOW;
 		}
 	}
+
+	boolean shouldCancel();
+	
+	Generate shouldGenerate();
 }

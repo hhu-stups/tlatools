@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017 Microsoft Research. All rights reserved. 
+ * Copyright (c) 2020 Microsoft Research. All rights reserved. 
  *
  * The MIT License (MIT)
  * 
@@ -23,57 +23,50 @@
  * Contributors:
  *   Markus Alexander Kuppe - initial API and implementation
  ******************************************************************************/
-package util;
+package tlc2.tool;
 
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
-import java.io.PipedOutputStream;
-import java.io.PrintStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-public class TestPrintStream extends PrintStream {
+import org.junit.Test;
 
-	private final StringBuffer buf = new StringBuffer();
-	private final List<String> strings = new ArrayList<String>();
-	
-	public TestPrintStream() {
-        super(new PipedOutputStream());
+import tlc2.output.EC;
+import tlc2.tool.liveness.ModelCheckerTestCase;
+
+public class Github461Test extends ModelCheckerTestCase {
+
+	public Github461Test() {
+		super("Github461", EC.ExitStatus.VIOLATION_ASSERT);
 	}
 
-	/* (non-Javadoc)
-	 * @see java.io.PrintStream#println(java.lang.String)
-	 */
-	public void println(String x) {
-		strings.add(x);
-		buf.append(x + "\n");
-		System.out.println(x);
-		super.println(x);
-	}
-	
-	public void assertEmpty() {
-		assertTrue(this.strings.isEmpty());
-	}
-	
-	public void assertContains(final String seq) {
-		assertTrue(buf.toString().contains(seq));
-	}
-	
-	public void assertSubstring(String substring) {
-		for (String string : strings) {
-			if (string.contains(substring)) {
-				return;
-			}
-		}
-		fail("Substring not found");
-	}
-	
-	public void assertNoSubstring(String substring) {
-		for (String string : strings) {
-			if (string.contains(substring)) {
-				fail("Substring not found");
-			}
-		}
+	@Test
+	public void testSpec() throws FileNotFoundException, IOException {
+		// Assert evaluation error.
+		assertTrue(recorder.recordedWithStringValue(EC.TLC_VALUE_ASSERT_FAILED,
+				"\"Failure of assertion at line 8, column 4.\""));
+
+		// Assert an error trace.
+		assertTrue(recorder.recorded(EC.TLC_STATE_PRINT2));
+		
+		// Assert the correct trace.
+		final List<String> expectedTrace = new ArrayList<String>(4);
+		expectedTrace.add("x = 0");
+		expectedTrace.add("x = 1");
+		expectedTrace.add("x = 2");
+		expectedTrace.add("x = 3");
+		expectedTrace.add("x = 4");
+		assertTraceWith(recorder.getRecords(EC.TLC_STATE_PRINT2), expectedTrace);
+
+		// Assert the underlying error message with stack trace.
+		assertTrue(recorder.recordedWithStringValues(EC.TLC_NESTED_EXPRESSION,
+				"0. Line 9, column 5 to line 10, column 17 in Github461\n" + 
+				"1. Line 9, column 8 to line 9, column 65 in Github461\n" + 
+				"\n"));
+		
+		assertZeroUncovered();
 	}
 }

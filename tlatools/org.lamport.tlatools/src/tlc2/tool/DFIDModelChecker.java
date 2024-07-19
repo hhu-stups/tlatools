@@ -20,6 +20,7 @@ import tlc2.util.IStateWriter;
 import tlc2.util.IdThread;
 import tlc2.util.LongVec;
 import tlc2.util.SetOfStates;
+import util.Assert;
 import util.FileUtil;
 import util.UniqueString;
 
@@ -58,7 +59,14 @@ public class DFIDModelChecker extends AbstractChecker
         // call the abstract constructor
         super(tool, metadir, stateWriter, deadlock, fromChkpt, startTime);
 
-        this.theInitStates = null;
+		// https://github.com/tlaplus/tlaplus/issues/548
+		Assert.check(TLCGlobals.getNumWorkers() == 1, EC.GENERAL,
+				"Depth-First Iterative Deepening mode does not support multiple workers (https://github.com/tlaplus/tlaplus/issues/548).  Please run TLC with a single worker.");
+		// https://github.com/tlaplus/tlaplus/issues/548
+		Assert.check(this.checkLiveness == false, EC.GENERAL,
+				"Depth-First Iterative Deepening mode does not support checking liveness properties (https://github.com/tlaplus/tlaplus/issues/548).  Please check liveness properties in Breadth-First-Search mode.");
+
+		this.theInitStates = null;
         this.theInitFPs = null;
         this.theFPSet = new MemFPIntSet(); // init the state set
         this.theFPSet.init(TLCGlobals.getNumWorkers(), this.metadir, this.tool.getRootFile());
@@ -186,7 +194,9 @@ public class DFIDModelChecker extends AbstractChecker
                 result = this.runTLC(level);
 				// Recent done flag before after the workers have checked the
 				// current level in preparation for the next level.
-                this.done = false;
+                synchronized (this) {
+                	this.done = false;
+				}
                 if (result != EC.NO_ERROR)
                     return result;
 

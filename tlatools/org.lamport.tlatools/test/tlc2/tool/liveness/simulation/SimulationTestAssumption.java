@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2017 Microsoft Research. All rights reserved. 
+ * Copyright (c) 2020 Microsoft Research. All rights reserved. 
  *
  * The MIT License (MIT)
  * 
@@ -23,57 +23,24 @@
  * Contributors:
  *   Markus Alexander Kuppe - initial API and implementation
  ******************************************************************************/
-package util;
+
+package tlc2.tool.liveness.simulation;
 
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
-import java.io.PipedOutputStream;
-import java.io.PrintStream;
-import java.util.ArrayList;
-import java.util.List;
+import org.junit.Test;
 
-public class TestPrintStream extends PrintStream {
+import tlc2.output.EC;
 
-	private final StringBuffer buf = new StringBuffer();
-	private final List<String> strings = new ArrayList<String>();
-	
-	public TestPrintStream() {
-        super(new PipedOutputStream());
-	}
+public class SimulationTestAssumption extends SuccessfulSimulationTestCase {
 
-	/* (non-Javadoc)
-	 * @see java.io.PrintStream#println(java.lang.String)
-	 */
-	public void println(String x) {
-		strings.add(x);
-		buf.append(x + "\n");
-		System.out.println(x);
-		super.println(x);
+	public SimulationTestAssumption() {
+		super("Test4", "/", new String[] { "-simulate", "num=1" }, EC.ExitStatus.VIOLATION_ASSUMPTION);
 	}
 	
-	public void assertEmpty() {
-		assertTrue(this.strings.isEmpty());
-	}
-	
-	public void assertContains(final String seq) {
-		assertTrue(buf.toString().contains(seq));
-	}
-	
-	public void assertSubstring(String substring) {
-		for (String string : strings) {
-			if (string.contains(substring)) {
-				return;
-			}
-		}
-		fail("Substring not found");
-	}
-	
-	public void assertNoSubstring(String substring) {
-		for (String string : strings) {
-			if (string.contains(substring)) {
-				fail("Substring not found");
-			}
-		}
+	@Test
+	public void testSpec() {
+		assertTrue(recorder.recorded(EC.TLC_ASSUMPTION_FALSE));
+		assertTrue(recorder.recorded(EC.TLC_FINISHED));
 	}
 }
