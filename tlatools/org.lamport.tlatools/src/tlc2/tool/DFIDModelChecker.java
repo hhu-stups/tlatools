@@ -12,6 +12,7 @@ import tla2sany.semantic.OpDeclNode;
 import tlc2.TLCGlobals;
 import tlc2.output.EC;
 import tlc2.output.MP;
+import tlc2.output.OutputCollector;
 import tlc2.tool.fp.dfid.FPIntSet;
 import tlc2.tool.fp.dfid.MemFPIntSet;
 import tlc2.tool.impl.CallStackTool;
@@ -246,22 +247,25 @@ public class DFIDModelChecker extends AbstractChecker
     {
         ExprNode[] assumps = this.tool.getAssumptions();
         boolean[] isAxiom = this.tool.getAssumptionIsAxiom();
+        int assumptionsError = EC.NO_ERROR;
         for (int i = 0; i < assumps.length; i++)
         {
             try
             {
                 if ((!isAxiom[i]) && !this.tool.isValid(assumps[i]))
                 {
-                    return MP.printError(EC.TLC_ASSUMPTION_FALSE, assumps[i].toString());
+                    OutputCollector.addViolatedAssumption(assumps[i]);
+                    assumptionsError = MP.printError(EC.TLC_ASSUMPTION_FALSE, assumps[i].toString());
                 }
             } catch (Exception e)
             {
                 // Assert.printStack(e);
-                return MP.printError(EC.TLC_ASSUMPTION_EVALUATION_ERROR,
+                OutputCollector.addViolatedAssumption(assumps[i]);
+                assumptionsError = MP.printError(EC.TLC_ASSUMPTION_EVALUATION_ERROR,
                         new String[] { assumps[i].toString(), e.getMessage() });
             }
         }
-        return EC.NO_ERROR;
+        return assumptionsError;
     }
 
     /* Compute the set of initial states.  */
