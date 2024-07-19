@@ -6,8 +6,8 @@ project.version = '1.0.3-SNAPSHOT'
 project.group = 'de.hhu.stups'
 project.archivesBaseName = 'tlatools'
 
-project.sourceCompatibility = JavaVersion.VERSION_1_8
-project.targetCompatibility = JavaVersion.VERSION_1_8
+project.sourceCompatibility = JavaVersion.VERSION_11
+project.targetCompatibility = JavaVersion.VERSION_11
 
 repositories {
 	mavenCentral()

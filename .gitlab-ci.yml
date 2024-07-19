@@ -1,4 +1,4 @@
-image: eclipse-temurin:8
+image: eclipse-temurin:11
 
 variables:
   GRADLE_ARGS: --no-daemon --stacktrace --warning-mode=all
