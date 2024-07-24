@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import tla2sany.semantic.ExprNode;
@@ -16,23 +17,23 @@ import tlc2.tool.TLCStateInfo;
 public class OutputCollector {
 
 	private static TLCState initialState = null;
-	private static ArrayList<TLCStateInfo> trace = null;
-	private static ArrayList<Message> allMessages = new ArrayList<Message>();
+	private static List<TLCStateInfo> trace = null;
+	private static List<Message> allMessages = new ArrayList<>();
 	private static Map<Location, Long> lineCount = new HashMap<>();
 	private static ModuleNode moduleNode = null;
-	private static ArrayList<ExprNode> violatedAssumptions = new ArrayList<>();
+	private static List<ExprNode> violatedAssumptions = new ArrayList<>();
 
-	public static ArrayList<TLCStateInfo> getTrace() {
-		return trace;
+	public static List<TLCStateInfo> getTrace() {
+		return Collections.unmodifiableList(trace);
 	}
 
-	public static void setTrace(ArrayList<TLCStateInfo> trace) {
+	public static void setTrace(List<TLCStateInfo> trace) {
 		OutputCollector.trace = trace;
 	}
 
 	public static void addStateToTrace(TLCStateInfo tlcStateInfo) {
 		if (trace == null) {
-			trace = new ArrayList<TLCStateInfo>();
+			trace = new ArrayList<>();
 		}
 		trace.add(tlcStateInfo);
 	}
@@ -45,16 +46,16 @@ public class OutputCollector {
 		return OutputCollector.initialState;
 	}
 
-	public static ArrayList<Message> getAllMessages() {
-		return allMessages;
+	public static List<Message> getAllMessages() {
+		return Collections.unmodifiableList(allMessages);
 	}
 
 	public static void addViolatedAssumption(ExprNode assumption) {
 			violatedAssumptions.add(assumption);
 	}
 
-	public static ArrayList<ExprNode> getViolatedAssumptions() {
-		return violatedAssumptions;
+	public static List<ExprNode> getViolatedAssumptions() {
+		return Collections.unmodifiableList(violatedAssumptions);
 	}
 
 	public synchronized static void saveMessage(int messageClass,

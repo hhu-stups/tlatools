@@ -11,8 +11,8 @@ import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import tlc2.output.EC;
@@ -22,6 +22,7 @@ import tlc2.output.StatePrinter;
 import tlc2.util.BufferedRandomAccessFile;
 import tlc2.util.LongVec;
 import tlc2.value.RandomEnumerableValues;
+
 import util.FileUtil;
 
 public class TLCTrace {
@@ -343,7 +344,7 @@ public class TLCTrace {
 	
 	protected synchronized final void printTrace(final TLCState s1, final TLCState s2, final TLCStateInfo[] prefix)
 			throws IOException, WorkerException {
-		ArrayList<TLCStateInfo> trace = new ArrayList<TLCStateInfo>(); // collecting the whole error trace
+		List<TLCStateInfo> trace = new ArrayList<>(); // collecting the whole error trace
 
 		if (s1.isInitial()) {
 			// Do not recreate the potentially expensive error trace - e.g. when the set of
