@@ -1,12 +1,15 @@
 package tlc2.output;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
-import java.util.Hashtable;
+import java.util.HashMap;
+import java.util.Map;
 
 import tla2sany.semantic.ExprNode;
 import tla2sany.semantic.ModuleNode;
 import tla2sany.st.Location;
+
 import tlc2.tool.TLCState;
 import tlc2.tool.TLCStateInfo;
 
@@ -15,7 +18,7 @@ public class OutputCollector {
 	private static TLCState initialState = null;
 	private static ArrayList<TLCStateInfo> trace = null;
 	private static ArrayList<Message> allMessages = new ArrayList<Message>();
-	private static Hashtable<Location, Long> lineCount = new Hashtable<Location, Long>();
+	private static Map<Location, Long> lineCount = new HashMap<>();
 	private static ModuleNode moduleNode = null;
 	private static ArrayList<ExprNode> violatedAssumptions = new ArrayList<>();
 
@@ -70,8 +73,8 @@ public class OutputCollector {
 		OutputCollector.moduleNode = moduleNode;
 	}
 
-	public static Hashtable<Location, Long> getLineCountTable() {
-		return new Hashtable<Location, Long>(lineCount);
+	public static Map<Location, Long> getLineCountTable() {
+		return Collections.unmodifiableMap(lineCount);
 	}
 
 	public static void putLineCount(Location location, long val) {
