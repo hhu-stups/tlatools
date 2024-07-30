@@ -17,7 +17,7 @@ import tlc2.tool.TLCStateInfo;
 public class OutputCollector {
 
 	private static TLCState initialState = null;
-	private static List<TLCStateInfo> trace = null;
+	private static List<TLCStateInfo> trace = new ArrayList<>();
 	private static List<Message> allMessages = new ArrayList<>();
 	private static Map<Location, Long> lineCount = new HashMap<>();
 	private static ModuleNode moduleNode = null;
@@ -32,9 +32,6 @@ public class OutputCollector {
 	}
 
 	public static void addStateToTrace(TLCStateInfo tlcStateInfo) {
-		if (trace == null) {
-			trace = new ArrayList<>();
-		}
 		trace.add(tlcStateInfo);
 	}
 
