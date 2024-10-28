@@ -1,10 +1,13 @@
 apply plugin: 'java'
 apply plugin: 'eclipse'
-apply plugin: 'maven'
+apply plugin: "maven-publish"
+apply plugin: "signing"
 
 project.version = '1.1.0-SNAPSHOT'
 project.group = 'de.hhu.stups'
 project.archivesBaseName = 'tlatools'
+
+final isSnapshot = project.version.endsWith("-SNAPSHOT")
 
 project.sourceCompatibility = JavaVersion.VERSION_1_8
 project.targetCompatibility = JavaVersion.VERSION_1_8
@@ -24,8 +27,18 @@ sourceSets {
 	}
 }
 
+java {
+	withSourcesJar()
+	withJavadocJar()
+}
+
 javadoc {
 	failOnError = false
+}
+
+sourcesJar {
+	// Ignore duplicates because the same directory is used for sources and resources.
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 task tlatools(type: Copy, dependsOn: build) {
@@ -35,75 +48,55 @@ task tlatools(type: Copy, dependsOn: build) {
 	rename('tlatools-(.+)', 'tlatools.jar')
 }
 
-if (project.hasProperty('ossrhUsername') && project.hasProperty('ossrhPassword')) {
-	println "Configuring deployment for ${ project.name }"
+publishing {
+	publications {
+		mavenJava(MavenPublication) {
+			pom {
+				name = "TLA+ Tools"
+				description = "Modified version of the TLA+ tools for usage in ProB"
+				url = "https://github.com/hhu-stups/tlatools"
 
-	apply plugin: 'signing'
-
-	task javadocJar(type: Jar) {
-		classifier = 'javadoc'
-		from javadoc
-	}
-
-	task sourcesJar(type: Jar) {
-		classifier = 'sources'
-		from sourceSets.main.allSource
-		// Ignore duplicates because the same directory is used for sources and resources.
-		duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-	}
-
-	artifacts {
-		archives javadocJar, sourcesJar
-	}
-
-	ext."signing.secretKeyRingFile" = rootProject.file("secring.gpg").absolutePath
-
-	signing {
-		sign configurations.archives
-	}
-
-	uploadArchives {
-		repositories {
-			mavenDeployer {
-				beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
-
-				repository(url: "https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
-					authentication(userName: ossrhUsername, password: ossrhPassword)
+				licenses {
+					license {
+						name = "MIT License"
+						url = "http://research.microsoft.com/en-us/um/people/lamport/tla/license.html"
+					}
 				}
 
-				snapshotRepository(url: "https://oss.sonatype.org/content/repositories/snapshots/") {
-					authentication(userName: ossrhUsername, password: ossrhPassword)
+				scm {
+					connection = "scm:git:git://github.com/hhu-stups/tlatools.git"
+					developerConnection = "scm:git:git@github.com:hhu-stups/tlatools.git"
+					url = "https://github.com/hhu-stups/tlatools"
 				}
 
-				pom.project {
-					name "TLA+ Tools"
-					packaging 'jar'
-					// optionally artifactId can be defined here
-					description 'Modified version of the TLA+ tools for usage in ProB'
-					url 'https://github.com/hhu-stups/tlatools'
-
-					licenses {
-						license {
-							name 'MIT License'
-							url 'http://research.microsoft.com/en-us/um/people/lamport/tla/license.html'
-						}
-					}
-
-					scm {
-						connection 'scm:git:git://github.com/hhu-stups/tlatools.git'
-						developerConnection 'scm:git:git@github.com:hhu-stups/tlatools.git'
-						url 'https://github.com/hhu-stups/tlatools'
-					}
-
-					developers {
-						developer {
-							id 'bendisposto'
-							name 'Jens Bendisposto'
-							email 'jens@bendisposto.de'
-						}
+				developers {
+					developer {
+						id = "bendisposto"
+						name = "Jens Bendisposto"
+						email = "jens@bendisposto.de"
 					}
 				}
 			}
 		}
 	}
+
+	repositories {
+		maven {
+			final releasesRepoUrl = "https://oss.sonatype.org/service/local/staging/deploy/maven2"
+			final snapshotsRepoUrl = "https://oss.sonatype.org/content/repositories/snapshots"
+			url isSnapshot ? snapshotsRepoUrl : releasesRepoUrl
+			if (project.hasProperty("ossrhUsername") && project.hasProperty("ossrhPassword")) {
+				credentials {
+					username project.ossrhUsername
+					password project.ossrhPassword
+				}
+			}
+		}
+	}
+}
+
+ext."signing.secretKeyRingFile" = rootProject.file("secring.gpg").absolutePath
+
+signing {
+	sign publishing.publications.mavenJava
 }
