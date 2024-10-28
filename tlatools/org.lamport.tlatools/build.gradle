@@ -33,6 +33,8 @@ java {
 }
 
 javadoc {
+	// The TLA Tools source code uses unescaped HTML symbols in Javadoc text,
+	// which is considered an error.
 	failOnError = false
 }
 
