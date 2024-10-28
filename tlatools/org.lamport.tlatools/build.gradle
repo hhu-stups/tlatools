@@ -5,12 +5,8 @@ apply plugin: "signing"
 
 project.version = '1.1.0-SNAPSHOT'
 project.group = 'de.hhu.stups'
-project.archivesBaseName = 'tlatools'
 
 final isSnapshot = project.version.endsWith("-SNAPSHOT")
-
-project.sourceCompatibility = JavaVersion.VERSION_1_8
-project.targetCompatibility = JavaVersion.VERSION_1_8
 
 repositories {
 	mavenCentral()
@@ -28,6 +24,8 @@ sourceSets {
 }
 
 java {
+	sourceCompatibility = JavaVersion.VERSION_1_8
+
 	withSourcesJar()
 	withJavadocJar()
 }
