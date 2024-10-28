@@ -53,6 +53,8 @@ task tlatools(type: Copy, dependsOn: build) {
 publishing {
 	publications {
 		mavenJava(MavenPublication) {
+			from components.java
+
 			pom {
 				name = "TLA+ Tools"
 				description = "Modified version of the TLA+ tools for usage in ProB"
